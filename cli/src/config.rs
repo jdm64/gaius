@@ -1,0 +1,180 @@
+/* Copyright 2026 Justin Madru (justin.jdm64@gmail.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+use crate::{
+    agent::{create_client, validate_model},
+    util::{config_path, prompt_input},
+};
+use genai::Client;
+use genai::adapter::AdapterKind;
+use serde::{Deserialize, Serialize};
+use url::Url;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    #[serde(default)]
+    provider: Vec<ProviderConfig>,
+    #[serde(default)]
+    model: Vec<ModelConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    name: String,
+    kind: String,
+    url: String,
+    key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelConfig {
+    name: String,
+    provider: String,
+    id: String,
+}
+
+pub struct SelectedModel {
+    pub client: Client,
+    pub model_id: String,
+}
+
+impl Config {
+    pub fn new() -> Config {
+        Self {
+            provider: vec![],
+            model: vec![],
+        }
+    }
+
+    pub async fn load(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let path = config_path()?;
+        if path.exists() {
+            let contents = std::fs::read_to_string(&path)?;
+            *self = toml::from_str(&contents)?;
+            return Ok(());
+        }
+
+        println!(
+            "Config file missing ({}). Configure an LLM provider.",
+            path.display()
+        );
+        loop {
+            let mut kind = prompt_input("Kind (blank for OpenAI compatable): ")?;
+            kind = if kind.is_empty() {
+                "openai".to_string()
+            } else {
+                kind
+            };
+
+            let adapter_kind = match AdapterKind::from_lower_str(&kind) {
+                Some(kind) => kind,
+                None => {
+                    eprintln!("Invalid provider kind: {}", kind);
+                    continue;
+                }
+            };
+
+            let url = prompt_input("Url: ")?;
+            let key = prompt_input("Key: ")?;
+            let model_id = prompt_input("Model: ")?;
+
+            let name = match Url::parse(&url).map(|u| u.host_str().unwrap_or("default").to_string())
+            {
+                Ok(name) => name,
+                Err(_) => "default".to_string(),
+            };
+
+            let client = create_client(adapter_kind, url.clone(), key.clone(), model_id.clone());
+            match validate_model(&client, &model_id).await {
+                Ok(()) => {
+                    let provider = ProviderConfig {
+                        name: name.to_string(),
+                        url,
+                        kind: adapter_kind.as_lower_str().to_string(),
+                        key,
+                    };
+                    let model = ModelConfig {
+                        name: model_id.clone(),
+                        provider: name.to_string(),
+                        id: model_id,
+                    };
+                    let config = Config {
+                        provider: vec![provider],
+                        model: vec![model],
+                    };
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&path, toml::to_string_pretty(&config)?)?;
+                    *self = config;
+                    return Ok(());
+                }
+                Err(err) => {
+                    eprintln!("Provider validation failed: {}", err);
+                }
+            }
+        }
+    }
+
+    pub async fn select_model(&self) -> Result<SelectedModel, Box<dyn std::error::Error>> {
+        for model in &self.model {
+            let provider = match self
+                .provider
+                .iter()
+                .find(|provider| provider.name == model.provider)
+            {
+                Some(provider) => provider,
+                None => {
+                    eprintln!(
+                        "Model '{}' references missing provider '{}'.",
+                        model.name, model.provider
+                    );
+                    continue;
+                }
+            };
+
+            let adapter_kind = match AdapterKind::from_lower_str(&provider.kind.to_lowercase()) {
+                Some(kind) => kind,
+                None => {
+                    eprintln!(
+                        "Provider '{}' has invalid kind '{}'.",
+                        provider.name, provider.kind
+                    );
+                    continue;
+                }
+            };
+
+            let client = create_client(
+                adapter_kind,
+                provider.url.clone(),
+                provider.key.clone(),
+                model.id.clone(),
+            );
+            match validate_model(&client, &model.id).await {
+                Ok(()) => {
+                    return Ok(SelectedModel {
+                        client,
+                        model_id: model.id.clone(),
+                    });
+                }
+                Err(err) => {
+                    eprintln!("Model '{}' failed validation: {}", model.name, err);
+                }
+            }
+        }
+
+        Err("No valid model was found. Check config file.".into())
+    }
+}
