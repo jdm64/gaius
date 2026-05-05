@@ -16,10 +16,12 @@
 mod agent;
 mod config;
 mod tools;
+mod tui;
 mod util;
 
 use crate::agent::LLMAgent;
 use crate::config::Config;
+use crate::tui::TuiApp;
 use pico_args::Arguments;
 use std::path::PathBuf;
 
@@ -95,18 +97,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    if initial_prompt.is_none() {
-        println!("LLM Agent Harness");
-        println!("Model: {}", selected_model.model_id);
-        println!("{}", "=".repeat(50));
-    }
-
     let mut agent = LLMAgent::new(
         selected_model.client,
-        selected_model.model_id,
+        selected_model.model_id.clone(),
         initial_prompt,
     );
-    agent.run().await?;
+    if agent.is_oneshot() {
+        agent.run().await?;
+    } else {
+        TuiApp::new(selected_model.model_id).run(&mut agent).await?;
+    }
 
     Ok(())
 }

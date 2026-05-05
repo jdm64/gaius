@@ -52,6 +52,11 @@ pub struct LLMAgent {
     oneshot_prompt: Option<String>,
 }
 
+pub enum AgentEvent {
+    AgentMessage(String),
+    ToolCall { name: String, arguments: String },
+}
+
 impl LLMAgent {
     pub fn new(client: Client, model: String, oneshot_prompt: Option<String>) -> Self {
         let tool_engine = ToolEngine {};
@@ -63,6 +68,10 @@ impl LLMAgent {
             model,
             oneshot_prompt,
         }
+    }
+
+    pub fn is_oneshot(&self) -> bool {
+        self.oneshot_prompt.is_some()
     }
 
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -81,7 +90,24 @@ impl LLMAgent {
         Ok(())
     }
 
-    async fn run_turn(&mut self, prompt: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run_turn(&mut self, prompt: String) -> Result<(), Box<dyn std::error::Error>> {
+        self.run_turn_with_events(prompt, |event| match event {
+            AgentEvent::AgentMessage(text) => println!("agent> {}", text),
+            AgentEvent::ToolCall { name, arguments } => {
+                println!("tool-call> {} ({})", name, arguments);
+            }
+        })
+        .await
+    }
+
+    pub async fn run_turn_with_events<F>(
+        &mut self,
+        prompt: String,
+        mut on_event: F,
+    ) -> Result<(), Box<dyn std::error::Error>>
+    where
+        F: FnMut(AgentEvent),
+    {
         self.history.messages.push(ChatMessage::user(prompt));
 
         loop {
@@ -96,7 +122,7 @@ impl LLMAgent {
 
             let text = response.first_text().unwrap_or("").to_string();
             if !text.is_empty() {
-                println!("agent> {}", text);
+                on_event(AgentEvent::AgentMessage(text));
             }
 
             let tool_calls = response.tool_calls();
@@ -110,7 +136,10 @@ impl LLMAgent {
                     .messages
                     .push(ToolResponse::new(&tc.call_id, result.clone()).into());
 
-                println!("tool-call> {} ({})", tc.fn_name, tc.fn_arguments);
+                on_event(AgentEvent::ToolCall {
+                    name: tc.fn_name.to_string(),
+                    arguments: tc.fn_arguments.to_string(),
+                });
             }
         }
     }
