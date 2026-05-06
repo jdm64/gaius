@@ -24,6 +24,29 @@ pub fn config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
         .join("config.toml"))
 }
 
+pub fn session_path(session_id: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    validate_session_id(session_id)?;
+    let home = std::env::var("HOME")?;
+    Ok(PathBuf::from(home)
+        .join(".local")
+        .join("share")
+        .join("gaius")
+        .join("sessions")
+        .join(format!("{}.json", session_id)))
+}
+
+pub fn validate_session_id(session_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if session_id.is_empty() {
+        return Err("Session id cannot be empty".into());
+    }
+
+    if session_id.contains('/') || session_id.contains('\\') {
+        return Err("Session id cannot contain path separators".into());
+    }
+
+    Ok(())
+}
+
 pub fn prompt_input(label: &str) -> Result<String, Box<dyn std::error::Error>> {
     print!("{}", label);
     io::stdout().flush()?;

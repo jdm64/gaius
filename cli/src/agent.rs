@@ -13,13 +13,17 @@
  * limitations under the License.
  */
 
-use crate::{tools::ToolEngine, util::prompt_input};
+use crate::{
+    tools::ToolEngine,
+    util::{prompt_input, session_path, validate_session_id},
+};
 use genai::{
     Client, ModelIden, ServiceTarget,
     adapter::AdapterKind,
     chat::{ChatMessage, ChatRequest, ToolResponse},
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
 };
+use uuid::Uuid;
 
 pub fn create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
     let resolver = ServiceTargetResolver::from_resolver_fn(
@@ -50,6 +54,9 @@ pub struct LLMAgent {
     tool_engine: ToolEngine,
     model: String,
     oneshot_prompt: Option<String>,
+    session_id: Option<String>,
+    save_history: bool,
+    print_continue_hint: bool,
 }
 
 pub enum AgentEvent {
@@ -58,20 +65,65 @@ pub enum AgentEvent {
 }
 
 impl LLMAgent {
-    pub fn new(client: Client, model: String, oneshot_prompt: Option<String>) -> Self {
+    pub fn new(
+        client: Client,
+        model: String,
+        oneshot_prompt: Option<String>,
+        session_id: Option<String>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let tool_engine = ToolEngine {};
-        let history = ChatRequest::new(vec![]).with_tools(tool_engine.build_tools());
-        Self {
+        let is_oneshot = oneshot_prompt.is_some();
+        let (session_id, save_history, print_continue_hint) = match session_id {
+            Some(session_id) => {
+                validate_session_id(&session_id)?;
+                (Some(session_id), true, false)
+            }
+            None if is_oneshot => (None, false, false),
+            None => (Some(Uuid::new_v4().to_string()), true, true),
+        };
+
+        let mut history = if let Some(session_id) = &session_id {
+            let path = session_path(session_id)?;
+            if !path.exists() && !print_continue_hint {
+                return Err(format!("Session not found: {}", session_id).into());
+            }
+            if path.exists() {
+                let content = std::fs::read_to_string(&path)?;
+                serde_json::from_str(&content)?
+            } else {
+                ChatRequest::new(vec![])
+            }
+        } else {
+            ChatRequest::new(vec![])
+        };
+        history.tools = Some(tool_engine.build_tools());
+
+        Ok(Self {
             history,
             client,
             tool_engine,
             model,
             oneshot_prompt,
-        }
+            session_id,
+            save_history,
+            print_continue_hint,
+        })
     }
 
     pub fn is_oneshot(&self) -> bool {
         self.oneshot_prompt.is_some()
+    }
+
+    pub fn continue_hint(&self) -> Option<&str> {
+        if self.print_continue_hint {
+            self.session_id.as_deref()
+        } else {
+            None
+        }
+    }
+
+    pub fn history(&self) -> &ChatRequest {
+        &self.history
     }
 
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -127,6 +179,7 @@ impl LLMAgent {
 
             let tool_calls = response.tool_calls();
             if tool_calls.is_empty() {
+                self.save_history()?;
                 return Ok(());
             }
 
@@ -142,5 +195,16 @@ impl LLMAgent {
                 });
             }
         }
+    }
+
+    fn save_history(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.save_history {
+            if let Some(session_id) = &self.session_id {
+                let path = session_path(session_id)?;
+                let content = serde_json::to_string_pretty(&self.history)?;
+                std::fs::write(&path, content)?;
+            }
+        }
+        Ok(())
     }
 }

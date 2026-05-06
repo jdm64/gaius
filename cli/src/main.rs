@@ -28,6 +28,7 @@ use std::path::PathBuf;
 struct Args {
     prompt: Option<String>,
     prompt_file: Option<PathBuf>,
+    session_id: Option<String>,
 }
 
 fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
@@ -42,6 +43,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     let prompt_file = pargs.opt_value_from_os_str("--prompt-file", |path| {
         Ok::<PathBuf, std::convert::Infallible>(PathBuf::from(path))
     })?;
+    let session_id = pargs.opt_value_from_str("--session")?;
 
     if prompt_mode && prompt_file.is_some() {
         return Err("--prompt and --prompt-file cannot both be present".into());
@@ -61,6 +63,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     Ok(Args {
         prompt,
         prompt_file,
+        session_id,
     })
 }
 
@@ -73,6 +76,7 @@ fn print_help() {
     println!("OPTIONS:");
     println!("  --prompt                Run one prompt from the unnamed argument and exit");
     println!("  --prompt-file <PATH>    Run one prompt read from a file and exit");
+    println!("  --session <ID>          Load and continue a saved session");
     println!("  -h, --help              Show this help message");
 }
 
@@ -101,11 +105,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         selected_model.client,
         selected_model.model_id.clone(),
         initial_prompt,
-    );
+        args.session_id,
+    )?;
     if agent.is_oneshot() {
         agent.run().await?;
     } else {
         TuiApp::new(selected_model.model_id).run(&mut agent).await?;
+    }
+
+    if let Some(session_id) = agent.continue_hint() {
+        println!("To continue pass --session {}", session_id);
     }
 
     Ok(())

@@ -19,6 +19,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use genai::chat::{ChatRequest, ChatRole, ContentPart};
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
@@ -46,7 +47,7 @@ struct TuiMessage {
     text: String,
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum MessageRole {
     User,
     Agent,
@@ -68,6 +69,10 @@ impl TuiApp {
     }
 
     pub async fn run(&mut self, agent: &mut LLMAgent) -> Result<(), Box<dyn std::error::Error>> {
+        if self.messages.is_empty() {
+            self.load_history(agent.history());
+        }
+
         let mut guard = TerminalGuard::enter()?;
 
         loop {
@@ -146,6 +151,24 @@ impl TuiApp {
         }
 
         Ok(())
+    }
+
+    fn load_history(&mut self, history: &ChatRequest) {
+        if let Some(system) = &history.system {
+            if !system.trim().is_empty() {
+                self.messages.push(TuiMessage {
+                    role: MessageRole::Agent,
+                    text: format!("system: {}", system),
+                });
+            }
+        }
+
+        for message in &history.messages {
+            for tui_message in tui_messages_for_chat_message(message.role.clone(), &message.content)
+            {
+                self.messages.push(tui_message);
+            }
+        }
     }
 
     fn draw(&self, frame: &mut Frame<'_>) {
@@ -227,6 +250,47 @@ impl TuiApp {
     }
 }
 
+fn tui_messages_for_chat_message(
+    role: ChatRole,
+    content: &genai::chat::MessageContent,
+) -> Vec<TuiMessage> {
+    let mut messages = Vec::new();
+
+    for part in content {
+        match part {
+            ContentPart::Text(text) if !text.is_empty() => {
+                messages.push(TuiMessage {
+                    role: message_role_for_chat_role(&role),
+                    text: text.clone(),
+                });
+            }
+            ContentPart::ToolCall(tool_call) => {
+                messages.push(TuiMessage {
+                    role: MessageRole::ToolCall,
+                    text: format!("{} ({})", tool_call.fn_name, tool_call.fn_arguments),
+                });
+            }
+            ContentPart::ToolResponse(tool_response) => {
+                messages.push(TuiMessage {
+                    role: MessageRole::ToolCall,
+                    text: format!("{} => {}", tool_response.call_id, tool_response.content),
+                });
+            }
+            ContentPart::Text(_) | ContentPart::Binary(_) | ContentPart::ThoughtSignature(_) => {}
+        }
+    }
+
+    messages
+}
+
+fn message_role_for_chat_role(role: &ChatRole) -> MessageRole {
+    match role {
+        ChatRole::User => MessageRole::User,
+        ChatRole::Assistant | ChatRole::System => MessageRole::Agent,
+        ChatRole::Tool => MessageRole::ToolCall,
+    }
+}
+
 impl MessageRole {
     fn parts(&self) -> (&'static str, Style) {
         match self {
@@ -257,5 +321,53 @@ impl Drop for TerminalGuard {
         let _ = disable_raw_mode();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use genai::chat::{ChatMessage, MessageContent, ToolCall, ToolResponse};
+
+    #[test]
+    fn loads_chat_request_into_tui_history() {
+        let request = ChatRequest {
+            system: Some("be useful".to_string()),
+            messages: vec![
+                ChatMessage::user("hello"),
+                ChatMessage::assistant(MessageContent::from_parts(vec![
+                    ContentPart::Text("hi".to_string()),
+                    ContentPart::ToolCall(ToolCall {
+                        call_id: "123".to_string(),
+                        fn_name: "weather".to_string(),
+                        fn_arguments: serde_json::json!({"city": "Atlanta"}),
+                        thought_signatures: None,
+                    }),
+                ])),
+                ChatMessage {
+                    role: ChatRole::Tool,
+                    content: MessageContent::from_parts(vec![ContentPart::ToolResponse(
+                        ToolResponse::new("123", "sunny"),
+                    )]),
+                    options: None,
+                },
+            ],
+            tools: None,
+        };
+
+        let mut app = TuiApp::new("test-model".to_string());
+        app.load_history(&request);
+
+        assert_eq!(app.messages.len(), 5);
+        assert_eq!(app.messages[0].role, MessageRole::Agent);
+        assert_eq!(app.messages[0].text, "system: be useful");
+        assert_eq!(app.messages[1].role, MessageRole::User);
+        assert_eq!(app.messages[1].text, "hello");
+        assert_eq!(app.messages[2].role, MessageRole::Agent);
+        assert_eq!(app.messages[2].text, "hi");
+        assert_eq!(app.messages[3].role, MessageRole::ToolCall);
+        assert_eq!(app.messages[3].text, "weather ({\"city\":\"Atlanta\"})");
+        assert_eq!(app.messages[4].role, MessageRole::ToolCall);
+        assert_eq!(app.messages[4].text, "123 => sunny");
     }
 }
