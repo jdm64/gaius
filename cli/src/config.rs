@@ -162,17 +162,11 @@ impl Config {
                 provider.key.clone(),
                 model.id.clone(),
             );
-            match validate_model(&client, &model.id).await {
-                Ok(()) => {
-                    return Ok(SelectedModel {
-                        client,
-                        model_id: model.id.clone(),
-                    });
-                }
-                Err(err) => {
-                    eprintln!("Model '{}' failed validation: {}", model.name, err);
-                }
-            }
+
+            return Ok(SelectedModel {
+                client,
+                model_id: model.id.clone(),
+            });
         }
 
         Err("No valid model was found. Check config file.".into())
