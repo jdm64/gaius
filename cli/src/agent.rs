@@ -122,6 +122,10 @@ impl LLMAgent {
         }
     }
 
+    pub fn model(&self) -> &String {
+        &self.model
+    }
+
     pub fn history(&self) -> &ChatRequest {
         &self.history
     }

@@ -59,9 +59,9 @@ struct TerminalGuard {
 }
 
 impl TuiApp {
-    pub fn new(model: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            model,
+            model: String::new(),
             input: String::new(),
             messages: Vec::new(),
             status: "Esc or Ctrl-C to quit".to_string(),
@@ -69,6 +69,7 @@ impl TuiApp {
     }
 
     pub async fn run(&mut self, agent: &mut LLMAgent) -> Result<(), Box<dyn std::error::Error>> {
+        self.model = agent.model().clone();
         self.load_history(agent.history());
 
         let mut guard = TerminalGuard::enter()?;
@@ -353,7 +354,7 @@ mod tests {
             tools: None,
         };
 
-        let mut app = TuiApp::new("test-model".to_string());
+        let mut app = TuiApp::new();
         app.load_history(&request);
 
         assert_eq!(app.messages.len(), 5);

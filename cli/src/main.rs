@@ -110,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if agent.is_oneshot() {
         agent.run().await?;
     } else {
-        TuiApp::new(selected_model.model_id).run(&mut agent).await?;
+        TuiApp::new().run(&mut agent).await?;
     }
 
     if let Some(session_id) = agent.continue_hint() {
