@@ -88,8 +88,8 @@ impl LLMAgent {
                 return Err(format!("Session not found: {}", session_id).into());
             }
             if path.exists() {
-                let content = std::fs::read_to_string(&path)?;
-                serde_json::from_str(&content)?
+                let content = std::fs::read(&path)?;
+                rmp_serde::from_slice(&content)?
             } else {
                 ChatRequest::new(vec![])
             }
@@ -201,7 +201,7 @@ impl LLMAgent {
         if self.save_history {
             if let Some(session_id) = &self.session_id {
                 let path = session_path(session_id)?;
-                let content = serde_json::to_string_pretty(&self.history)?;
+                let content = rmp_serde::to_vec(&self.history)?;
                 std::fs::write(&path, content)?;
             }
         }

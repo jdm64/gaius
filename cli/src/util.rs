@@ -32,7 +32,7 @@ pub fn session_path(session_id: &str) -> Result<PathBuf, Box<dyn std::error::Err
         .join("share")
         .join("gaius")
         .join("sessions")
-        .join(format!("{}.json", session_id)))
+        .join(format!("{}.mpk", session_id)))
 }
 
 pub fn validate_session_id(session_id: &str) -> Result<(), Box<dyn std::error::Error>> {
