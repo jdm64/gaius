@@ -69,9 +69,7 @@ impl TuiApp {
     }
 
     pub async fn run(&mut self, agent: &mut LLMAgent) -> Result<(), Box<dyn std::error::Error>> {
-        if self.messages.is_empty() {
-            self.load_history(agent.history());
-        }
+        self.load_history(agent.history());
 
         let mut guard = TerminalGuard::enter()?;
 
