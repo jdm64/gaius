@@ -1,6 +1,8 @@
-use std::{error::Error, path::PathBuf};
+use std::{error::Error, fs::File, io::BufReader, path::PathBuf};
 
-use genai::chat::ChatRequest;
+use genai::chat::{ChatMessage, ChatRequest};
+use rmp_serde::{Deserializer, Serializer};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 fn session_path(session_id: &str) -> Result<PathBuf, Box<dyn Error>> {
@@ -53,8 +55,12 @@ impl Session {
 
         let path = session_path(session_id.as_str())?;
         if path.is_file() {
-            let content = std::fs::read(&path)?;
-            Ok(rmp_serde::from_slice(&content)?)
+            let file = File::open(path)?;
+            let reader = BufReader::new(file);
+            let mut des = Deserializer::new(reader);
+            let _version: i32 = Deserialize::deserialize(&mut des)?;
+            let messages: Vec<ChatMessage> = Deserialize::deserialize(&mut des)?;
+            Ok(ChatRequest::new(messages))
         } else {
             Ok(ChatRequest::new(vec![]))
         }
@@ -63,8 +69,10 @@ impl Session {
     pub fn save(&self, history: &ChatRequest) -> Result<(), Box<dyn Error>> {
         if let Some(session_id) = self.id.clone() {
             let path = session_path(session_id.as_str())?;
-            let content = rmp_serde::to_vec(history)?;
-            std::fs::write(&path, content)?;
+            let file = File::create(path)?;
+            let mut ser = Serializer::new(file).with_struct_map();
+            1.serialize(&mut ser)?;
+            history.messages.serialize(&mut ser)?;
         }
 
         Ok(())
