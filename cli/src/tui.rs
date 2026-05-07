@@ -40,6 +40,14 @@ pub struct TuiApp {
     input: String,
     messages: Vec<TuiMessage>,
     status: String,
+    show_commands: bool,
+    filtered_commands: Vec<Command>,
+    command_selected: usize,
+}
+
+struct Command {
+    name: &'static str,
+    description: &'static str,
 }
 
 struct TuiMessage {
@@ -65,7 +73,50 @@ impl TuiApp {
             input: String::new(),
             messages: Vec::new(),
             status: "Esc or Ctrl-C to quit".to_string(),
+            show_commands: false,
+            filtered_commands: Vec::new(),
+            command_selected: 0,
         }
+    }
+
+    fn commands() -> Vec<Command> {
+        vec![Command {
+            name: "new",
+            description: "Clear history and create a new session",
+        }]
+    }
+
+    fn update_command_filter(&mut self) {
+        let input = self.input.as_str();
+        if input.starts_with('/') {
+            let query = &input[1..].to_lowercase();
+            self.filtered_commands = Self::commands()
+                .into_iter()
+                .filter(|cmd| cmd.name.to_lowercase().contains(query))
+                .collect();
+            self.show_commands = !self.filtered_commands.is_empty();
+            self.command_selected = 0;
+        } else {
+            self.show_commands = false;
+        }
+    }
+
+    fn execute_command(&mut self, agent: &mut LLMAgent, command: &str) {
+        match command {
+            "new" => {
+                agent.new_session();
+                self.messages.clear();
+                self.status = "New session created".to_string();
+            }
+            _ => {
+                self.messages.push(TuiMessage {
+                    role: MessageRole::Agent,
+                    text: format!("Unknown command: /{}", command),
+                });
+            }
+        }
+        self.show_commands = false;
+        self.input.clear();
     }
 
     pub async fn run(&mut self, agent: &mut LLMAgent) -> Result<(), Box<dyn std::error::Error>> {
@@ -93,14 +144,40 @@ impl TuiApp {
                 KeyCode::Esc => break,
                 KeyCode::Backspace => {
                     self.input.pop();
+                    self.update_command_filter();
+                }
+                KeyCode::Up => {
+                    if self.show_commands && self.command_selected > 0 {
+                        self.command_selected -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if self.show_commands
+                        && self.command_selected + 1 < self.filtered_commands.len()
+                    {
+                        self.command_selected += 1;
+                    }
                 }
                 KeyCode::Enter => {
+                    if self.show_commands && !self.filtered_commands.is_empty() {
+                        let command = self.filtered_commands[self.command_selected].name;
+                        self.execute_command(agent, command);
+                        continue;
+                    }
+
                     let prompt = self.input.trim().to_string();
                     if prompt.is_empty() {
                         continue;
                     }
 
+                    if prompt.starts_with('/') {
+                        let command = &prompt[1..];
+                        self.execute_command(agent, command);
+                        continue;
+                    }
+
                     self.input.clear();
+                    self.show_commands = false;
                     self.messages.push(TuiMessage {
                         role: MessageRole::User,
                         text: prompt.clone(),
@@ -144,6 +221,7 @@ impl TuiApp {
                 }
                 KeyCode::Char(ch) => {
                     self.input.push(ch);
+                    self.update_command_filter();
                 }
                 _ => {}
             }
@@ -180,6 +258,39 @@ impl TuiApp {
         frame.render_widget(Clear, area);
         self.draw_history(frame, chunks[0]);
         self.draw_input(frame, chunks[1]);
+
+        if self.show_commands {
+            self.draw_commands(frame, chunks[1]);
+        }
+    }
+
+    fn draw_commands(&self, frame: &mut Frame<'_>, input_area: Rect) {
+        let command_count = self.filtered_commands.len() as u16;
+        let visible_commands = command_count.min(10);
+        let width = 50.min(input_area.width - 4);
+        let height = visible_commands + 2;
+        let x = input_area.x + 2;
+        let y = input_area.y - height;
+        let rect = Rect::new(x, y, width, height);
+
+        let items: Vec<ListItem> = self
+            .filtered_commands
+            .iter()
+            .enumerate()
+            .map(|(i, cmd)| {
+                let content = format!("/{} - {}", cmd.name, cmd.description);
+                if i == self.command_selected {
+                    ListItem::new(content).style(Style::default().bg(Color::DarkGray))
+                } else {
+                    ListItem::new(content)
+                }
+            })
+            .collect();
+
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title("Commands"));
+
+        frame.render_widget(Clear, rect);
+        frame.render_widget(list, rect);
     }
 
     fn draw_history(&self, frame: &mut Frame<'_>, area: Rect) {

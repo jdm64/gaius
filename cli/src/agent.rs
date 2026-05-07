@@ -126,6 +126,12 @@ impl LLMAgent {
         &self.model
     }
 
+    pub fn new_session(&mut self) {
+        self.session_id = Some(Uuid::now_v7().to_string());
+        self.history = ChatRequest::new(vec![]);
+        self.history.tools = Some(self.tool_engine.build_tools());
+    }
+
     pub fn history(&self) -> &ChatRequest {
         &self.history
     }
