@@ -79,7 +79,7 @@ impl LLMAgent {
                 (Some(session_id), true, false)
             }
             None if is_oneshot => (None, false, false),
-            None => (Some(Uuid::new_v4().to_string()), true, true),
+            None => (Some(Uuid::now_v7().to_string()), true, true),
         };
 
         let mut history = if let Some(session_id) = &session_id {
