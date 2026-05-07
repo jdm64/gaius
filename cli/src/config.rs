@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+use std::error::Error;
+
 use crate::{
     agent::{create_client, validate_model},
     util::{config_path, prompt_input},
@@ -58,7 +60,7 @@ impl Config {
         }
     }
 
-    pub async fn load(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn load(&mut self) -> Result<(), Box<dyn Error>> {
         let path = config_path()?;
         if path.exists() {
             let contents = std::fs::read_to_string(&path)?;
@@ -128,7 +130,7 @@ impl Config {
         }
     }
 
-    pub async fn select_model(&self) -> Result<SelectedModel, Box<dyn std::error::Error>> {
+    pub async fn select_model(&self) -> Result<SelectedModel, Box<dyn Error>> {
         for model in &self.model {
             let provider = match self
                 .provider

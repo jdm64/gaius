@@ -3,7 +3,7 @@ use std::{error::Error, path::PathBuf};
 use genai::chat::ChatRequest;
 use uuid::Uuid;
 
-fn session_path(session_id: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn session_path(session_id: &str) -> Result<PathBuf, Box<dyn Error>> {
     validate_session_id(session_id)?;
     let home = std::env::var("HOME")?;
     Ok(PathBuf::from(home)
@@ -14,7 +14,7 @@ fn session_path(session_id: &str) -> Result<PathBuf, Box<dyn std::error::Error>>
         .join(format!("{}.mpk", session_id)))
 }
 
-fn validate_session_id(session_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn validate_session_id(session_id: &str) -> Result<(), Box<dyn Error>> {
     if session_id.is_empty() {
         return Err("Session id cannot be empty".into());
     }
@@ -37,7 +37,7 @@ impl Session {
         }
     }
 
-    pub fn new_named(name: String) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new_named(name: String) -> Result<Self, Box<dyn Error>> {
         validate_session_id(name.as_str())?;
         Ok(Self { id: Some(name) })
     }

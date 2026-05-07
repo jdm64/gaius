@@ -29,6 +29,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListDirection, ListItem, Padding, Paragraph, Wrap},
 };
 use std::{
+    error::Error,
     io::{self, Stdout},
     time::Duration,
 };
@@ -119,7 +120,7 @@ impl TuiApp {
         self.input.clear();
     }
 
-    pub async fn run(&mut self, agent: &mut LLMAgent) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&mut self, agent: &mut LLMAgent) -> Result<(), Box<dyn Error>> {
         self.model = agent.model().clone();
         self.load_history(agent.history());
 

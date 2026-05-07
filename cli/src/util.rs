@@ -13,10 +13,11 @@
  * limitations under the License.
  */
 
+use std::error::Error;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-pub fn config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub fn config_path() -> Result<PathBuf, Box<dyn Error>> {
     let home = std::env::var("HOME")?;
     Ok(PathBuf::from(home)
         .join(".config")
@@ -24,7 +25,7 @@ pub fn config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
         .join("config.toml"))
 }
 
-pub fn prompt_input(label: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn prompt_input(label: &str) -> Result<String, Box<dyn Error>> {
     print!("{}", label);
     io::stdout().flush()?;
     let mut input = String::new();

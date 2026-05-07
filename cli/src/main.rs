@@ -24,6 +24,7 @@ use crate::agent::LLMAgent;
 use crate::config::Config;
 use crate::tui::TuiApp;
 use pico_args::Arguments;
+use std::error::Error;
 use std::path::PathBuf;
 
 struct Args {
@@ -32,7 +33,7 @@ struct Args {
     session_id: Option<String>,
 }
 
-fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
+fn parse_args() -> Result<Args, Box<dyn Error>> {
     let mut pargs = Arguments::from_env();
 
     if pargs.contains(["-h", "--help"]) {
@@ -82,7 +83,7 @@ fn print_help() {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
     let initial_prompt = match (args.prompt, args.prompt_file) {
         (Some(prompt), None) => Some(prompt),
