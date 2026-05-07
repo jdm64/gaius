@@ -15,6 +15,7 @@
 
 mod agent;
 mod config;
+mod session;
 mod tools;
 mod tui;
 mod util;
@@ -107,13 +108,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         initial_prompt,
         args.session_id,
     )?;
+
     if agent.is_oneshot() {
         agent.run().await?;
     } else {
         TuiApp::new().run(&mut agent).await?;
     }
 
-    if let Some(session_id) = agent.continue_hint() {
+    if let Some(session_id) = agent.session_id() {
         println!("To continue pass --session {}", session_id);
     }
 
