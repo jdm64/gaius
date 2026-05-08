@@ -89,11 +89,11 @@ impl TuiApp {
 
     fn update_command_filter(&mut self) {
         let input = self.input.as_str();
-        if input.starts_with('/') {
-            let query = &input[1..].to_lowercase();
+        if let Some(query) = input.strip_prefix('/') {
+            let query = query.to_lowercase();
             self.filtered_commands = Self::commands()
                 .into_iter()
-                .filter(|cmd| cmd.name.to_lowercase().contains(query))
+                .filter(|cmd| cmd.name.to_lowercase().contains(&query))
                 .collect();
             self.show_commands = !self.filtered_commands.is_empty();
             self.command_selected = 0;
@@ -171,8 +171,7 @@ impl TuiApp {
                         continue;
                     }
 
-                    if prompt.starts_with('/') {
-                        let command = &prompt[1..];
+                    if let Some(command) = prompt.strip_prefix('/') {
                         self.execute_command(agent, command);
                         continue;
                     }
