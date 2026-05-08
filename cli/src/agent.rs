@@ -99,10 +99,19 @@ impl LLMAgent {
         &self.model
     }
 
-    pub fn new_session(&mut self) {
-        self.session = Session::new();
-        self.history = ChatRequest::new(vec![]);
+    pub fn new_session(&mut self) -> Result<(), Box<dyn Error>> {
+        self.load_session(Session::new())
+    }
+
+    pub fn load_session_by_id(&mut self, session_id: &str) -> Result<(), Box<dyn Error>> {
+        self.load_session(Session::new_named(session_id.to_string())?)
+    }
+
+    pub fn load_session(&mut self, session: Session) -> Result<(), Box<dyn Error>> {
+        self.session = session;
+        self.history = self.session.load()?;
         self.history.tools = Some(self.tool_engine.build_tools());
+        Ok(())
     }
 
     pub fn history(&self) -> &ChatRequest {

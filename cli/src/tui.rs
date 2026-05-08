@@ -13,7 +13,10 @@
  * limitations under the License.
  */
 
-use crate::agent::{AgentEvent, LLMAgent};
+use crate::{
+    agent::{AgentEvent, LLMAgent},
+    session::Session,
+};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
@@ -31,22 +34,34 @@ use ratatui::{
 use std::{
     error::Error,
     io::{self, Stdout},
+    mem,
     time::Duration,
 };
 
 const INPUT_HEIGHT: u16 = 3;
+
+pub enum InputMode {
+    PromptInput,
+    Command {
+        selected: usize,
+        filtered: Vec<Command>,
+    },
+    Session {
+        selected: usize,
+        sessions: Vec<String>,
+    },
+}
 
 pub struct TuiApp {
     model: String,
     input: String,
     messages: Vec<TuiMessage>,
     status: String,
-    show_commands: bool,
-    filtered_commands: Vec<Command>,
-    command_selected: usize,
+    mode: InputMode,
 }
 
-struct Command {
+#[derive(Clone)]
+pub struct Command {
     name: &'static str,
     description: &'static str,
 }
@@ -74,50 +89,77 @@ impl TuiApp {
             input: String::new(),
             messages: Vec::new(),
             status: "Esc or Ctrl-C to quit".to_string(),
-            show_commands: false,
-            filtered_commands: Vec::new(),
-            command_selected: 0,
+            mode: InputMode::PromptInput,
         }
     }
 
     fn commands() -> Vec<Command> {
-        vec![Command {
-            name: "new",
-            description: "Clear history and create a new session",
-        }]
+        vec![
+            Command {
+                name: "new",
+                description: "Clear history and create a new session",
+            },
+            Command {
+                name: "sessions",
+                description: "Load and delete sessions",
+            },
+        ]
     }
 
-    fn update_command_filter(&mut self) {
+    fn command_mode_for_input(&self) -> Option<InputMode> {
         let input = self.input.as_str();
-        if let Some(query) = input.strip_prefix('/') {
-            let query = query.to_lowercase();
-            self.filtered_commands = Self::commands()
-                .into_iter()
-                .filter(|cmd| cmd.name.to_lowercase().contains(&query))
-                .collect();
-            self.show_commands = !self.filtered_commands.is_empty();
-            self.command_selected = 0;
+        let query = input.strip_prefix('/')?.to_lowercase();
+        let filtered: Vec<Command> = Self::commands()
+            .into_iter()
+            .filter(|cmd| cmd.name.to_lowercase().contains(&query))
+            .collect();
+
+        if filtered.is_empty() {
+            None
         } else {
-            self.show_commands = false;
+            Some(InputMode::Command {
+                selected: 0,
+                filtered,
+            })
         }
     }
 
-    fn execute_command(&mut self, agent: &mut LLMAgent, command: &str) {
+    fn mode_for_input(&self) -> InputMode {
+        self.command_mode_for_input()
+            .unwrap_or(InputMode::PromptInput)
+    }
+
+    fn execute_command(&mut self, agent: &mut LLMAgent, command: &str) -> InputMode {
         match command {
             "new" => {
-                agent.new_session();
-                self.messages.clear();
-                self.status = "New session created".to_string();
+                match agent.new_session() {
+                    Ok(_) => {
+                        self.messages.clear();
+                        self.status = "New session created".to_string();
+                    }
+                    Err(e) => {
+                        self.status = e.to_string();
+                    }
+                };
+                self.input.clear();
+                InputMode::PromptInput
+            }
+            "sessions" => {
+                let sessions = Session::list();
+                self.input.clear();
+                InputMode::Session {
+                    selected: 0,
+                    sessions,
+                }
             }
             _ => {
                 self.messages.push(TuiMessage {
                     role: MessageRole::Agent,
                     text: format!("Unknown command: /{}", command),
                 });
+                InputMode::PromptInput
             }
         }
-        self.show_commands = false;
-        self.input.clear();
     }
 
     pub async fn run(&mut self, agent: &mut LLMAgent) -> Result<(), Box<dyn Error>> {
@@ -140,104 +182,187 @@ impl TuiApp {
                 continue;
             }
 
-            match key.code {
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-                KeyCode::Esc => break,
-                KeyCode::Backspace => {
-                    self.input.pop();
-                    self.update_command_filter();
+            let mode = mem::replace(&mut self.mode, InputMode::PromptInput);
+            self.mode = match mode {
+                InputMode::PromptInput => self.handle_prompt_input(key, &mut guard, agent).await?,
+                InputMode::Command { selected, filtered } => {
+                    self.handle_command_mode(key, selected, filtered, agent)
                 }
-                KeyCode::Up => {
-                    if self.show_commands && self.command_selected > 0 {
-                        self.command_selected -= 1;
-                    }
+                InputMode::Session { selected, sessions } => {
+                    self.handle_session_mode(key, selected, sessions, agent)
                 }
-                KeyCode::Down => {
-                    if self.show_commands
-                        && self.command_selected + 1 < self.filtered_commands.len()
-                    {
-                        self.command_selected += 1;
-                    }
+            };
+        }
+    }
+
+    async fn handle_prompt_input(
+        &mut self,
+        key: event::KeyEvent,
+        guard: &mut TerminalGuard,
+        agent: &mut LLMAgent,
+    ) -> Result<InputMode, Box<dyn Error>> {
+        match key.code {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Err("Ctrl-C pressed".into());
+            }
+            KeyCode::Esc => return Err("Esc pressed".into()),
+            KeyCode::Backspace => {
+                self.input.pop();
+                return Ok(self.mode_for_input());
+            }
+            KeyCode::Enter => {
+                let prompt = self.input.trim().to_string();
+                if prompt.is_empty() {
+                    return Ok(InputMode::PromptInput);
                 }
-                KeyCode::Enter => {
-                    if self.show_commands && !self.filtered_commands.is_empty() {
-                        let command = self.filtered_commands[self.command_selected].name;
-                        self.execute_command(agent, command);
-                        continue;
-                    }
 
-                    let prompt = self.input.trim().to_string();
-                    if prompt.is_empty() {
-                        continue;
-                    }
+                if let Some(command) = prompt.strip_prefix('/') {
+                    return Ok(self.execute_command(agent, command));
+                }
 
-                    if let Some(command) = prompt.strip_prefix('/') {
-                        self.execute_command(agent, command);
-                        continue;
-                    }
+                self.input.clear();
+                self.messages.push(TuiMessage {
+                    role: MessageRole::User,
+                    text: prompt.clone(),
+                });
+                self.status = "Waiting for agent...".to_string();
+                guard.terminal.draw(|frame| self.draw(frame))?;
 
-                    self.input.clear();
-                    self.show_commands = false;
-                    self.messages.push(TuiMessage {
-                        role: MessageRole::User,
-                        text: prompt.clone(),
-                    });
-                    self.status = "Waiting for agent...".to_string();
-                    guard.terminal.draw(|frame| self.draw(frame))?;
+                let mut events = Vec::new();
+                let result = agent
+                    .run_turn_with_events(prompt, |event| events.push(event))
+                    .await;
 
-                    let mut events = Vec::new();
-                    let result = agent
-                        .run_turn_with_events(prompt, |event| events.push(event))
-                        .await;
-
-                    match result {
-                        Ok(()) => {
-                            for event in events {
-                                match event {
-                                    AgentEvent::AgentMessage(text) => {
-                                        self.messages.push(TuiMessage {
-                                            role: MessageRole::Agent,
-                                            text,
-                                        });
-                                    }
-                                    AgentEvent::ToolCall { name, arguments } => {
-                                        self.messages.push(TuiMessage {
-                                            role: MessageRole::ToolCall,
-                                            text: format!("{} ({})", name, arguments),
-                                        });
-                                    }
+                match result {
+                    Ok(()) => {
+                        for event in events {
+                            match event {
+                                AgentEvent::AgentMessage(text) => {
+                                    self.messages.push(TuiMessage {
+                                        role: MessageRole::Agent,
+                                        text,
+                                    });
+                                }
+                                AgentEvent::ToolCall { name, arguments } => {
+                                    self.messages.push(TuiMessage {
+                                        role: MessageRole::ToolCall,
+                                        text: format!("{} ({})", name, arguments),
+                                    });
                                 }
                             }
-                            self.status = "Esc or Ctrl-C to quit".to_string();
                         }
-                        Err(err) => {
-                            self.messages.push(TuiMessage {
-                                role: MessageRole::Agent,
-                                text: format!("Error: {}", err),
-                            });
-                            self.status = "Agent request failed".to_string();
-                        }
+                        self.status = "Esc or Ctrl-C to quit".to_string();
+                    }
+                    Err(err) => {
+                        self.messages.push(TuiMessage {
+                            role: MessageRole::Agent,
+                            text: format!("Error: {}", err),
+                        });
+                        self.status = "Agent request failed".to_string();
+                    }
+                };
+                Ok(InputMode::PromptInput)
+            }
+            KeyCode::Char(ch) => {
+                self.input.push(ch);
+                return Ok(self.mode_for_input());
+            }
+            _ => Ok(InputMode::PromptInput),
+        }
+    }
+
+    fn handle_command_mode(
+        &mut self,
+        key: event::KeyEvent,
+        mut selected: usize,
+        filtered: Vec<Command>,
+        agent: &mut LLMAgent,
+    ) -> InputMode {
+        match key.code {
+            KeyCode::Esc => InputMode::PromptInput,
+            KeyCode::Up if selected > 0 => {
+                selected -= 1;
+                InputMode::Command { selected, filtered }
+            }
+            KeyCode::Down if selected + 1 < filtered.len() => {
+                selected += 1;
+                InputMode::Command { selected, filtered }
+            }
+            KeyCode::Enter if !filtered.is_empty() => {
+                let command = filtered[selected].name;
+                self.execute_command(agent, command)
+            }
+            KeyCode::Backspace => {
+                self.input.pop();
+                self.mode_for_input()
+            }
+            KeyCode::Char(ch) => {
+                self.input.push(ch);
+                self.mode_for_input()
+            }
+            _ => InputMode::Command { selected, filtered },
+        }
+    }
+
+    fn handle_session_mode(
+        &mut self,
+        key: event::KeyEvent,
+        mut selected: usize,
+        mut sessions: Vec<String>,
+        agent: &mut LLMAgent,
+    ) -> InputMode {
+        match key.code {
+            KeyCode::Esc => InputMode::PromptInput,
+            KeyCode::Up if selected > 0 => {
+                selected -= 1;
+                InputMode::Session { selected, sessions }
+            }
+            KeyCode::Down if selected + 1 < sessions.len() => {
+                selected += 1;
+                InputMode::Session { selected, sessions }
+            }
+            KeyCode::Enter if !sessions.is_empty() => {
+                let session_id = &sessions[selected];
+                match agent.load_session_by_id(session_id) {
+                    Ok(()) => {
+                        self.messages.clear();
+                        self.status = format!("Loaded session: {}", session_id);
+                        self.load_history(agent.history());
+                        InputMode::PromptInput
+                    }
+                    Err(e) => {
+                        self.status = format!("Error loading session: {}", e);
+                        InputMode::Session { selected, sessions }
                     }
                 }
-                KeyCode::Char(ch) => {
-                    self.input.push(ch);
-                    self.update_command_filter();
-                }
-                _ => {}
             }
+            KeyCode::Char('d')
+                if key.modifiers.contains(KeyModifiers::CONTROL) && !sessions.is_empty() =>
+            {
+                let session_id = sessions[selected].clone();
+                if let Err(e) = Session::delete(&session_id) {
+                    self.status = format!("Error deleting session: {}", e);
+                } else {
+                    sessions = Session::list();
+                    if selected >= sessions.len() && selected > 0 {
+                        selected -= 1;
+                    }
+                    self.status = format!("Deleted session: {}", session_id);
+                }
+                InputMode::Session { selected, sessions }
+            }
+            _ => InputMode::Session { selected, sessions },
         }
-
-        Ok(())
     }
 
     fn load_history(&mut self, history: &ChatRequest) {
-        if let Some(system) = &history.system {
-            if !system.trim().is_empty() {
-                self.messages.push(TuiMessage {
-                    role: MessageRole::Agent,
-                    text: format!("system: {}", system),
-                });
-            }
+        if let Some(system) = &history.system
+            && !system.trim().is_empty()
+        {
+            self.messages.push(TuiMessage {
+                role: MessageRole::Agent,
+                text: format!("system: {}", system),
+            });
         }
 
         for message in &history.messages {
@@ -259,13 +384,25 @@ impl TuiApp {
         self.draw_history(frame, chunks[0]);
         self.draw_input(frame, chunks[1]);
 
-        if self.show_commands {
-            self.draw_commands(frame, chunks[1]);
+        match &self.mode {
+            InputMode::Command { selected, filtered } => {
+                self.draw_commands(frame, chunks[1], *selected, filtered);
+            }
+            InputMode::Session { selected, sessions } => {
+                self.draw_sessions(frame, chunks[1], *selected, sessions);
+            }
+            InputMode::PromptInput => {}
         }
     }
 
-    fn draw_commands(&self, frame: &mut Frame<'_>, input_area: Rect) {
-        let command_count = self.filtered_commands.len() as u16;
+    fn draw_commands(
+        &self,
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        selected: usize,
+        filtered: &[Command],
+    ) {
+        let command_count = filtered.len() as u16;
         let visible_commands = command_count.min(10);
         let width = 50.min(input_area.width - 4);
         let height = visible_commands + 2;
@@ -273,13 +410,12 @@ impl TuiApp {
         let y = input_area.y - height;
         let rect = Rect::new(x, y, width, height);
 
-        let items: Vec<ListItem> = self
-            .filtered_commands
+        let items: Vec<ListItem> = filtered
             .iter()
             .enumerate()
             .map(|(i, cmd)| {
                 let content = format!("/{} - {}", cmd.name, cmd.description);
-                if i == self.command_selected {
+                if i == selected {
                     ListItem::new(content).style(Style::default().bg(Color::DarkGray))
                 } else {
                     ListItem::new(content)
@@ -291,6 +427,56 @@ impl TuiApp {
 
         frame.render_widget(Clear, rect);
         frame.render_widget(list, rect);
+    }
+
+    fn draw_sessions(
+        &self,
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        selected: usize,
+        sessions: &[String],
+    ) {
+        let session_count = sessions.len() as u16;
+        let visible_sessions = session_count.min(10);
+        let help_height = 3u16;
+        let width = 50.min(input_area.width - 4);
+        let height = visible_sessions + 2 + help_height;
+        let x = input_area.x + 2;
+        let y = input_area.y - height;
+        let rect = Rect::new(x, y, width, height);
+
+        let items: Vec<ListItem> = sessions
+            .iter()
+            .enumerate()
+            .map(|(i, session_id)| {
+                if i == selected {
+                    ListItem::new(session_id.as_str()).style(Style::default().bg(Color::DarkGray))
+                } else {
+                    ListItem::new(session_id.as_str())
+                }
+            })
+            .collect();
+
+        let sessions_list =
+            List::new(items).block(Block::default().borders(Borders::ALL).title("Sessions"));
+
+        let help_text = "Enter: load | Ctrl+D: delete | Esc: close";
+        let help_para = Paragraph::new(help_text)
+            .block(Block::default().borders(Borders::ALL))
+            .style(Style::default().fg(Color::Yellow));
+
+        frame.render_widget(Clear, rect);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(visible_sessions + 2),
+                Constraint::Length(help_height),
+            ])
+            .split(rect);
+
+        frame.render_widget(sessions_list, chunks[0]);
+        frame.render_widget(help_para, chunks[1]);
     }
 
     fn draw_history(&self, frame: &mut Frame<'_>, area: Rect) {
