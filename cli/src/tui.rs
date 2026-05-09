@@ -61,6 +61,7 @@ pub enum InputMode {
 pub struct TuiApp {
     model: String,
     input: String,
+    input_cursor: usize,
     messages: Vec<TuiMessage>,
     status: String,
     mode: InputMode,
@@ -93,6 +94,7 @@ impl TuiApp {
         Self {
             model: String::new(),
             input: String::new(),
+            input_cursor: 0,
             messages: Vec::new(),
             status: "Esc or Ctrl-C to quit".to_string(),
             mode: InputMode::PromptInput,
@@ -139,6 +141,68 @@ impl TuiApp {
             .unwrap_or(InputMode::PromptInput)
     }
 
+    fn input_len(&self) -> usize {
+        self.input.chars().count()
+    }
+
+    fn input_cursor_byte_index(&self) -> usize {
+        if self.input_cursor == self.input_len() {
+            return self.input.len();
+        }
+
+        self.input
+            .char_indices()
+            .nth(self.input_cursor)
+            .map(|(index, _)| index)
+            .unwrap_or(self.input.len())
+    }
+
+    fn clear_input(&mut self) {
+        self.input.clear();
+        self.input_cursor = 0;
+    }
+
+    fn insert_input_char(&mut self, ch: char) {
+        let index = self.input_cursor_byte_index();
+        self.input.insert(index, ch);
+        self.input_cursor += 1;
+    }
+
+    fn delete_input_char_before_cursor(&mut self) {
+        if self.input_cursor == 0 {
+            return;
+        }
+
+        self.input_cursor -= 1;
+        let index = self.input_cursor_byte_index();
+        self.input.remove(index);
+    }
+
+    fn delete_input_char_at_cursor(&mut self) {
+        if self.input_cursor == self.input_len() {
+            return;
+        }
+
+        let index = self.input_cursor_byte_index();
+        self.input.remove(index);
+    }
+
+    fn move_input_cursor_left(&mut self) {
+        self.input_cursor = self.input_cursor.saturating_sub(1);
+    }
+
+    fn move_input_cursor_right(&mut self) {
+        self.input_cursor = (self.input_cursor + 1).min(self.input_len());
+    }
+
+    fn move_input_cursor_home(&mut self) {
+        self.input_cursor = 0;
+    }
+
+    fn move_input_cursor_end(&mut self) {
+        self.input_cursor = self.input_len();
+    }
+
     fn filtered_model_indices(&self, models: &[AvailableModel]) -> Vec<usize> {
         let query = self.input.trim().to_lowercase();
         models
@@ -173,19 +237,19 @@ impl TuiApp {
                         self.status = e.to_string();
                     }
                 };
-                self.input.clear();
+                self.clear_input();
                 InputMode::PromptInput
             }
             "sessions" => {
                 let sessions = Session::list();
-                self.input.clear();
+                self.clear_input();
                 InputMode::Session {
                     selected: 0,
                     sessions,
                 }
             }
             "models" => {
-                self.input.clear();
+                self.clear_input();
                 self.status = "Loading models...".to_string();
                 match Models::list(config).await {
                     Ok(models) => {
@@ -206,7 +270,7 @@ impl TuiApp {
                     role: MessageRole::Agent,
                     text: format!("Unknown command: /{}", command),
                 });
-                self.input.clear();
+                self.clear_input();
                 InputMode::PromptInput
             }
         }
@@ -270,8 +334,28 @@ impl TuiApp {
             }
             KeyCode::Esc => return Err("Esc pressed".into()),
             KeyCode::Backspace => {
-                self.input.pop();
+                self.delete_input_char_before_cursor();
                 return Ok(self.mode_for_input());
+            }
+            KeyCode::Delete => {
+                self.delete_input_char_at_cursor();
+                return Ok(self.mode_for_input());
+            }
+            KeyCode::Left => {
+                self.move_input_cursor_left();
+                return Ok(InputMode::PromptInput);
+            }
+            KeyCode::Right => {
+                self.move_input_cursor_right();
+                return Ok(InputMode::PromptInput);
+            }
+            KeyCode::Home => {
+                self.move_input_cursor_home();
+                return Ok(InputMode::PromptInput);
+            }
+            KeyCode::End => {
+                self.move_input_cursor_end();
+                return Ok(InputMode::PromptInput);
             }
             KeyCode::Enter => {
                 let prompt = self.input.trim().to_string();
@@ -283,7 +367,7 @@ impl TuiApp {
                     return Ok(self.execute_command(agent, config, command).await);
                 }
 
-                self.input.clear();
+                self.clear_input();
                 self.messages.push(TuiMessage {
                     role: MessageRole::User,
                     text: prompt.clone(),
@@ -327,7 +411,7 @@ impl TuiApp {
                 Ok(InputMode::PromptInput)
             }
             KeyCode::Char(ch) => {
-                self.input.push(ch);
+                self.insert_input_char(ch);
                 return Ok(self.mode_for_input());
             }
             _ => Ok(InputMode::PromptInput),
@@ -344,7 +428,7 @@ impl TuiApp {
     ) -> InputMode {
         match key.code {
             KeyCode::Esc => {
-                self.input.clear();
+                self.clear_input();
                 InputMode::PromptInput
             }
             KeyCode::Up if selected > 0 => {
@@ -360,11 +444,31 @@ impl TuiApp {
                 self.execute_command(agent, config, command).await
             }
             KeyCode::Backspace => {
-                self.input.pop();
+                self.delete_input_char_before_cursor();
                 self.mode_for_input()
             }
+            KeyCode::Delete => {
+                self.delete_input_char_at_cursor();
+                self.mode_for_input()
+            }
+            KeyCode::Left => {
+                self.move_input_cursor_left();
+                InputMode::Command { selected, filtered }
+            }
+            KeyCode::Right => {
+                self.move_input_cursor_right();
+                InputMode::Command { selected, filtered }
+            }
+            KeyCode::Home => {
+                self.move_input_cursor_home();
+                InputMode::Command { selected, filtered }
+            }
+            KeyCode::End => {
+                self.move_input_cursor_end();
+                InputMode::Command { selected, filtered }
+            }
             KeyCode::Char(ch) => {
-                self.input.push(ch);
+                self.insert_input_char(ch);
                 self.mode_for_input()
             }
             _ => InputMode::Command { selected, filtered },
@@ -432,7 +536,7 @@ impl TuiApp {
     ) -> InputMode {
         match key.code {
             KeyCode::Esc => {
-                self.input.clear();
+                self.clear_input();
                 InputMode::PromptInput
             }
             KeyCode::Up if selected > 0 => {
@@ -457,7 +561,7 @@ impl TuiApp {
                         let model_id = selected_model.id.clone();
                         agent.set_model(client, model_id.clone());
                         self.model = model_id.clone();
-                        self.input.clear();
+                        self.clear_input();
                         self.status = format!("Selected model: {}", model_id);
                         InputMode::PromptInput
                     }
@@ -482,15 +586,36 @@ impl TuiApp {
                 }
             }
             KeyCode::Backspace => {
-                self.input.pop();
+                self.delete_input_char_before_cursor();
                 selected = self.clamp_model_selection(selected, &models);
+                InputMode::Models { selected, models }
+            }
+            KeyCode::Delete => {
+                self.delete_input_char_at_cursor();
+                selected = self.clamp_model_selection(selected, &models);
+                InputMode::Models { selected, models }
+            }
+            KeyCode::Left => {
+                self.move_input_cursor_left();
+                InputMode::Models { selected, models }
+            }
+            KeyCode::Right => {
+                self.move_input_cursor_right();
+                InputMode::Models { selected, models }
+            }
+            KeyCode::Home => {
+                self.move_input_cursor_home();
+                InputMode::Models { selected, models }
+            }
+            KeyCode::End => {
+                self.move_input_cursor_end();
                 InputMode::Models { selected, models }
             }
             KeyCode::Char(ch)
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
                     && !key.modifiers.contains(KeyModifiers::ALT) =>
             {
-                self.input.push(ch);
+                self.insert_input_char(ch);
                 selected = self.clamp_model_selection(selected, &models);
                 InputMode::Models { selected, models }
             }
@@ -750,7 +875,7 @@ impl TuiApp {
         .wrap(Wrap { trim: false });
         frame.render_widget(input, area);
 
-        let cursor_x = area.x + 4 + self.input.chars().count() as u16;
+        let cursor_x = area.x + 4 + self.input_cursor as u16;
         let cursor_y = area.y + 1;
         if cursor_x < area.x + area.width {
             frame.set_cursor_position((cursor_x, cursor_y));
@@ -836,6 +961,59 @@ impl Drop for TerminalGuard {
 mod tests {
     use super::*;
     use genai::chat::{ChatMessage, MessageContent, ToolCall, ToolResponse};
+
+    #[test]
+    fn edits_input_at_cursor() {
+        let mut app = TuiApp::new();
+        app.insert_input_char('a');
+        app.insert_input_char('c');
+
+        app.move_input_cursor_left();
+        app.insert_input_char('b');
+
+        assert_eq!(app.input, "abc");
+        assert_eq!(app.input_cursor, 2);
+
+        app.delete_input_char_before_cursor();
+
+        assert_eq!(app.input, "ac");
+        assert_eq!(app.input_cursor, 1);
+
+        app.delete_input_char_at_cursor();
+
+        assert_eq!(app.input, "a");
+        assert_eq!(app.input_cursor, 1);
+    }
+
+    #[test]
+    fn moves_input_cursor_home_and_end() {
+        let mut app = TuiApp::new();
+        for ch in "prompt".chars() {
+            app.insert_input_char(ch);
+        }
+
+        app.move_input_cursor_home();
+        assert_eq!(app.input_cursor, 0);
+
+        app.move_input_cursor_end();
+        assert_eq!(app.input_cursor, 6);
+    }
+
+    #[test]
+    fn edits_multibyte_input_at_cursor() {
+        let mut app = TuiApp::new();
+        for ch in "aéc".chars() {
+            app.insert_input_char(ch);
+        }
+
+        app.move_input_cursor_left();
+        app.insert_input_char('b');
+        app.move_input_cursor_left();
+        app.delete_input_char_before_cursor();
+
+        assert_eq!(app.input, "abc");
+        assert_eq!(app.input_cursor, 1);
+    }
 
     #[test]
     fn loads_chat_request_into_tui_history() {
