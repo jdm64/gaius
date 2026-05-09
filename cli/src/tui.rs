@@ -15,6 +15,8 @@
 
 use crate::{
     agent::{AgentEvent, LLMAgent},
+    config::Config,
+    models::{AvailableModel, Models},
     session::Session,
 };
 use crossterm::{
@@ -49,6 +51,10 @@ pub enum InputMode {
     Session {
         selected: usize,
         sessions: Vec<String>,
+    },
+    Models {
+        selected: usize,
+        models: Vec<AvailableModel>,
     },
 }
 
@@ -103,6 +109,10 @@ impl TuiApp {
                 name: "sessions",
                 description: "Load and delete sessions",
             },
+            Command {
+                name: "models",
+                description: "List and select models",
+            },
         ]
     }
 
@@ -129,7 +139,29 @@ impl TuiApp {
             .unwrap_or(InputMode::PromptInput)
     }
 
-    fn execute_command(&mut self, agent: &mut LLMAgent, command: &str) -> InputMode {
+    fn filtered_model_indices(&self, models: &[AvailableModel]) -> Vec<usize> {
+        let query = self.input.trim().to_lowercase();
+        models
+            .iter()
+            .enumerate()
+            .filter_map(|(index, model)| {
+                let is_match = query.is_empty() || model.id.to_lowercase().contains(&query);
+                is_match.then_some(index)
+            })
+            .collect()
+    }
+
+    fn clamp_model_selection(&self, selected: usize, models: &[AvailableModel]) -> usize {
+        let filtered_len = self.filtered_model_indices(models).len();
+        selected.min(filtered_len.saturating_sub(1))
+    }
+
+    async fn execute_command(
+        &mut self,
+        agent: &mut LLMAgent,
+        config: &Config,
+        command: &str,
+    ) -> InputMode {
         match command {
             "new" => {
                 match agent.new_session() {
@@ -152,17 +184,39 @@ impl TuiApp {
                     sessions,
                 }
             }
+            "models" => {
+                self.input.clear();
+                self.status = "Loading models...".to_string();
+                match Models::list(config).await {
+                    Ok(models) => {
+                        self.status = format!("Loaded {} models", models.len());
+                        InputMode::Models {
+                            selected: 0,
+                            models,
+                        }
+                    }
+                    Err(err) => {
+                        self.status = format!("Error loading models: {}", err);
+                        InputMode::PromptInput
+                    }
+                }
+            }
             _ => {
                 self.messages.push(TuiMessage {
                     role: MessageRole::Agent,
                     text: format!("Unknown command: /{}", command),
                 });
+                self.input.clear();
                 InputMode::PromptInput
             }
         }
     }
 
-    pub async fn run(&mut self, agent: &mut LLMAgent) -> Result<(), Box<dyn Error>> {
+    pub async fn run(
+        &mut self,
+        agent: &mut LLMAgent,
+        config: &Config,
+    ) -> Result<(), Box<dyn Error>> {
         self.model = agent.model().clone();
         self.load_history(agent.history());
 
@@ -184,12 +238,20 @@ impl TuiApp {
 
             let mode = mem::replace(&mut self.mode, InputMode::PromptInput);
             self.mode = match mode {
-                InputMode::PromptInput => self.handle_prompt_input(key, &mut guard, agent).await?,
+                InputMode::PromptInput => {
+                    self.handle_prompt_input(key, &mut guard, agent, config)
+                        .await?
+                }
                 InputMode::Command { selected, filtered } => {
-                    self.handle_command_mode(key, selected, filtered, agent)
+                    self.handle_command_mode(key, selected, filtered, agent, config)
+                        .await
                 }
                 InputMode::Session { selected, sessions } => {
                     self.handle_session_mode(key, selected, sessions, agent)
+                }
+                InputMode::Models { selected, models } => {
+                    self.handle_models_mode(key, selected, models, agent, config)
+                        .await
                 }
             };
         }
@@ -200,6 +262,7 @@ impl TuiApp {
         key: event::KeyEvent,
         guard: &mut TerminalGuard,
         agent: &mut LLMAgent,
+        config: &Config,
     ) -> Result<InputMode, Box<dyn Error>> {
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -217,7 +280,7 @@ impl TuiApp {
                 }
 
                 if let Some(command) = prompt.strip_prefix('/') {
-                    return Ok(self.execute_command(agent, command));
+                    return Ok(self.execute_command(agent, config, command).await);
                 }
 
                 self.input.clear();
@@ -271,15 +334,19 @@ impl TuiApp {
         }
     }
 
-    fn handle_command_mode(
+    async fn handle_command_mode(
         &mut self,
         key: event::KeyEvent,
         mut selected: usize,
         filtered: Vec<Command>,
         agent: &mut LLMAgent,
+        config: &Config,
     ) -> InputMode {
         match key.code {
-            KeyCode::Esc => InputMode::PromptInput,
+            KeyCode::Esc => {
+                self.input.clear();
+                InputMode::PromptInput
+            }
             KeyCode::Up if selected > 0 => {
                 selected -= 1;
                 InputMode::Command { selected, filtered }
@@ -290,7 +357,7 @@ impl TuiApp {
             }
             KeyCode::Enter if !filtered.is_empty() => {
                 let command = filtered[selected].name;
-                self.execute_command(agent, command)
+                self.execute_command(agent, config, command).await
             }
             KeyCode::Backspace => {
                 self.input.pop();
@@ -355,6 +422,82 @@ impl TuiApp {
         }
     }
 
+    async fn handle_models_mode(
+        &mut self,
+        key: event::KeyEvent,
+        mut selected: usize,
+        models: Vec<AvailableModel>,
+        agent: &mut LLMAgent,
+        config: &Config,
+    ) -> InputMode {
+        match key.code {
+            KeyCode::Esc => {
+                self.input.clear();
+                InputMode::PromptInput
+            }
+            KeyCode::Up if selected > 0 => {
+                selected -= 1;
+                InputMode::Models { selected, models }
+            }
+            KeyCode::Down if selected + 1 < self.filtered_model_indices(&models).len() => {
+                selected += 1;
+                InputMode::Models { selected, models }
+            }
+            KeyCode::Enter => {
+                let filtered = self.filtered_model_indices(&models);
+                if filtered.is_empty() {
+                    self.status = "No matching models".to_string();
+                    return InputMode::Models { selected, models };
+                }
+
+                selected = selected.min(filtered.len().saturating_sub(1));
+                let selected_model = &models[filtered[selected]];
+                match selected_model.create_client(config) {
+                    Ok(client) => {
+                        let model_id = selected_model.id.clone();
+                        agent.set_model(client, model_id.clone());
+                        self.model = model_id.clone();
+                        self.input.clear();
+                        self.status = format!("Selected model: {}", model_id);
+                        InputMode::PromptInput
+                    }
+                    Err(err) => {
+                        self.status = format!("Error selecting model: {}", err);
+                        InputMode::Models { selected, models }
+                    }
+                }
+            }
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.status = "Reloading models...".to_string();
+                match Models::reload(config).await {
+                    Ok(models) => {
+                        let selected = self.clamp_model_selection(selected, &models);
+                        self.status = format!("Reloaded {} models", models.len());
+                        InputMode::Models { selected, models }
+                    }
+                    Err(err) => {
+                        self.status = format!("Error reloading models: {}", err);
+                        InputMode::Models { selected, models }
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                self.input.pop();
+                selected = self.clamp_model_selection(selected, &models);
+                InputMode::Models { selected, models }
+            }
+            KeyCode::Char(ch)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.input.push(ch);
+                selected = self.clamp_model_selection(selected, &models);
+                InputMode::Models { selected, models }
+            }
+            _ => InputMode::Models { selected, models },
+        }
+    }
+
     fn load_history(&mut self, history: &ChatRequest) {
         if let Some(system) = &history.system
             && !system.trim().is_empty()
@@ -390,6 +533,9 @@ impl TuiApp {
             }
             InputMode::Session { selected, sessions } => {
                 self.draw_sessions(frame, chunks[1], *selected, sessions);
+            }
+            InputMode::Models { selected, models } => {
+                self.draw_models(frame, chunks[1], *selected, models);
             }
             InputMode::PromptInput => {}
         }
@@ -476,6 +622,72 @@ impl TuiApp {
             .split(rect);
 
         frame.render_widget(sessions_list, chunks[0]);
+        frame.render_widget(help_para, chunks[1]);
+    }
+
+    fn draw_models(
+        &self,
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        selected: usize,
+        models: &[AvailableModel],
+    ) {
+        let filtered = self.filtered_model_indices(models);
+        let result_count = filtered.len();
+        let selected = selected.min(result_count.saturating_sub(1));
+        let visible_models = (result_count as u16).clamp(1, 10);
+        let help_height = 3u16;
+        let width = 70.min(input_area.width - 4);
+        let height = visible_models + 2 + help_height;
+        let x = input_area.x + 2;
+        let y = input_area.y - height;
+        let rect = Rect::new(x, y, width, height);
+
+        let start = if selected >= visible_models as usize {
+            selected + 1 - visible_models as usize
+        } else {
+            0
+        };
+        let end = (start + visible_models as usize).min(result_count);
+
+        let items: Vec<ListItem> = if result_count == 0 {
+            vec![ListItem::new("No matching models")]
+        } else {
+            filtered[start..end]
+                .iter()
+                .enumerate()
+                .map(|(offset, model_index)| {
+                    let i = start + offset;
+                    let model = &models[*model_index];
+                    let label = model.label();
+                    if i == selected {
+                        ListItem::new(label).style(Style::default().bg(Color::DarkGray))
+                    } else {
+                        ListItem::new(label)
+                    }
+                })
+                .collect()
+        };
+
+        let models_list =
+            List::new(items).block(Block::default().borders(Borders::ALL).title("Models"));
+
+        let help_text = "Type: filter | Enter: select | Ctrl+R: reload | Esc: close";
+        let help_para = Paragraph::new(help_text)
+            .block(Block::default().borders(Borders::ALL))
+            .style(Style::default().fg(Color::Yellow));
+
+        frame.render_widget(Clear, rect);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(visible_models + 2),
+                Constraint::Length(help_height),
+            ])
+            .split(rect);
+
+        frame.render_widget(models_list, chunks[0]);
         frame.render_widget(help_para, chunks[1]);
     }
 

@@ -99,6 +99,11 @@ impl LLMAgent {
         &self.model
     }
 
+    pub fn set_model(&mut self, client: Client, model: String) {
+        self.client = client;
+        self.model = model;
+    }
+
     pub fn new_session(&mut self) -> Result<(), Box<dyn Error>> {
         self.load_session(Session::new())
     }

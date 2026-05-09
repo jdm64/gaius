@@ -34,17 +34,17 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
-    name: String,
-    kind: String,
-    url: String,
-    key: String,
+    pub name: String,
+    pub kind: String,
+    pub url: String,
+    pub key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
-    name: String,
-    provider: String,
-    id: String,
+    pub name: String,
+    pub provider: String,
+    pub id: String,
 }
 
 pub struct SelectedModel {
@@ -172,5 +172,9 @@ impl Config {
         }
 
         Err("No valid model was found. Check config file.".into())
+    }
+
+    pub fn providers(&self) -> &[ProviderConfig] {
+        &self.provider
     }
 }

@@ -15,6 +15,7 @@
 
 mod agent;
 mod config;
+mod models;
 mod session;
 mod tools;
 mod tui;
@@ -113,7 +114,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if agent.is_oneshot() {
         agent.run().await?;
     } else {
-        TuiApp::new().run(&mut agent).await?;
+        TuiApp::new().run(&mut agent, &config).await?;
     }
 
     if let Some(session_id) = agent.session_id() {
