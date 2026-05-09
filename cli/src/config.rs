@@ -16,8 +16,9 @@
 use std::error::Error;
 
 use crate::{
-    agent::{create_client, validate_model},
-    util::{config_path, prompt_input},
+    agents::Agents,
+    harness::{create_client, validate_model},
+    util::{config_dir, config_path, prompt_input},
 };
 use genai::Client;
 use genai::adapter::AdapterKind;
@@ -30,6 +31,8 @@ pub struct Config {
     provider: Vec<ProviderConfig>,
     #[serde(default)]
     model: Vec<ModelConfig>,
+    #[serde(skip)]
+    agents: Agents,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +60,7 @@ impl Config {
         Self {
             provider: vec![],
             model: vec![],
+            agents: Agents::default(),
         }
     }
 
@@ -65,6 +69,7 @@ impl Config {
         if path.exists() {
             let contents = std::fs::read_to_string(&path)?;
             *self = toml::from_str(&contents)?;
+            self.agents = Agents::load(&config_dir()?)?;
             return Ok(());
         }
 
@@ -115,6 +120,7 @@ impl Config {
                     let config = Config {
                         provider: vec![provider],
                         model: vec![model],
+                        agents: Agents::load(&config_dir()?)?,
                     };
                     if let Some(parent) = path.parent() {
                         std::fs::create_dir_all(parent)?;
@@ -176,5 +182,9 @@ impl Config {
 
     pub fn providers(&self) -> &[ProviderConfig] {
         &self.provider
+    }
+
+    pub fn agents(&self) -> &Agents {
+        &self.agents
     }
 }

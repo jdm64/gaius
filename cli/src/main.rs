@@ -13,16 +13,17 @@
  * limitations under the License.
  */
 
-mod agent;
+mod agents;
 mod config;
+mod harness;
 mod models;
 mod session;
 mod tools;
 mod tui;
 mod util;
 
-use crate::agent::LLMAgent;
 use crate::config::Config;
+use crate::harness::Harness;
 use crate::tui::TuiApp;
 use pico_args::Arguments;
 use std::error::Error;
@@ -104,20 +105,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let mut agent = LLMAgent::new(
+    let mut harness = Harness::new(
         selected_model.client,
         selected_model.model_id.clone(),
+        config.agents().default_agent().clone(),
         initial_prompt,
         args.session_id,
     )?;
 
-    if agent.is_oneshot() {
-        agent.run().await?;
+    if harness.is_oneshot() {
+        harness.run().await?;
     } else {
-        TuiApp::new().run(&mut agent, &config).await?;
+        TuiApp::new().run(&mut harness, &config).await?;
     }
 
-    if let Some(session_id) = agent.session_id() {
+    if let Some(session_id) = harness.session_id() {
         println!("To continue pass --session {}", session_id);
     }
 

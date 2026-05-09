@@ -16,8 +16,8 @@
 use std::{collections::BTreeMap, error::Error, path::PathBuf, time::Duration};
 
 use crate::{
-    agent::create_client,
     config::{Config, ProviderConfig},
+    harness::create_client,
 };
 use genai::{Client, adapter::AdapterKind};
 use serde::{Deserialize, Serialize};

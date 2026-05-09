@@ -15,7 +15,7 @@
 
 use std::error::Error;
 
-use crate::{session::Session, tools::ToolEngine, util::prompt_input};
+use crate::{agents::AgentDefinition, session::Session, tools::ToolEngine, util::prompt_input};
 use genai::{
     Client, ModelIden, ServiceTarget,
     adapter::AdapterKind,
@@ -46,24 +46,26 @@ pub async fn validate_model(
     Ok(())
 }
 
-pub struct LLMAgent {
+pub struct Harness {
     history: ChatRequest,
     client: Client,
     tool_engine: ToolEngine,
     model: String,
+    agent: AgentDefinition,
     oneshot_prompt: Option<String>,
     session: Session,
 }
 
-pub enum AgentEvent {
+pub enum HarnessEvent {
     AgentMessage(String),
     ToolCall { name: String, arguments: String },
 }
 
-impl LLMAgent {
+impl Harness {
     pub fn new(
         client: Client,
         model: String,
+        agent: AgentDefinition,
         oneshot_prompt: Option<String>,
         session_id: Option<String>,
     ) -> Result<Self, Box<dyn Error>> {
@@ -76,12 +78,14 @@ impl LLMAgent {
 
         let mut history = session.load()?;
         history.tools = Some(tool_engine.build_tools());
+        apply_agent_prompt(&mut history, &agent);
 
         Ok(Self {
             history,
             client,
             tool_engine,
             model,
+            agent,
             oneshot_prompt,
             session,
         })
@@ -99,9 +103,18 @@ impl LLMAgent {
         &self.model
     }
 
+    pub fn agent_name(&self) -> &str {
+        &self.agent.name
+    }
+
     pub fn set_model(&mut self, client: Client, model: String) {
         self.client = client;
         self.model = model;
+    }
+
+    pub fn set_agent(&mut self, agent: AgentDefinition) {
+        apply_agent_prompt(&mut self.history, &agent);
+        self.agent = agent;
     }
 
     pub fn new_session(&mut self) -> Result<(), Box<dyn Error>> {
@@ -116,6 +129,7 @@ impl LLMAgent {
         self.session = session;
         self.history = self.session.load()?;
         self.history.tools = Some(self.tool_engine.build_tools());
+        apply_agent_prompt(&mut self.history, &self.agent);
         Ok(())
     }
 
@@ -141,8 +155,8 @@ impl LLMAgent {
 
     pub async fn run_turn(&mut self, prompt: String) -> Result<(), Box<dyn std::error::Error>> {
         self.run_turn_with_events(prompt, |event| match event {
-            AgentEvent::AgentMessage(text) => println!("agent> {}", text),
-            AgentEvent::ToolCall { name, arguments } => {
+            HarnessEvent::AgentMessage(text) => println!("agent> {}", text),
+            HarnessEvent::ToolCall { name, arguments } => {
                 println!("tool-call> {} ({})", name, arguments);
             }
         })
@@ -155,7 +169,7 @@ impl LLMAgent {
         mut on_event: F,
     ) -> Result<(), Box<dyn std::error::Error>>
     where
-        F: FnMut(AgentEvent),
+        F: FnMut(HarnessEvent),
     {
         self.history.messages.push(ChatMessage::user(prompt));
 
@@ -171,7 +185,7 @@ impl LLMAgent {
 
             let text = response.first_text().unwrap_or("").to_string();
             if !text.is_empty() {
-                on_event(AgentEvent::AgentMessage(text));
+                on_event(HarnessEvent::AgentMessage(text));
             }
 
             let tool_calls = response.tool_calls();
@@ -186,7 +200,7 @@ impl LLMAgent {
                     .messages
                     .push(ToolResponse::new(&tc.call_id, result.clone()).into());
 
-                on_event(AgentEvent::ToolCall {
+                on_event(HarnessEvent::ToolCall {
                     name: tc.fn_name.to_string(),
                     arguments: tc.fn_arguments.to_string(),
                 });
@@ -198,4 +212,13 @@ impl LLMAgent {
         self.session.save(&self.history)?;
         Ok(())
     }
+}
+
+fn apply_agent_prompt(history: &mut ChatRequest, agent: &AgentDefinition) {
+    let prompt = agent.prompt.trim();
+    history.system = if prompt.is_empty() {
+        None
+    } else {
+        Some(agent.prompt.clone())
+    };
 }

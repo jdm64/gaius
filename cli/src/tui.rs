@@ -14,8 +14,9 @@
  */
 
 use crate::{
-    agent::{AgentEvent, LLMAgent},
+    agents::AgentDefinition,
     config::Config,
+    harness::{Harness, HarnessEvent},
     models::{AvailableModel, Models},
     session::Session,
 };
@@ -56,10 +57,15 @@ pub enum InputMode {
         selected: usize,
         models: Vec<AvailableModel>,
     },
+    Agents {
+        selected: usize,
+        agents: Vec<AgentDefinition>,
+    },
 }
 
 pub struct TuiApp {
     model: String,
+    agent_name: String,
     input: String,
     input_cursor: usize,
     messages: Vec<TuiMessage>,
@@ -93,6 +99,7 @@ impl TuiApp {
     pub fn new() -> Self {
         Self {
             model: String::new(),
+            agent_name: String::new(),
             input: String::new(),
             input_cursor: 0,
             messages: Vec::new(),
@@ -114,6 +121,10 @@ impl TuiApp {
             Command {
                 name: "models",
                 description: "List and select models",
+            },
+            Command {
+                name: "agents",
+                description: "List and select agents",
             },
         ]
     }
@@ -220,15 +231,32 @@ impl TuiApp {
         selected.min(filtered_len.saturating_sub(1))
     }
 
+    fn filtered_agent_indices(&self, agents: &[AgentDefinition]) -> Vec<usize> {
+        let query = self.input.trim().to_lowercase();
+        agents
+            .iter()
+            .enumerate()
+            .filter_map(|(index, agent)| {
+                let is_match = query.is_empty() || agent.name.to_lowercase().contains(&query);
+                is_match.then_some(index)
+            })
+            .collect()
+    }
+
+    fn clamp_agent_selection(&self, selected: usize, agents: &[AgentDefinition]) -> usize {
+        let filtered_len = self.filtered_agent_indices(agents).len();
+        selected.min(filtered_len.saturating_sub(1))
+    }
+
     async fn execute_command(
         &mut self,
-        agent: &mut LLMAgent,
+        harness: &mut Harness,
         config: &Config,
         command: &str,
     ) -> InputMode {
         match command {
             "new" => {
-                match agent.new_session() {
+                match harness.new_session() {
                     Ok(_) => {
                         self.messages.clear();
                         self.status = "New session created".to_string();
@@ -265,6 +293,15 @@ impl TuiApp {
                     }
                 }
             }
+            "agents" => {
+                let agents = config.agents().all().to_vec();
+                self.clear_input();
+                self.status = format!("Loaded {} agents", agents.len());
+                InputMode::Agents {
+                    selected: 0,
+                    agents,
+                }
+            }
             _ => {
                 self.messages.push(TuiMessage {
                     role: MessageRole::Agent,
@@ -278,11 +315,12 @@ impl TuiApp {
 
     pub async fn run(
         &mut self,
-        agent: &mut LLMAgent,
+        harness: &mut Harness,
         config: &Config,
     ) -> Result<(), Box<dyn Error>> {
-        self.model = agent.model().clone();
-        self.load_history(agent.history());
+        self.model = harness.model().clone();
+        self.agent_name = harness.agent_name().to_string();
+        self.load_history(harness.history());
 
         let mut guard = TerminalGuard::enter()?;
 
@@ -303,19 +341,22 @@ impl TuiApp {
             let mode = mem::replace(&mut self.mode, InputMode::PromptInput);
             self.mode = match mode {
                 InputMode::PromptInput => {
-                    self.handle_prompt_input(key, &mut guard, agent, config)
+                    self.handle_prompt_input(key, &mut guard, harness, config)
                         .await?
                 }
                 InputMode::Command { selected, filtered } => {
-                    self.handle_command_mode(key, selected, filtered, agent, config)
+                    self.handle_command_mode(key, selected, filtered, harness, config)
                         .await
                 }
                 InputMode::Session { selected, sessions } => {
-                    self.handle_session_mode(key, selected, sessions, agent)
+                    self.handle_session_mode(key, selected, sessions, harness)
                 }
                 InputMode::Models { selected, models } => {
-                    self.handle_models_mode(key, selected, models, agent, config)
+                    self.handle_models_mode(key, selected, models, harness, config)
                         .await
+                }
+                InputMode::Agents { selected, agents } => {
+                    self.handle_agents_mode(key, selected, agents, harness)
                 }
             };
         }
@@ -325,7 +366,7 @@ impl TuiApp {
         &mut self,
         key: event::KeyEvent,
         guard: &mut TerminalGuard,
-        agent: &mut LLMAgent,
+        harness: &mut Harness,
         config: &Config,
     ) -> Result<InputMode, Box<dyn Error>> {
         match key.code {
@@ -364,7 +405,7 @@ impl TuiApp {
                 }
 
                 if let Some(command) = prompt.strip_prefix('/') {
-                    return Ok(self.execute_command(agent, config, command).await);
+                    return Ok(self.execute_command(harness, config, command).await);
                 }
 
                 self.clear_input();
@@ -376,7 +417,7 @@ impl TuiApp {
                 guard.terminal.draw(|frame| self.draw(frame))?;
 
                 let mut events = Vec::new();
-                let result = agent
+                let result = harness
                     .run_turn_with_events(prompt, |event| events.push(event))
                     .await;
 
@@ -384,13 +425,13 @@ impl TuiApp {
                     Ok(()) => {
                         for event in events {
                             match event {
-                                AgentEvent::AgentMessage(text) => {
+                                HarnessEvent::AgentMessage(text) => {
                                     self.messages.push(TuiMessage {
                                         role: MessageRole::Agent,
                                         text,
                                     });
                                 }
-                                AgentEvent::ToolCall { name, arguments } => {
+                                HarnessEvent::ToolCall { name, arguments } => {
                                     self.messages.push(TuiMessage {
                                         role: MessageRole::ToolCall,
                                         text: format!("{} ({})", name, arguments),
@@ -423,7 +464,7 @@ impl TuiApp {
         key: event::KeyEvent,
         mut selected: usize,
         filtered: Vec<Command>,
-        agent: &mut LLMAgent,
+        harness: &mut Harness,
         config: &Config,
     ) -> InputMode {
         match key.code {
@@ -441,7 +482,7 @@ impl TuiApp {
             }
             KeyCode::Enter if !filtered.is_empty() => {
                 let command = filtered[selected].name;
-                self.execute_command(agent, config, command).await
+                self.execute_command(harness, config, command).await
             }
             KeyCode::Backspace => {
                 self.delete_input_char_before_cursor();
@@ -480,7 +521,7 @@ impl TuiApp {
         key: event::KeyEvent,
         mut selected: usize,
         mut sessions: Vec<String>,
-        agent: &mut LLMAgent,
+        harness: &mut Harness,
     ) -> InputMode {
         match key.code {
             KeyCode::Esc => InputMode::PromptInput,
@@ -494,11 +535,11 @@ impl TuiApp {
             }
             KeyCode::Enter if !sessions.is_empty() => {
                 let session_id = &sessions[selected];
-                match agent.load_session_by_id(session_id) {
+                match harness.load_session_by_id(session_id) {
                     Ok(()) => {
                         self.messages.clear();
                         self.status = format!("Loaded session: {}", session_id);
-                        self.load_history(agent.history());
+                        self.load_history(harness.history());
                         InputMode::PromptInput
                     }
                     Err(e) => {
@@ -531,7 +572,7 @@ impl TuiApp {
         key: event::KeyEvent,
         mut selected: usize,
         models: Vec<AvailableModel>,
-        agent: &mut LLMAgent,
+        harness: &mut Harness,
         config: &Config,
     ) -> InputMode {
         match key.code {
@@ -559,7 +600,7 @@ impl TuiApp {
                 match selected_model.create_client(config) {
                     Ok(client) => {
                         let model_id = selected_model.id.clone();
-                        agent.set_model(client, model_id.clone());
+                        harness.set_model(client, model_id.clone());
                         self.model = model_id.clone();
                         self.clear_input();
                         self.status = format!("Selected model: {}", model_id);
@@ -623,6 +664,79 @@ impl TuiApp {
         }
     }
 
+    fn handle_agents_mode(
+        &mut self,
+        key: event::KeyEvent,
+        mut selected: usize,
+        agents: Vec<AgentDefinition>,
+        harness: &mut Harness,
+    ) -> InputMode {
+        match key.code {
+            KeyCode::Esc => {
+                self.clear_input();
+                InputMode::PromptInput
+            }
+            KeyCode::Up if selected > 0 => {
+                selected -= 1;
+                InputMode::Agents { selected, agents }
+            }
+            KeyCode::Down if selected + 1 < self.filtered_agent_indices(&agents).len() => {
+                selected += 1;
+                InputMode::Agents { selected, agents }
+            }
+            KeyCode::Enter => {
+                let filtered = self.filtered_agent_indices(&agents);
+                if filtered.is_empty() {
+                    self.status = "No matching agents".to_string();
+                    return InputMode::Agents { selected, agents };
+                }
+
+                selected = selected.min(filtered.len().saturating_sub(1));
+                let selected_agent = agents[filtered[selected]].clone();
+                harness.set_agent(selected_agent.clone());
+                self.agent_name = selected_agent.name.clone();
+                self.clear_input();
+                self.status = format!("Selected agent: {}", selected_agent.name);
+                InputMode::PromptInput
+            }
+            KeyCode::Backspace => {
+                self.delete_input_char_before_cursor();
+                selected = self.clamp_agent_selection(selected, &agents);
+                InputMode::Agents { selected, agents }
+            }
+            KeyCode::Delete => {
+                self.delete_input_char_at_cursor();
+                selected = self.clamp_agent_selection(selected, &agents);
+                InputMode::Agents { selected, agents }
+            }
+            KeyCode::Left => {
+                self.move_input_cursor_left();
+                InputMode::Agents { selected, agents }
+            }
+            KeyCode::Right => {
+                self.move_input_cursor_right();
+                InputMode::Agents { selected, agents }
+            }
+            KeyCode::Home => {
+                self.move_input_cursor_home();
+                InputMode::Agents { selected, agents }
+            }
+            KeyCode::End => {
+                self.move_input_cursor_end();
+                InputMode::Agents { selected, agents }
+            }
+            KeyCode::Char(ch)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.insert_input_char(ch);
+                selected = self.clamp_agent_selection(selected, &agents);
+                InputMode::Agents { selected, agents }
+            }
+            _ => InputMode::Agents { selected, agents },
+        }
+    }
+
     fn load_history(&mut self, history: &ChatRequest) {
         if let Some(system) = &history.system
             && !system.trim().is_empty()
@@ -661,6 +775,9 @@ impl TuiApp {
             }
             InputMode::Models { selected, models } => {
                 self.draw_models(frame, chunks[1], *selected, models);
+            }
+            InputMode::Agents { selected, agents } => {
+                self.draw_agents(frame, chunks[1], *selected, agents);
             }
             InputMode::PromptInput => {}
         }
@@ -816,6 +933,72 @@ impl TuiApp {
         frame.render_widget(help_para, chunks[1]);
     }
 
+    fn draw_agents(
+        &self,
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        selected: usize,
+        agents: &[AgentDefinition],
+    ) {
+        let filtered = self.filtered_agent_indices(agents);
+        let result_count = filtered.len();
+        let selected = selected.min(result_count.saturating_sub(1));
+        let visible_agents = (result_count as u16).clamp(1, 10);
+        let help_height = 3u16;
+        let width = 60.min(input_area.width - 4);
+        let height = visible_agents + 2 + help_height;
+        let x = input_area.x + 2;
+        let y = input_area.y - height;
+        let rect = Rect::new(x, y, width, height);
+
+        let start = if selected >= visible_agents as usize {
+            selected + 1 - visible_agents as usize
+        } else {
+            0
+        };
+        let end = (start + visible_agents as usize).min(result_count);
+
+        let items: Vec<ListItem> = if result_count == 0 {
+            vec![ListItem::new("No matching agents")]
+        } else {
+            filtered[start..end]
+                .iter()
+                .enumerate()
+                .map(|(offset, agent_index)| {
+                    let i = start + offset;
+                    let agent = &agents[*agent_index];
+                    if i == selected {
+                        ListItem::new(agent.name.as_str())
+                            .style(Style::default().bg(Color::DarkGray))
+                    } else {
+                        ListItem::new(agent.name.as_str())
+                    }
+                })
+                .collect()
+        };
+
+        let agents_list =
+            List::new(items).block(Block::default().borders(Borders::ALL).title("Agents"));
+
+        let help_text = "Type: filter | Enter: select | Esc: close";
+        let help_para = Paragraph::new(help_text)
+            .block(Block::default().borders(Borders::ALL))
+            .style(Style::default().fg(Color::Yellow));
+
+        frame.render_widget(Clear, rect);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(visible_agents + 2),
+                Constraint::Length(help_height),
+            ])
+            .split(rect);
+
+        frame.render_widget(agents_list, chunks[0]);
+        frame.render_widget(help_para, chunks[1]);
+    }
+
     fn draw_history(&self, frame: &mut Frame<'_>, area: Rect) {
         let mut items = Vec::new();
         for (index, message) in self.messages.iter().rev().enumerate() {
@@ -853,7 +1036,7 @@ impl TuiApp {
             .direction(ListDirection::BottomToTop)
             .block(
                 Block::default()
-                    .title(format!(" Gaius - {} ", self.model))
+                    .title(format!(" Gaius - {} - {} ", self.model, self.agent_name))
                     .borders(Borders::ALL)
                     .padding(Padding::horizontal(1)),
             )

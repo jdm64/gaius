@@ -18,11 +18,12 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 pub fn config_path() -> Result<PathBuf, Box<dyn Error>> {
+    Ok(config_dir()?.join("config.toml"))
+}
+
+pub fn config_dir() -> Result<PathBuf, Box<dyn Error>> {
     let home = std::env::var("HOME")?;
-    Ok(PathBuf::from(home)
-        .join(".config")
-        .join("gaius")
-        .join("config.toml"))
+    Ok(PathBuf::from(home).join(".config").join("gaius"))
 }
 
 pub fn prompt_input(label: &str) -> Result<String, Box<dyn Error>> {
