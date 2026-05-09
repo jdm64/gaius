@@ -21,7 +21,10 @@ use crate::{
     session::Session,
 };
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+        MouseEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -31,8 +34,8 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListDirection, ListItem, Padding, Paragraph, Wrap},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
 };
 use std::{
     error::Error,
@@ -68,6 +71,8 @@ pub struct TuiApp {
     agent_name: String,
     input: String,
     input_cursor: usize,
+    history_scroll: u16,
+    history_page_size: u16,
     messages: Vec<TuiMessage>,
     status: String,
     mode: InputMode,
@@ -102,6 +107,8 @@ impl TuiApp {
             agent_name: String::new(),
             input: String::new(),
             input_cursor: 0,
+            history_scroll: 0,
+            history_page_size: 1,
             messages: Vec::new(),
             status: "Esc or Ctrl-C to quit".to_string(),
             mode: InputMode::PromptInput,
@@ -198,6 +205,17 @@ impl TuiApp {
         self.input.remove(index);
     }
 
+    fn delete_input_to_start(&mut self) {
+        let index = self.input_cursor_byte_index();
+        self.input.drain(..index);
+        self.input_cursor = 0;
+    }
+
+    fn delete_input_to_end(&mut self) {
+        let index = self.input_cursor_byte_index();
+        self.input.truncate(index);
+    }
+
     fn move_input_cursor_left(&mut self) {
         self.input_cursor = self.input_cursor.saturating_sub(1);
     }
@@ -212,6 +230,22 @@ impl TuiApp {
 
     fn move_input_cursor_end(&mut self) {
         self.input_cursor = self.input_len();
+    }
+
+    fn reset_history_scroll(&mut self) {
+        self.history_scroll = 0;
+    }
+
+    fn scroll_history_up(&mut self, amount: u16) {
+        self.history_scroll = self.history_scroll.saturating_add(amount);
+    }
+
+    fn scroll_history_down(&mut self, amount: u16) {
+        self.history_scroll = self.history_scroll.saturating_sub(amount);
+    }
+
+    fn history_page_scroll_amount(&self) -> u16 {
+        self.history_page_size.saturating_sub(1).max(1)
     }
 
     fn filtered_model_indices(&self, models: &[AvailableModel]) -> Vec<usize> {
@@ -259,6 +293,7 @@ impl TuiApp {
                 match harness.new_session() {
                     Ok(_) => {
                         self.messages.clear();
+                        self.reset_history_scroll();
                         self.status = "New session created".to_string();
                     }
                     Err(e) => {
@@ -307,6 +342,7 @@ impl TuiApp {
                     role: MessageRole::Agent,
                     text: format!("Unknown command: /{}", command),
                 });
+                self.reset_history_scroll();
                 self.clear_input();
                 InputMode::PromptInput
             }
@@ -331,11 +367,29 @@ impl TuiApp {
                 continue;
             }
 
-            let Event::Key(key) = event::read()? else {
-                continue;
+            let key = match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => key,
+                Event::Mouse(mouse) => {
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => self.scroll_history_up(3),
+                        MouseEventKind::ScrollDown => self.scroll_history_down(3),
+                        _ => {}
+                    }
+                    continue;
+                }
+                _ => continue,
             };
-            if key.kind != KeyEventKind::Press {
-                continue;
+
+            match key.code {
+                KeyCode::PageUp => {
+                    self.scroll_history_up(self.history_page_scroll_amount());
+                    continue;
+                }
+                KeyCode::PageDown => {
+                    self.scroll_history_down(self.history_page_scroll_amount());
+                    continue;
+                }
+                _ => {}
             }
 
             let mode = mem::replace(&mut self.mode, InputMode::PromptInput);
@@ -382,6 +436,14 @@ impl TuiApp {
                 self.delete_input_char_at_cursor();
                 return Ok(self.mode_for_input());
             }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_input_to_start();
+                return Ok(self.mode_for_input());
+            }
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_input_to_end();
+                return Ok(self.mode_for_input());
+            }
             KeyCode::Left => {
                 self.move_input_cursor_left();
                 return Ok(InputMode::PromptInput);
@@ -409,6 +471,7 @@ impl TuiApp {
                 }
 
                 self.clear_input();
+                self.reset_history_scroll();
                 self.messages.push(TuiMessage {
                     role: MessageRole::User,
                     text: prompt.clone(),
@@ -430,12 +493,14 @@ impl TuiApp {
                                         role: MessageRole::Agent,
                                         text,
                                     });
+                                    self.reset_history_scroll();
                                 }
                                 HarnessEvent::ToolCall { name, arguments } => {
                                     self.messages.push(TuiMessage {
                                         role: MessageRole::ToolCall,
                                         text: format!("{} ({})", name, arguments),
                                     });
+                                    self.reset_history_scroll();
                                 }
                             }
                         }
@@ -446,6 +511,7 @@ impl TuiApp {
                             role: MessageRole::Agent,
                             text: format!("Error: {}", err),
                         });
+                        self.reset_history_scroll();
                         self.status = "Agent request failed".to_string();
                     }
                 };
@@ -490,6 +556,14 @@ impl TuiApp {
             }
             KeyCode::Delete => {
                 self.delete_input_char_at_cursor();
+                self.mode_for_input()
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_input_to_start();
+                self.mode_for_input()
+            }
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_input_to_end();
                 self.mode_for_input()
             }
             KeyCode::Left => {
@@ -538,6 +612,7 @@ impl TuiApp {
                 match harness.load_session_by_id(session_id) {
                     Ok(()) => {
                         self.messages.clear();
+                        self.reset_history_scroll();
                         self.status = format!("Loaded session: {}", session_id);
                         self.load_history(harness.history());
                         InputMode::PromptInput
@@ -636,6 +711,16 @@ impl TuiApp {
                 selected = self.clamp_model_selection(selected, &models);
                 InputMode::Models { selected, models }
             }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_input_to_start();
+                selected = self.clamp_model_selection(selected, &models);
+                InputMode::Models { selected, models }
+            }
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_input_to_end();
+                selected = self.clamp_model_selection(selected, &models);
+                InputMode::Models { selected, models }
+            }
             KeyCode::Left => {
                 self.move_input_cursor_left();
                 InputMode::Models { selected, models }
@@ -709,6 +794,16 @@ impl TuiApp {
                 selected = self.clamp_agent_selection(selected, &agents);
                 InputMode::Agents { selected, agents }
             }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_input_to_start();
+                selected = self.clamp_agent_selection(selected, &agents);
+                InputMode::Agents { selected, agents }
+            }
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_input_to_end();
+                selected = self.clamp_agent_selection(selected, &agents);
+                InputMode::Agents { selected, agents }
+            }
             KeyCode::Left => {
                 self.move_input_cursor_left();
                 InputMode::Agents { selected, agents }
@@ -755,7 +850,7 @@ impl TuiApp {
         }
     }
 
-    fn draw(&self, frame: &mut Frame<'_>) {
+    fn draw(&mut self, frame: &mut Frame<'_>) {
         let area = frame.area();
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -999,23 +1094,43 @@ impl TuiApp {
         frame.render_widget(help_para, chunks[1]);
     }
 
-    fn draw_history(&self, frame: &mut Frame<'_>, area: Rect) {
-        let mut items = Vec::new();
-        for (index, message) in self.messages.iter().rev().enumerate() {
+    fn draw_history(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let lines = self.history_lines();
+        let text_width = area.width.saturating_sub(4).max(1);
+        let text_height = area.height.saturating_sub(2).max(1);
+        self.history_page_size = text_height;
+
+        let wrapped_height = wrapped_line_count(&lines, text_width);
+        let max_scroll = wrapped_height.saturating_sub(text_height);
+        self.history_scroll = self.history_scroll.min(max_scroll);
+        let scroll_offset = max_scroll.saturating_sub(self.history_scroll);
+
+        let history = Paragraph::new(Text::from(lines))
+            .block(
+                Block::default()
+                    .title(format!(" Gaius - {} - {} ", self.model, self.agent_name))
+                    .borders(Borders::ALL)
+                    .padding(Padding::horizontal(1)),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((scroll_offset, 0));
+        frame.render_widget(history, area);
+    }
+
+    fn history_lines(&self) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        for (index, message) in self.messages.iter().enumerate() {
             if index > 0 {
-                let previous = &self.messages[self.messages.len() - index];
+                let previous = &self.messages[index - 1];
                 if previous.role != message.role {
-                    items.push(ListItem::new(""));
+                    lines.push(Line::from(""));
                 }
             }
 
             let (label, style) = message.role.parts();
-            let lines = message
-                .text
-                .lines()
-                .enumerate()
-                .map(|(index, line)| {
-                    if index == 0 {
+            for (index, line) in message.text.lines().enumerate() {
+                if index == 0 {
+                    lines.push(
                         Line::from(vec![
                             Span::styled(
                                 format!("{} ", label),
@@ -1023,25 +1138,15 @@ impl TuiApp {
                             ),
                             Span::raw(line.to_string()),
                         ])
-                    } else {
-                        Line::from(format!("  {}", line))
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            items.push(ListItem::new(lines).style(style));
+                        .style(style),
+                    );
+                } else {
+                    lines.push(Line::from(format!("  {}", line)).style(style));
+                }
+            }
         }
 
-        let history = List::new(items)
-            .direction(ListDirection::BottomToTop)
-            .block(
-                Block::default()
-                    .title(format!(" Gaius - {} - {} ", self.model, self.agent_name))
-                    .borders(Borders::ALL)
-                    .padding(Padding::horizontal(1)),
-            )
-            .highlight_style(Style::default());
-        frame.render_widget(history, area);
+        lines
     }
 
     fn draw_input(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -1126,7 +1231,7 @@ impl MessageRole {
 impl TerminalGuard {
     fn enter() -> io::Result<Self> {
         enable_raw_mode()?;
-        execute!(io::stdout(), EnterAlternateScreen)?;
+        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
         let terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
         Ok(Self { terminal })
     }
@@ -1135,9 +1240,22 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         let _ = self.terminal.show_cursor();
     }
+}
+
+fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> u16 {
+    let width = width.max(1) as usize;
+    lines.iter().fold(0u16, |total, line| {
+        let line_width = line.width();
+        let wrapped = (line_width / width) + usize::from(line_width % width != 0);
+        total.saturating_add(wrapped.max(1) as u16)
+    })
 }
 
 #[cfg(test)]
@@ -1196,6 +1314,77 @@ mod tests {
 
         assert_eq!(app.input, "abc");
         assert_eq!(app.input_cursor, 1);
+    }
+
+    #[test]
+    fn deletes_input_to_start_and_end() {
+        let mut app = TuiApp::new();
+        for ch in "abcdef".chars() {
+            app.insert_input_char(ch);
+        }
+
+        app.move_input_cursor_left();
+        app.move_input_cursor_left();
+        app.delete_input_to_start();
+
+        assert_eq!(app.input, "ef");
+        assert_eq!(app.input_cursor, 0);
+
+        app.move_input_cursor_end();
+        app.move_input_cursor_left();
+        app.delete_input_to_end();
+
+        assert_eq!(app.input, "e");
+        assert_eq!(app.input_cursor, 1);
+    }
+
+    #[test]
+    fn deletes_multibyte_input_to_start_and_end() {
+        let mut app = TuiApp::new();
+        for ch in "aé文z".chars() {
+            app.insert_input_char(ch);
+        }
+
+        app.move_input_cursor_left();
+        app.move_input_cursor_left();
+        app.delete_input_to_start();
+
+        assert_eq!(app.input, "文z");
+        assert_eq!(app.input_cursor, 0);
+
+        app.move_input_cursor_right();
+        app.delete_input_to_end();
+
+        assert_eq!(app.input, "文");
+        assert_eq!(app.input_cursor, 1);
+    }
+
+    #[test]
+    fn scrolls_history_with_saturating_offsets() {
+        let mut app = TuiApp::new();
+
+        assert_eq!(app.history_scroll, 0);
+
+        app.scroll_history_up(5);
+        assert_eq!(app.history_scroll, 5);
+
+        app.scroll_history_down(2);
+        assert_eq!(app.history_scroll, 3);
+
+        app.scroll_history_down(10);
+        assert_eq!(app.history_scroll, 0);
+
+        app.scroll_history_up(4);
+        app.reset_history_scroll();
+        assert_eq!(app.history_scroll, 0);
+    }
+
+    #[test]
+    fn counts_wrapped_history_lines() {
+        let lines = vec![Line::from("12345"), Line::from("123456")];
+
+        assert_eq!(wrapped_line_count(&lines, 5), 3);
+        assert_eq!(wrapped_line_count(&lines, 0), 11);
     }
 
     #[test]
