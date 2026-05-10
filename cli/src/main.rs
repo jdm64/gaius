@@ -119,7 +119,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         TuiApp::new().run(&mut harness, &config).await?;
     }
 
-    if let Some(session_id) = harness.session_id() {
+    if !harness.history().messages.is_empty()
+        && let Some(session_id) = harness.session_id()
+    {
         println!("To continue pass --session {}", session_id);
     }
 
