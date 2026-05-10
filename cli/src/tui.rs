@@ -563,11 +563,11 @@ impl TuiApp {
         self.handle_input_cursor(key);
         match key.code {
             KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Up if selected > 0 => {
-                selected -= 1;
+            KeyCode::Up => {
+                selected = wrap(selected as i32 - 1, filtered.len());
             }
-            KeyCode::Down if selected + 1 < filtered.len() => {
-                selected += 1;
+            KeyCode::Down => {
+                selected = wrap(selected as i32 + 1, filtered.len());
             }
             KeyCode::Enter if !filtered.is_empty() => {
                 let command = filtered[selected].name;
@@ -591,11 +591,11 @@ impl TuiApp {
     ) -> InputMode {
         match key.code {
             KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Up if selected > 0 => {
-                selected -= 1;
+            KeyCode::Up => {
+                selected = wrap(selected as i32 - 1, sessions.len());
             }
-            KeyCode::Down if selected + 1 < sessions.len() => {
-                selected += 1;
+            KeyCode::Down => {
+                selected = wrap(selected as i32 + 1, sessions.len());
             }
             KeyCode::Enter if !sessions.is_empty() => {
                 let session_id = &sessions[selected];
@@ -643,11 +643,13 @@ impl TuiApp {
         self.handle_input_cursor(key);
         match key.code {
             KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Up if selected > 0 => {
-                selected -= 1;
+            KeyCode::Up => {
+                let filtered_len = self.filtered_model_indices(&models).len();
+                selected = wrap(selected as i32 - 1, filtered_len);
             }
-            KeyCode::Down if selected + 1 < self.filtered_model_indices(&models).len() => {
-                selected += 1;
+            KeyCode::Down => {
+                let filtered_len = self.filtered_model_indices(&models).len();
+                selected = wrap(selected as i32 + 1, filtered_len);
             }
             KeyCode::Enter => {
                 let filtered = self.filtered_model_indices(&models);
@@ -720,11 +722,13 @@ impl TuiApp {
             KeyCode::Esc => {
                 return InputMode::PromptInput;
             }
-            KeyCode::Up if selected > 0 => {
-                selected -= 1;
+            KeyCode::Up => {
+                let filtered_len = self.filtered_agent_indices(&agents).len();
+                selected = wrap(selected as i32 - 1, filtered_len);
             }
-            KeyCode::Down if selected + 1 < self.filtered_agent_indices(&agents).len() => {
-                selected += 1;
+            KeyCode::Down => {
+                let filtered_len = self.filtered_agent_indices(&agents).len();
+                selected = wrap(selected as i32 + 1, filtered_len);
             }
             KeyCode::Enter => {
                 let filtered = self.filtered_agent_indices(&agents);
@@ -1137,6 +1141,11 @@ fn tui_messages_for_chat_message(
     messages
 }
 
+fn wrap(i: i32, n: usize) -> usize {
+    let m = n as i32;
+    ((i % m + m) % m) as usize
+}
+
 fn message_role_for_chat_role(role: &ChatRole) -> MessageRole {
     match role {
         ChatRole::User => MessageRole::User,
@@ -1360,5 +1369,34 @@ mod tests {
         assert_eq!(app.messages[3].text, "weather ({\"city\":\"Atlanta\"})");
         assert_eq!(app.messages[4].role, MessageRole::ToolCall);
         assert_eq!(app.messages[4].text, "123 => sunny");
+    }
+
+    #[test]
+    fn wrap_behaves_correctly() {
+        // Basic wrapping within bounds
+        assert_eq!(wrap(0, 5), 0);
+        assert_eq!(wrap(2, 5), 2);
+        assert_eq!(wrap(4, 5), 4);
+
+        // Wrapping around at boundaries
+        assert_eq!(wrap(5, 5), 0);
+        assert_eq!(wrap(6, 5), 1);
+        assert_eq!(wrap(9, 5), 4);
+
+        // Negative indices wrap to end
+        assert_eq!(wrap(-1, 5), 4);
+        assert_eq!(wrap(-2, 5), 3);
+        assert_eq!(wrap(-5, 5), 0);
+        assert_eq!(wrap(-6, 5), 4);
+
+        // Large numbers wrap correctly
+        assert_eq!(wrap(12, 5), 2);
+        assert_eq!(wrap(20, 7), 6);
+        assert_eq!(wrap(100, 10), 0);
+
+        // Edge case: single element
+        assert_eq!(wrap(0, 1), 0);
+        assert_eq!(wrap(10, 1), 0);
+        assert_eq!(wrap(-1, 1), 0);
     }
 }
