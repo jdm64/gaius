@@ -13,13 +13,17 @@
  * limitations under the License.
  */
 
-use std::error::Error;
+use std::{
+    error::Error,
+    io::{self, Write},
+};
 
 use crate::{agents::AgentDefinition, session::Session, tools::ToolEngine, util::prompt_input};
+use futures::StreamExt;
 use genai::{
     Client, ModelIden, ServiceTarget,
     adapter::AdapterKind,
-    chat::{ChatMessage, ChatRequest, ToolResponse},
+    chat::{ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ToolResponse},
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
 };
 
@@ -57,7 +61,7 @@ pub struct Harness {
 }
 
 pub enum HarnessEvent {
-    AgentMessage(String),
+    AgentMessageChunk(String),
     ToolCall { name: String, arguments: String },
 }
 
@@ -154,13 +158,31 @@ impl Harness {
     }
 
     pub async fn run_turn(&mut self, prompt: String) -> Result<(), Box<dyn std::error::Error>> {
+        let mut agent_started = false;
         self.run_turn_with_events(prompt, |event| match event {
-            HarnessEvent::AgentMessage(text) => println!("agent> {}", text),
+            HarnessEvent::AgentMessageChunk(text) => {
+                if !agent_started {
+                    print!("agent> ");
+                    agent_started = true;
+                }
+                print!("{}", text);
+                let _ = io::stdout().flush();
+            }
             HarnessEvent::ToolCall { name, arguments } => {
+                if agent_started {
+                    println!();
+                    agent_started = false;
+                }
                 println!("tool-call> {} ({})", name, arguments);
             }
         })
-        .await
+        .await?;
+
+        if agent_started {
+            println!();
+        }
+
+        Ok(())
     }
 
     pub async fn run_turn_with_events<F>(
@@ -174,21 +196,46 @@ impl Harness {
         self.history.messages.push(ChatMessage::user(prompt));
 
         loop {
-            let response = self
+            let chat_options = ChatOptions::default()
+                .with_capture_content(true)
+                .with_capture_tool_calls(true);
+            let mut response = self
                 .client
-                .exec_chat(&self.model, self.history.clone(), None)
+                .exec_chat_stream(&self.model, self.history.clone(), Some(&chat_options))
                 .await?;
 
-            self.history
-                .messages
-                .push(ChatMessage::assistant(response.content.clone()));
-
-            let text = response.first_text().unwrap_or("").to_string();
-            if !text.is_empty() {
-                on_event(HarnessEvent::AgentMessage(text));
+            let mut stream_end = None;
+            let mut emitted_text = false;
+            while let Some(event) = response.stream.next().await {
+                match event? {
+                    ChatStreamEvent::Chunk(chunk) if !chunk.content.is_empty() => {
+                        emitted_text = true;
+                        on_event(HarnessEvent::AgentMessageChunk(chunk.content));
+                    }
+                    ChatStreamEvent::End(end) => {
+                        stream_end = Some(end);
+                    }
+                    ChatStreamEvent::Start
+                    | ChatStreamEvent::Chunk(_)
+                    | ChatStreamEvent::ReasoningChunk(_)
+                    | ChatStreamEvent::ThoughtSignatureChunk(_)
+                    | ChatStreamEvent::ToolCallChunk(_) => {}
+                }
             }
 
-            let tool_calls = response.tool_calls();
+            let stream_end = stream_end.ok_or("Chat stream ended without an end event")?;
+            let content = stream_end.captured_content.unwrap_or_default();
+            if !emitted_text {
+                let text = content.texts().join("");
+                if !text.is_empty() {
+                    on_event(HarnessEvent::AgentMessageChunk(text));
+                }
+            }
+            let tool_calls = content.tool_calls();
+            self.history
+                .messages
+                .push(ChatMessage::assistant(content.clone()));
+
             if tool_calls.is_empty() {
                 self.save_history()?;
                 return Ok(());

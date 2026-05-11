@@ -249,6 +249,24 @@ impl TuiApp {
         self.history_page_size.saturating_sub(1).max(1)
     }
 
+    fn append_agent_message_chunk(&mut self, chunk: String) {
+        if chunk.is_empty() {
+            return;
+        }
+
+        if let Some(message) = self.messages.last_mut()
+            && message.role == MessageRole::Agent
+        {
+            message.text.push_str(&chunk);
+        } else {
+            self.messages.push(TuiMessage {
+                role: MessageRole::Agent,
+                text: chunk,
+            });
+        }
+        self.reset_history_scroll();
+    }
+
     fn filtered_model_indices(&self, models: &[AvailableModel]) -> Vec<usize> {
         let query = self.input.trim().to_lowercase();
         models
@@ -506,31 +524,26 @@ impl TuiApp {
                 self.status = "Waiting for agent...".to_string();
                 guard.terminal.draw(|frame| self.draw(frame))?;
 
-                let mut events = Vec::new();
                 let result = harness
-                    .run_turn_with_events(prompt, |event| events.push(event))
+                    .run_turn_with_events(prompt, |event| {
+                        match event {
+                            HarnessEvent::AgentMessageChunk(text) => {
+                                self.append_agent_message_chunk(text);
+                            }
+                            HarnessEvent::ToolCall { name, arguments } => {
+                                self.messages.push(TuiMessage {
+                                    role: MessageRole::ToolCall,
+                                    text: format!("{} ({})", name, arguments),
+                                });
+                                self.reset_history_scroll();
+                            }
+                        }
+                        let _ = guard.terminal.draw(|frame| self.draw(frame));
+                    })
                     .await;
 
                 match result {
                     Ok(()) => {
-                        for event in events {
-                            match event {
-                                HarnessEvent::AgentMessage(text) => {
-                                    self.messages.push(TuiMessage {
-                                        role: MessageRole::Agent,
-                                        text,
-                                    });
-                                    self.reset_history_scroll();
-                                }
-                                HarnessEvent::ToolCall { name, arguments } => {
-                                    self.messages.push(TuiMessage {
-                                        role: MessageRole::ToolCall,
-                                        text: format!("{} ({})", name, arguments),
-                                    });
-                                    self.reset_history_scroll();
-                                }
-                            }
-                        }
                         self.status = "Ctrl-C to quit".to_string();
                     }
                     Err(err) => {
