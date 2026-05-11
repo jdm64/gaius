@@ -449,11 +449,8 @@ impl TuiApp {
                 }
             };
 
-            match self.mode {
-                InputMode::Exit => {
-                    return Ok(());
-                }
-                _ => {}
+            if let InputMode::Exit = self.mode {
+                return Ok(());
             }
         }
     }
