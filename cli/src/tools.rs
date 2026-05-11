@@ -14,6 +14,8 @@
  */
 
 use genai::chat::*;
+use glob::glob;
+use regex::Regex;
 use serde_json::Value;
 use serde_json::json;
 use std::io::Write;
@@ -94,6 +96,46 @@ impl ToolEngine {
                     },
                     "required": ["command"]
                 })),
+            Tool::new("glob")
+                .with_description("Find files matching a glob pattern")
+                .with_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "Glob pattern to match files (e.g., '**/*.rs', 'src/**/*.toml')"
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "Optional directory to search in (defaults to current directory)"
+                        }
+                    },
+                    "required": ["pattern"]
+                })),
+            Tool::new("grep")
+                .with_description("Search file contents using regex pattern")
+                .with_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "Regex pattern to search for"
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "File or directory path to search"
+                        },
+                        "include": {
+                            "type": "string",
+                            "description": "Optional glob pattern to filter which files to search (e.g., '*.rs')"
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "description": "Whether to search recursively in directories (default: true)"
+                        }
+                    },
+                    "required": ["pattern", "path"]
+                })),
         ]
     }
 
@@ -103,6 +145,8 @@ impl ToolEngine {
             "write_file" => self.write_file_tool(args),
             "edit_file" => self.edit_file_tool(args),
             "bash" => self.bash_tool(args),
+            "glob" => self.glob_tool(args),
+            "grep" => self.grep_tool(args),
             _ => format!("Unknown tool call: {} ({})", name, args),
         }
     }
@@ -229,6 +273,128 @@ impl ToolEngine {
                 )
             }
             Err(e) => format!("Error executing command: {}", e),
+        }
+    }
+
+    fn glob_tool(&self, args: &Value) -> String {
+        let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return "Error: Missing pattern".to_string(),
+        };
+        let path_prefix = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => "",
+        };
+        let full_pattern = if path_prefix.is_empty() {
+            pattern.to_string()
+        } else {
+            format!("{}/{}", path_prefix, pattern)
+        };
+        let cwd = match std::env::current_dir() {
+            Ok(c) => c,
+            Err(e) => return format!("Error getting current directory: {}", e),
+        };
+        let full_pattern = if full_pattern.starts_with('/') {
+            full_pattern
+        } else {
+            cwd.join(&full_pattern).to_string_lossy().into_owned()
+        };
+        match glob(&full_pattern) {
+            Ok(entries) => {
+                let mut results = Vec::new();
+                for entry in entries.filter_map(Result::ok) {
+                    results.push(entry.to_string_lossy().into_owned());
+                }
+                results.join("\n")
+            }
+            Err(e) => format!("Error in glob pattern: {}", e),
+        }
+    }
+
+    fn grep_tool(&self, args: &Value) -> String {
+        let pattern_str = match args.get("pattern").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return "Error: Missing pattern".to_string(),
+        };
+        let path_str = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return "Error: Missing path".to_string(),
+        };
+        let include_pattern = args.get("include").and_then(|v| v.as_str());
+        let recursive = args
+            .get("recursive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let cwd = match std::env::current_dir() {
+            Ok(c) => c,
+            Err(e) => return format!("Error getting current directory: {}", e),
+        };
+        let full_path = if path_str.starts_with('/') {
+            std::path::PathBuf::from(path_str)
+        } else {
+            cwd.join(path_str)
+        };
+        let regex = match Regex::new(pattern_str) {
+            Ok(r) => r,
+            Err(e) => return format!("Error compiling regex: {}", e),
+        };
+        let mut results = Vec::new();
+        if !full_path.exists() {
+            return format!("Error: path does not exist: {}", path_str);
+        }
+        if full_path.is_file() {
+            self.grep_file(&full_path, &regex, &mut results);
+        } else if recursive {
+            self.grep_directory(&full_path, &regex, include_pattern, &mut results);
+        } else {
+            return "Error: path is a directory but recursive is false".to_string();
+        }
+        results.join("\n")
+    }
+
+    fn grep_file(&self, path: &std::path::Path, regex: &Regex, results: &mut Vec<String>) {
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        for (line_num, line) in content.lines().enumerate() {
+            if regex.is_match(line) {
+                results.push(format!(
+                    "{}:{}: {}",
+                    path.to_string_lossy(),
+                    line_num + 1,
+                    line.trim_start()
+                ));
+            }
+        }
+    }
+
+    fn grep_directory(
+        &self,
+        dir: &std::path::Path,
+        regex: &Regex,
+        include_pattern: Option<&str>,
+        results: &mut Vec<String>,
+    ) {
+        let include_regex = match include_pattern {
+            Some(p) => match glob::Pattern::new(p) {
+                Ok(pat) => Some(pat),
+                Err(_) => return,
+            },
+            None => None,
+        };
+        let walker = walkdir::WalkDir::new(dir).into_iter();
+        for entry in walker.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(pat) = &include_regex {
+                    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if !pat.matches(filename) {
+                        continue;
+                    }
+                }
+                self.grep_file(path, regex, results);
+            }
         }
     }
 }
