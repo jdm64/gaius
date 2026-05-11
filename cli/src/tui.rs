@@ -77,6 +77,7 @@ pub struct TuiApp {
     messages: Vec<TuiMessage>,
     status: String,
     mode: InputMode,
+    context_tokens: Option<i32>,
 }
 
 #[derive(Clone)]
@@ -113,6 +114,7 @@ impl TuiApp {
             messages: Vec::new(),
             status: "Ctrl-C to quit".to_string(),
             mode: InputMode::PromptInput,
+            context_tokens: None,
         }
     }
 
@@ -133,6 +135,10 @@ impl TuiApp {
             Command {
                 name: "agents",
                 description: "List and select agents",
+            },
+            Command {
+                name: "streaming",
+                description: "Toggle streaming mode on/off",
             },
         ]
     }
@@ -314,6 +320,7 @@ impl TuiApp {
                         self.messages.clear();
                         self.reset_history_scroll();
                         self.status = "New session created".to_string();
+                        self.context_tokens = None;
                     }
                     Err(e) => {
                         self.status = e.to_string();
@@ -355,6 +362,12 @@ impl TuiApp {
                     selected: 0,
                     agents,
                 }
+            }
+            "streaming" => {
+                harness.set_streaming(!harness.streaming());
+                self.status = format!("Streaming = {}", harness.streaming());
+                self.clear_input();
+                InputMode::PromptInput
             }
             _ => {
                 self.messages.push(TuiMessage {
@@ -545,6 +558,7 @@ impl TuiApp {
                 match result {
                     Ok(()) => {
                         self.status = "Ctrl-C to quit".to_string();
+                        self.context_tokens = harness.context_tokens();
                     }
                     Err(err) => {
                         self.messages.push(TuiMessage {
@@ -617,6 +631,7 @@ impl TuiApp {
                         self.messages.clear();
                         self.reset_history_scroll();
                         self.status = format!("Loaded session: {}", session_id);
+                        self.context_tokens = None;
                         self.load_history(harness.history());
                         return InputMode::PromptInput;
                     }
@@ -1055,10 +1070,19 @@ impl TuiApp {
         self.history_scroll = self.history_scroll.min(max_scroll);
         let scroll_offset = max_scroll.saturating_sub(self.history_scroll);
 
+        let title = if let Some(tokens) = self.context_tokens {
+            format!(
+                " Gaius - {} - {} | Context: {} ",
+                self.model, self.agent_name, tokens
+            )
+        } else {
+            format!(" Gaius - {} - {} ", self.model, self.agent_name)
+        };
+
         let history = Paragraph::new(Text::from(lines))
             .block(
                 Block::default()
-                    .title(format!(" Gaius - {} - {} ", self.model, self.agent_name))
+                    .title(title)
                     .borders(Borders::ALL)
                     .padding(Padding::horizontal(1)),
             )

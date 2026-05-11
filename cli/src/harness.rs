@@ -23,7 +23,7 @@ use futures::StreamExt;
 use genai::{
     Client, ModelIden, ServiceTarget,
     adapter::AdapterKind,
-    chat::{ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ToolResponse},
+    chat::{ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ToolCall, ToolResponse},
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
 };
 
@@ -58,6 +58,8 @@ pub struct Harness {
     agent: AgentDefinition,
     oneshot_prompt: Option<String>,
     session: Session,
+    context_tokens: Option<i32>,
+    streaming: bool,
 }
 
 pub enum HarnessEvent {
@@ -92,6 +94,8 @@ impl Harness {
             agent,
             oneshot_prompt,
             session,
+            context_tokens: None,
+            streaming: true,
         })
     }
 
@@ -109,6 +113,18 @@ impl Harness {
 
     pub fn agent_name(&self) -> &str {
         &self.agent.name
+    }
+
+    pub fn context_tokens(&self) -> Option<i32> {
+        self.context_tokens
+    }
+
+    pub fn streaming(&self) -> bool {
+        self.streaming
+    }
+
+    pub fn set_streaming(&mut self, streaming: bool) {
+        self.streaming = streaming;
     }
 
     pub fn set_model(&mut self, client: Client, model: String) {
@@ -134,6 +150,7 @@ impl Harness {
         self.history = self.session.load()?;
         self.history.tools = Some(self.tool_engine.build_tools());
         apply_agent_prompt(&mut self.history, &self.agent);
+        self.context_tokens = None;
         Ok(())
     }
 
@@ -196,62 +213,122 @@ impl Harness {
         self.history.messages.push(ChatMessage::user(prompt));
 
         loop {
-            let chat_options = ChatOptions::default()
-                .with_capture_content(true)
-                .with_capture_tool_calls(true);
-            let mut response = self
-                .client
-                .exec_chat_stream(&self.model, self.history.clone(), Some(&chat_options))
-                .await?;
+            self.save_history()?;
 
-            let mut stream_end = None;
-            let mut emitted_text = false;
-            while let Some(event) = response.stream.next().await {
-                match event? {
-                    ChatStreamEvent::Chunk(chunk) if !chunk.content.is_empty() => {
-                        emitted_text = true;
-                        on_event(HarnessEvent::AgentMessageChunk(chunk.content));
-                    }
-                    ChatStreamEvent::End(end) => {
-                        stream_end = Some(end);
-                    }
-                    ChatStreamEvent::Start
-                    | ChatStreamEvent::Chunk(_)
-                    | ChatStreamEvent::ReasoningChunk(_)
-                    | ChatStreamEvent::ThoughtSignatureChunk(_)
-                    | ChatStreamEvent::ToolCallChunk(_) => {}
-                }
-            }
-
-            let stream_end = stream_end.ok_or("Chat stream ended without an end event")?;
-            let content = stream_end.captured_content.unwrap_or_default();
-            if !emitted_text {
-                let text = content.texts().join("");
-                if !text.is_empty() {
-                    on_event(HarnessEvent::AgentMessageChunk(text));
-                }
-            }
-            let tool_calls = content.tool_calls();
-            self.history
-                .messages
-                .push(ChatMessage::assistant(content.clone()));
-
+            let tool_calls = if self.streaming {
+                self.send_request_streaming(&mut on_event).await?
+            } else {
+                self.send_request_waiting(&mut on_event).await?
+            };
+            self.call_tools(&tool_calls, &mut on_event);
             if tool_calls.is_empty() {
-                self.save_history()?;
                 return Ok(());
             }
+        }
+    }
 
-            for tc in tool_calls {
-                let result = self.tool_engine.execute(&tc.fn_name, &tc.fn_arguments);
-                self.history
-                    .messages
-                    .push(ToolResponse::new(&tc.call_id, result.clone()).into());
+    async fn send_request_streaming<F>(
+        &mut self,
+        on_event: &mut F,
+    ) -> Result<Vec<ToolCall>, Box<dyn std::error::Error>>
+    where
+        F: FnMut(HarnessEvent),
+    {
+        let chat_options = ChatOptions::default()
+            .with_capture_content(true)
+            .with_capture_tool_calls(true)
+            .with_capture_usage(true)
+            .with_extra_headers(vec![("X-Stream-Options", "include_usage=true")]);
+        let mut response = self
+            .client
+            .exec_chat_stream(&self.model, self.history.clone(), Some(&chat_options))
+            .await?;
 
-                on_event(HarnessEvent::ToolCall {
-                    name: tc.fn_name.to_string(),
-                    arguments: tc.fn_arguments.to_string(),
-                });
+        let mut stream_end = None;
+        let mut emitted_text = false;
+        while let Some(event) = response.stream.next().await {
+            match event? {
+                ChatStreamEvent::Chunk(chunk) if !chunk.content.is_empty() => {
+                    emitted_text = true;
+                    on_event(HarnessEvent::AgentMessageChunk(chunk.content));
+                }
+                ChatStreamEvent::End(end) => {
+                    stream_end = Some(end);
+                }
+                ChatStreamEvent::Start
+                | ChatStreamEvent::Chunk(_)
+                | ChatStreamEvent::ReasoningChunk(_)
+                | ChatStreamEvent::ThoughtSignatureChunk(_)
+                | ChatStreamEvent::ToolCallChunk(_) => {}
             }
+        }
+
+        let stream_end = stream_end.ok_or("Chat stream ended without an end event")?;
+        let content = stream_end.captured_content.unwrap_or_default();
+        if !emitted_text {
+            let text = content.texts().join("");
+            if !text.is_empty() {
+                on_event(HarnessEvent::AgentMessageChunk(text));
+            }
+        }
+
+        self.history
+            .messages
+            .push(ChatMessage::assistant(content.clone()));
+
+        self.context_tokens = stream_end.captured_usage.as_ref().map(|usage| {
+            usage.total_tokens.unwrap_or_else(|| {
+                usage.prompt_tokens.unwrap_or(0) + usage.completion_tokens.unwrap_or(0)
+            })
+        });
+
+        Ok(content.into_tool_calls())
+    }
+
+    async fn send_request_waiting<F>(
+        &mut self,
+        on_event: &mut F,
+    ) -> Result<Vec<ToolCall>, Box<dyn std::error::Error>>
+    where
+        F: FnMut(HarnessEvent),
+    {
+        let response = self
+            .client
+            .exec_chat(&self.model, self.history.clone(), None)
+            .await?;
+
+        let full_text = response.content.texts().join("");
+        if !full_text.is_empty() {
+            on_event(HarnessEvent::AgentMessageChunk(full_text.clone()));
+        }
+
+        self.history
+            .messages
+            .push(ChatMessage::assistant(response.content.clone()));
+
+        self.context_tokens = response.usage.total_tokens.or_else(|| {
+            let prompt = response.usage.prompt_tokens?;
+            let completion = response.usage.completion_tokens?;
+            Some(prompt + completion)
+        });
+
+        Ok(response.content.into_tool_calls())
+    }
+
+    fn call_tools<F>(&mut self, tool_calls: &[ToolCall], on_event: &mut F)
+    where
+        F: FnMut(HarnessEvent),
+    {
+        for tc in tool_calls {
+            let result = self.tool_engine.execute(&tc.fn_name, &tc.fn_arguments);
+            self.history
+                .messages
+                .push(ToolResponse::new(&tc.call_id, result).into());
+
+            on_event(HarnessEvent::ToolCall {
+                name: tc.fn_name.to_string(),
+                arguments: tc.fn_arguments.to_string(),
+            });
         }
     }
 
