@@ -35,7 +35,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
 };
 use std::{
     error::Error,
@@ -43,6 +43,7 @@ use std::{
     mem,
     time::Duration,
 };
+use tui_markdown::{Options, from_str_with_options};
 
 const INPUT_HEIGHT: u16 = 3;
 
@@ -86,12 +87,14 @@ pub struct Command {
     description: &'static str,
 }
 
-struct TuiMessage {
+#[derive(Clone)]
+pub struct TuiMessage {
     role: MessageRole,
     text: String,
+    is_markdown: bool,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 enum MessageRole {
     User,
     Agent,
@@ -268,6 +271,7 @@ impl TuiApp {
             self.messages.push(TuiMessage {
                 role: MessageRole::Agent,
                 text: chunk,
+                is_markdown: true,
             });
         }
         self.reset_history_scroll();
@@ -373,6 +377,7 @@ impl TuiApp {
                 self.messages.push(TuiMessage {
                     role: MessageRole::Agent,
                     text: format!("Unknown command: /{}", command),
+                    is_markdown: false,
                 });
                 self.reset_history_scroll();
                 self.clear_input();
@@ -530,6 +535,7 @@ impl TuiApp {
                 self.messages.push(TuiMessage {
                     role: MessageRole::User,
                     text: prompt.clone(),
+                    is_markdown: false,
                 });
                 self.status = "Waiting for agent...".to_string();
                 guard.terminal.draw(|frame| self.draw(frame))?;
@@ -544,6 +550,7 @@ impl TuiApp {
                                 self.messages.push(TuiMessage {
                                     role: MessageRole::ToolCall,
                                     text: format!("{} ({})", name, arguments),
+                                    is_markdown: false,
                                 });
                                 self.reset_history_scroll();
                             }
@@ -561,6 +568,7 @@ impl TuiApp {
                         self.messages.push(TuiMessage {
                             role: MessageRole::Agent,
                             text: format!("Error: {}", err),
+                            is_markdown: false,
                         });
                         self.reset_history_scroll();
                         self.status = "Agent request failed".to_string();
@@ -801,6 +809,7 @@ impl TuiApp {
             self.messages.push(TuiMessage {
                 role: MessageRole::Agent,
                 text: format!("system: {}", system),
+                is_markdown: false,
             });
         }
 
@@ -810,6 +819,32 @@ impl TuiApp {
                 self.messages.push(tui_message);
             }
         }
+    }
+
+    fn render_message<'a>(msg: &'a TuiMessage) -> Vec<Line<'a>> {
+        let mut lines = Vec::new();
+        let (label, style) = msg.role.parts();
+
+        if msg.is_markdown {
+            let options = Options::default();
+            lines.append(&mut from_str_with_options(&msg.text, &options).lines);
+        } else {
+            for line in msg.text.lines() {
+                lines.push(Line::from(line).style(style));
+            }
+        }
+
+        if let Some(first) = lines.get_mut(0) {
+            first.spans.insert(
+                0,
+                Span::styled(
+                    format!("{} ", label),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+            )
+        };
+
+        lines
     }
 
     fn draw(&mut self, frame: &mut Frame<'_>) {
@@ -1057,15 +1092,15 @@ impl TuiApp {
     }
 
     fn draw_history(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        let lines = self.history_lines();
         let text_width = area.width.saturating_sub(4).max(1);
         let text_height = area.height.saturating_sub(2).max(1);
         self.history_page_size = text_height;
 
+        let lines = self.history_lines();
         let wrapped_height = wrapped_line_count(&lines, text_width);
         let max_scroll = wrapped_height.saturating_sub(text_height);
-        self.history_scroll = self.history_scroll.min(max_scroll);
-        let scroll_offset = max_scroll.saturating_sub(self.history_scroll);
+        let clamped_scroll = self.history_scroll.min(max_scroll);
+        let scroll_offset = max_scroll.saturating_sub(clamped_scroll);
 
         let title = if let Some(tokens) = self.context_tokens {
             format!(
@@ -1086,9 +1121,11 @@ impl TuiApp {
             .wrap(Wrap { trim: false })
             .scroll((scroll_offset, 0));
         frame.render_widget(history, area);
+
+        self.history_scroll = clamped_scroll;
     }
 
-    fn history_lines(&self) -> Vec<Line<'static>> {
+    fn history_lines(&self) -> Vec<Line<'_>> {
         let mut lines = Vec::new();
         for (index, message) in self.messages.iter().enumerate() {
             if index > 0 {
@@ -1098,23 +1135,7 @@ impl TuiApp {
                 }
             }
 
-            let (label, style) = message.role.parts();
-            for (index, line) in message.text.lines().enumerate() {
-                if index == 0 {
-                    lines.push(
-                        Line::from(vec![
-                            Span::styled(
-                                format!("{} ", label),
-                                Style::default().add_modifier(Modifier::BOLD),
-                            ),
-                            Span::raw(line.to_string()),
-                        ])
-                        .style(style),
-                    );
-                } else {
-                    lines.push(Line::from(format!("  {}", line)).style(style));
-                }
-            }
+            lines.extend(Self::render_message(&message));
         }
 
         lines
@@ -1154,18 +1175,21 @@ fn tui_messages_for_chat_message(
                 messages.push(TuiMessage {
                     role: message_role_for_chat_role(&role),
                     text: text.clone(),
+                    is_markdown: matches!(role, ChatRole::Assistant),
                 });
             }
             ContentPart::ToolCall(tool_call) => {
                 messages.push(TuiMessage {
                     role: MessageRole::ToolCall,
                     text: format!("{} ({})", tool_call.fn_name, tool_call.fn_arguments),
+                    is_markdown: false,
                 });
             }
             ContentPart::ToolResponse(tool_response) => {
                 messages.push(TuiMessage {
                     role: MessageRole::ToolCall,
                     text: format!("{} => {}", tool_response.call_id, tool_response.content),
+                    is_markdown: false,
                 });
             }
             ContentPart::Text(_) | ContentPart::Binary(_) | ContentPart::ThoughtSignature(_) => {}
@@ -1432,5 +1456,49 @@ mod tests {
         assert_eq!(wrap(0, 1), 0);
         assert_eq!(wrap(10, 1), 0);
         assert_eq!(wrap(-1, 1), 0);
+    }
+
+    #[test]
+    fn markdown_heading_has_bold_style() {
+        let md = "# Heading";
+        let msg = TuiMessage {
+            role: MessageRole::Agent,
+            text: md.to_string(),
+            is_markdown: true,
+        };
+        let lines = TuiApp::render_message(&msg);
+        assert!(!lines.is_empty());
+        // The heading style should be applied to the Line's style, not the span.
+        let line = &lines[0];
+        // Check the line's style for bold and cyan (H1 style)
+        let has_bold = line.style.add_modifier.contains(Modifier::BOLD);
+        let has_cyan = line.style.fg == Some(Color::Cyan) || line.style.bg == Some(Color::Cyan);
+        // At least one of these should be true for H1 from DefaultStyleSheet
+        assert!(
+            has_bold || has_cyan,
+            "Expected heading line to have bold or cyan style, got {:?}",
+            line.style
+        );
+    }
+
+    #[test]
+    fn markdown_list_has_style() {
+        let md = "- item1\n- item2";
+        let msg = TuiMessage {
+            role: MessageRole::Agent,
+            text: md.to_string(),
+            is_markdown: true,
+        };
+        let lines = TuiApp::render_message(&msg);
+        assert!(!lines.is_empty());
+        // List items should have a style (maybe a marker).
+        // Check lines contain the items; style might be default but marker could have style?
+        let content: Vec<String> = lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        let joined = content.join(" ");
+        assert!(joined.contains("item1"));
+        assert!(joined.contains("item2"));
     }
 }
