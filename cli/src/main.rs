@@ -18,6 +18,7 @@ mod commands;
 mod config;
 mod harness;
 mod models;
+mod render;
 mod session;
 mod tools;
 mod tui;
