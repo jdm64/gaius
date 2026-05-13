@@ -15,10 +15,10 @@
 
 use crate::{
     agents::AgentDefinition,
+    commands::{Command, Commands},
     config::Config,
     harness::{Harness, HarnessEvent},
-    models::{AvailableModel, Models},
-    session::Session,
+    models::AvailableModel,
 };
 use crossterm::{
     event::{
@@ -40,7 +40,6 @@ use ratatui::{
 use std::{
     error::Error,
     io::{self, Stdout},
-    mem,
     time::Duration,
 };
 use tui_markdown::{Options, from_str_with_options};
@@ -69,39 +68,33 @@ pub enum InputMode {
 }
 
 pub struct TuiApp {
-    model: String,
-    agent_name: String,
-    input: String,
+    pub model: String,
+    pub agent_name: String,
+    pub input: String,
     input_cursor: usize,
     history_scroll: u16,
     history_page_size: u16,
-    messages: Vec<TuiMessage>,
-    status: String,
-    mode: InputMode,
-    context_tokens: Option<i32>,
-}
-
-#[derive(Clone)]
-pub struct Command {
-    name: &'static str,
-    description: &'static str,
+    pub messages: Vec<TuiMessage>,
+    pub status: String,
+    pub mode: InputMode,
+    pub context_tokens: Option<i32>,
 }
 
 #[derive(Clone)]
 pub struct TuiMessage {
-    role: MessageRole,
-    text: String,
-    is_markdown: bool,
+    pub role: MessageRole,
+    pub text: String,
+    pub is_markdown: bool,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-enum MessageRole {
+pub enum MessageRole {
     User,
     Agent,
     ToolCall,
 }
 
-struct TerminalGuard {
+pub struct TerminalGuard {
     terminal: Terminal<CrosstermBackend<Stdout>>,
 }
 
@@ -121,35 +114,10 @@ impl TuiApp {
         }
     }
 
-    fn commands() -> Vec<Command> {
-        vec![
-            Command {
-                name: "new",
-                description: "Clear history and create a new session",
-            },
-            Command {
-                name: "sessions",
-                description: "Load and delete sessions",
-            },
-            Command {
-                name: "models",
-                description: "List and select models",
-            },
-            Command {
-                name: "agents",
-                description: "List and select agents",
-            },
-            Command {
-                name: "streaming",
-                description: "Toggle streaming mode on/off",
-            },
-        ]
-    }
-
     fn command_mode_for_input(&self) -> Option<InputMode> {
         let input = self.input.as_str();
         let query = input.strip_prefix('/')?.to_lowercase();
-        let filtered: Vec<Command> = Self::commands()
+        let filtered: Vec<Command> = Commands::commands()
             .into_iter()
             .filter(|cmd| cmd.name.to_lowercase().contains(&query))
             .collect();
@@ -164,7 +132,7 @@ impl TuiApp {
         }
     }
 
-    fn mode_for_input(&self) -> InputMode {
+    pub fn mode_for_input(&self) -> InputMode {
         self.command_mode_for_input()
             .unwrap_or(InputMode::PromptInput)
     }
@@ -185,7 +153,7 @@ impl TuiApp {
             .unwrap_or(self.input.len())
     }
 
-    fn clear_input(&mut self) {
+    pub fn clear_input(&mut self) {
         self.input.clear();
         self.input_cursor = 0;
     }
@@ -242,7 +210,7 @@ impl TuiApp {
         self.input_cursor = self.input_len();
     }
 
-    fn reset_history_scroll(&mut self) {
+    pub fn reset_history_scroll(&mut self) {
         self.history_scroll = 0;
     }
 
@@ -275,115 +243,6 @@ impl TuiApp {
             });
         }
         self.reset_history_scroll();
-    }
-
-    fn filtered_model_indices(&self, models: &[AvailableModel]) -> Vec<usize> {
-        let query = self.input.trim().to_lowercase();
-        models
-            .iter()
-            .enumerate()
-            .filter_map(|(index, model)| {
-                let is_match = query.is_empty() || model.id.to_lowercase().contains(&query);
-                is_match.then_some(index)
-            })
-            .collect()
-    }
-
-    fn clamp_model_selection(&self, selected: usize, models: &[AvailableModel]) -> usize {
-        let filtered_len = self.filtered_model_indices(models).len();
-        selected.min(filtered_len.saturating_sub(1))
-    }
-
-    fn filtered_agent_indices(&self, agents: &[AgentDefinition]) -> Vec<usize> {
-        let query = self.input.trim().to_lowercase();
-        agents
-            .iter()
-            .enumerate()
-            .filter_map(|(index, agent)| {
-                let is_match = query.is_empty() || agent.name.to_lowercase().contains(&query);
-                is_match.then_some(index)
-            })
-            .collect()
-    }
-
-    fn clamp_agent_selection(&self, selected: usize, agents: &[AgentDefinition]) -> usize {
-        let filtered_len = self.filtered_agent_indices(agents).len();
-        selected.min(filtered_len.saturating_sub(1))
-    }
-
-    async fn execute_command(
-        &mut self,
-        harness: &mut Harness,
-        config: &Config,
-        command: &str,
-    ) -> InputMode {
-        match command {
-            "new" => {
-                match harness.new_session() {
-                    Ok(_) => {
-                        self.messages.clear();
-                        self.reset_history_scroll();
-                        self.status = "New session created".to_string();
-                        self.context_tokens = None;
-                    }
-                    Err(e) => {
-                        self.status = e.to_string();
-                    }
-                };
-                self.clear_input();
-                InputMode::PromptInput
-            }
-            "sessions" => {
-                let sessions = Session::list();
-                self.clear_input();
-                InputMode::Session {
-                    selected: 0,
-                    sessions,
-                }
-            }
-            "models" => {
-                self.clear_input();
-                self.status = "Loading models...".to_string();
-                match Models::list(config).await {
-                    Ok(models) => {
-                        self.status = format!("Loaded {} models", models.len());
-                        InputMode::Models {
-                            selected: 0,
-                            models,
-                        }
-                    }
-                    Err(err) => {
-                        self.status = format!("Error loading models: {}", err);
-                        InputMode::PromptInput
-                    }
-                }
-            }
-            "agents" => {
-                let agents = config.agents().all().to_vec();
-                self.clear_input();
-                self.status = format!("Loaded {} agents", agents.len());
-                InputMode::Agents {
-                    selected: 0,
-                    agents,
-                }
-            }
-            "streaming" => {
-                harness.set_streaming(!harness.streaming());
-                self.status = format!("Streaming = {}", harness.streaming());
-                self.clear_input();
-                InputMode::PromptInput
-            }
-            _ => {
-                self.messages.push(TuiMessage {
-                    role: MessageRole::Agent,
-                    text: format!("Unknown command: /{}", command),
-                    is_markdown: false,
-                });
-                self.reset_history_scroll();
-                self.clear_input();
-                InputMode::PromptInput
-            }
-        }
     }
 
     pub async fn run(
@@ -429,30 +288,9 @@ impl TuiApp {
                 _ => {}
             }
 
-            let mode = mem::replace(&mut self.mode, InputMode::PromptInput);
-            self.mode = match mode {
-                InputMode::PromptInput => {
-                    self.handle_prompt_input(key, &mut guard, harness, config)
-                        .await?
-                }
-                InputMode::Command { selected, filtered } => {
-                    self.handle_command_mode(key, selected, filtered, harness, config)
-                        .await
-                }
-                InputMode::Session { selected, sessions } => {
-                    self.handle_session_mode(key, selected, sessions, harness)
-                }
-                InputMode::Models { selected, models } => {
-                    self.handle_models_mode(key, selected, models, harness, config)
-                        .await
-                }
-                InputMode::Agents { selected, agents } => {
-                    self.handle_agents_mode(key, selected, agents, harness)
-                }
-                InputMode::Exit => {
-                    return Ok(());
-                }
-            };
+            if let Err(_) = Commands::handle_mode(self, key, &mut guard, harness, config).await {
+                return Ok(());
+            }
 
             if let InputMode::Exit = self.mode {
                 return Ok(());
@@ -460,7 +298,7 @@ impl TuiApp {
         }
     }
 
-    fn handle_input_cursor(&mut self, key: event::KeyEvent) {
+    pub fn handle_input_cursor(&mut self, key: event::KeyEvent) {
         match key.code {
             KeyCode::Esc => {
                 self.clear_input();
@@ -499,7 +337,7 @@ impl TuiApp {
         }
     }
 
-    async fn handle_prompt_input(
+    pub async fn handle_prompt_input(
         &mut self,
         key: event::KeyEvent,
         guard: &mut TerminalGuard,
@@ -527,7 +365,7 @@ impl TuiApp {
                 }
 
                 if let Some(command) = prompt.strip_prefix('/') {
-                    return Ok(self.execute_command(harness, config, command).await);
+                    return Ok(Commands::execute_command(self, harness, config, command).await);
                 }
 
                 self.clear_input();
@@ -584,225 +422,7 @@ impl TuiApp {
         Ok(InputMode::PromptInput)
     }
 
-    async fn handle_command_mode(
-        &mut self,
-        key: event::KeyEvent,
-        mut selected: usize,
-        filtered: Vec<Command>,
-        harness: &mut Harness,
-        config: &Config,
-    ) -> InputMode {
-        self.handle_input_cursor(key);
-        match key.code {
-            KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Up => {
-                selected = wrap(selected as i32 - 1, filtered.len());
-            }
-            KeyCode::Down => {
-                selected = wrap(selected as i32 + 1, filtered.len());
-            }
-            KeyCode::Enter if !filtered.is_empty() => {
-                let command = filtered[selected].name;
-                return self.execute_command(harness, config, command).await;
-            }
-            KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_) => {
-                return self.mode_for_input();
-            }
-            _ => {}
-        }
-
-        InputMode::Command { selected, filtered }
-    }
-
-    fn handle_session_mode(
-        &mut self,
-        key: event::KeyEvent,
-        mut selected: usize,
-        mut sessions: Vec<String>,
-        harness: &mut Harness,
-    ) -> InputMode {
-        match key.code {
-            KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Up => {
-                selected = wrap(selected as i32 - 1, sessions.len());
-            }
-            KeyCode::Down => {
-                selected = wrap(selected as i32 + 1, sessions.len());
-            }
-            KeyCode::Enter if !sessions.is_empty() => {
-                let session_id = &sessions[selected];
-                match harness.load_session_by_id(session_id) {
-                    Ok(()) => {
-                        self.messages.clear();
-                        self.reset_history_scroll();
-                        self.status = format!("Loaded session: {}", session_id);
-                        self.context_tokens = None;
-                        self.load_history(harness.history());
-                        return InputMode::PromptInput;
-                    }
-                    Err(e) => {
-                        self.status = format!("Error loading session: {}", e);
-                    }
-                }
-            }
-            KeyCode::Char('d')
-                if key.modifiers.contains(KeyModifiers::CONTROL) && !sessions.is_empty() =>
-            {
-                let session_id = sessions[selected].clone();
-                if let Err(e) = Session::delete(&session_id) {
-                    self.status = format!("Error deleting session: {}", e);
-                } else {
-                    sessions = Session::list();
-                    if selected >= sessions.len() && selected > 0 {
-                        selected -= 1;
-                    }
-                    self.status = format!("Deleted session: {}", session_id);
-                }
-            }
-            _ => {}
-        };
-
-        InputMode::Session { selected, sessions }
-    }
-
-    async fn handle_models_mode(
-        &mut self,
-        key: event::KeyEvent,
-        mut selected: usize,
-        models: Vec<AvailableModel>,
-        harness: &mut Harness,
-        config: &Config,
-    ) -> InputMode {
-        self.handle_input_cursor(key);
-        match key.code {
-            KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Up => {
-                let filtered_len = self.filtered_model_indices(&models).len();
-                selected = wrap(selected as i32 - 1, filtered_len);
-            }
-            KeyCode::Down => {
-                let filtered_len = self.filtered_model_indices(&models).len();
-                selected = wrap(selected as i32 + 1, filtered_len);
-            }
-            KeyCode::Enter => {
-                let filtered = self.filtered_model_indices(&models);
-                if filtered.is_empty() {
-                    self.status = "No matching models".to_string();
-                    return InputMode::Models { selected, models };
-                }
-
-                selected = selected.min(filtered.len().saturating_sub(1));
-                let selected_model = &models[filtered[selected]];
-                match selected_model.create_client(config) {
-                    Ok(client) => {
-                        let model_id = selected_model.id.clone();
-                        harness.set_model(client, model_id.clone());
-                        self.model = model_id.clone();
-                        self.clear_input();
-                        self.status = format!("Selected model: {}", model_id);
-                        return InputMode::PromptInput;
-                    }
-                    Err(err) => {
-                        self.status = format!("Error selecting model: {}", err);
-                    }
-                }
-            }
-            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.status = "Reloading models...".to_string();
-                match Models::reload(config).await {
-                    Ok(models) => {
-                        selected = self.clamp_model_selection(selected, &models);
-                        self.status = format!("Reloaded {} models", models.len());
-                    }
-                    Err(err) => {
-                        self.status = format!("Error reloading models: {}", err);
-                    }
-                }
-            }
-            KeyCode::Backspace => {
-                selected = self.clamp_model_selection(selected, &models);
-            }
-            KeyCode::Delete => {
-                selected = self.clamp_model_selection(selected, &models);
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                selected = self.clamp_model_selection(selected, &models);
-            }
-            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                selected = self.clamp_model_selection(selected, &models);
-            }
-            KeyCode::Char(ch)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                selected = self.clamp_model_selection(selected, &models);
-            }
-            _ => {}
-        };
-
-        InputMode::Models { selected, models }
-    }
-
-    fn handle_agents_mode(
-        &mut self,
-        key: event::KeyEvent,
-        mut selected: usize,
-        agents: Vec<AgentDefinition>,
-        harness: &mut Harness,
-    ) -> InputMode {
-        self.handle_input_cursor(key);
-        match key.code {
-            KeyCode::Esc => {
-                return InputMode::PromptInput;
-            }
-            KeyCode::Up => {
-                let filtered_len = self.filtered_agent_indices(&agents).len();
-                selected = wrap(selected as i32 - 1, filtered_len);
-            }
-            KeyCode::Down => {
-                let filtered_len = self.filtered_agent_indices(&agents).len();
-                selected = wrap(selected as i32 + 1, filtered_len);
-            }
-            KeyCode::Enter => {
-                let filtered = self.filtered_agent_indices(&agents);
-                if filtered.is_empty() {
-                    self.status = "No matching agents".to_string();
-                    return InputMode::Agents { selected, agents };
-                }
-
-                selected = selected.min(filtered.len().saturating_sub(1));
-                let selected_agent = agents[filtered[selected]].clone();
-                harness.set_agent(selected_agent.clone());
-                self.agent_name = selected_agent.name.clone();
-                self.clear_input();
-                self.status = format!("Selected agent: {}", selected_agent.name);
-                return InputMode::PromptInput;
-            }
-            KeyCode::Backspace => {
-                selected = self.clamp_agent_selection(selected, &agents);
-            }
-            KeyCode::Delete => {
-                selected = self.clamp_agent_selection(selected, &agents);
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                selected = self.clamp_agent_selection(selected, &agents);
-            }
-            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                selected = self.clamp_agent_selection(selected, &agents);
-            }
-            KeyCode::Char(ch)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                selected = self.clamp_agent_selection(selected, &agents);
-            }
-            _ => {}
-        };
-
-        InputMode::Agents { selected, agents }
-    }
-
-    fn load_history(&mut self, history: &ChatRequest) {
+    pub fn load_history(&mut self, history: &ChatRequest) {
         if let Some(system) = &history.system
             && !system.trim().is_empty()
         {
@@ -966,7 +586,7 @@ impl TuiApp {
         selected: usize,
         models: &[AvailableModel],
     ) {
-        let filtered = self.filtered_model_indices(models);
+        let filtered = Commands::filtered_model_indices(&self.input, models);
         let result_count = filtered.len();
         let selected = selected.min(result_count.saturating_sub(1));
         let visible_models = (result_count as u16).clamp(1, 10);
@@ -1032,7 +652,7 @@ impl TuiApp {
         selected: usize,
         agents: &[AgentDefinition],
     ) {
-        let filtered = self.filtered_agent_indices(agents);
+        let filtered = Commands::filtered_agent_indices(&self.input, agents);
         let result_count = filtered.len();
         let selected = selected.min(result_count.saturating_sub(1));
         let visible_agents = (result_count as u16).clamp(1, 10);
@@ -1135,7 +755,7 @@ impl TuiApp {
                 }
             }
 
-            lines.extend(Self::render_message(&message));
+            lines.extend(Self::render_message(message));
         }
 
         lines
@@ -1197,11 +817,6 @@ fn tui_messages_for_chat_message(
     }
 
     messages
-}
-
-fn wrap(i: i32, n: usize) -> usize {
-    let m = n as i32;
-    ((i % m + m) % m) as usize
 }
 
 fn message_role_for_chat_role(role: &ChatRole) -> MessageRole {
@@ -1427,35 +1042,6 @@ mod tests {
         assert_eq!(app.messages[3].text, "weather ({\"city\":\"Atlanta\"})");
         assert_eq!(app.messages[4].role, MessageRole::ToolCall);
         assert_eq!(app.messages[4].text, "123 => sunny");
-    }
-
-    #[test]
-    fn wrap_behaves_correctly() {
-        // Basic wrapping within bounds
-        assert_eq!(wrap(0, 5), 0);
-        assert_eq!(wrap(2, 5), 2);
-        assert_eq!(wrap(4, 5), 4);
-
-        // Wrapping around at boundaries
-        assert_eq!(wrap(5, 5), 0);
-        assert_eq!(wrap(6, 5), 1);
-        assert_eq!(wrap(9, 5), 4);
-
-        // Negative indices wrap to end
-        assert_eq!(wrap(-1, 5), 4);
-        assert_eq!(wrap(-2, 5), 3);
-        assert_eq!(wrap(-5, 5), 0);
-        assert_eq!(wrap(-6, 5), 4);
-
-        // Large numbers wrap correctly
-        assert_eq!(wrap(12, 5), 2);
-        assert_eq!(wrap(20, 7), 6);
-        assert_eq!(wrap(100, 10), 0);
-
-        // Edge case: single element
-        assert_eq!(wrap(0, 1), 0);
-        assert_eq!(wrap(10, 1), 0);
-        assert_eq!(wrap(-1, 1), 0);
     }
 
     #[test]

@@ -14,6 +14,7 @@
  */
 
 mod agents;
+mod commands;
 mod config;
 mod harness;
 mod models;
