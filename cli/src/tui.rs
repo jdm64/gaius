@@ -14,17 +14,15 @@
  */
 
 use crate::{
-    agents::AgentDefinition,
-    commands::{Command, Commands},
+    commands::Commands,
     config::Config,
     harness::{Harness, HarnessEvent},
-    models::AvailableModel,
+    input::{Input, InputMode},
     render::Render,
 };
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-        MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -42,40 +40,6 @@ use std::{
     time::Duration,
 };
 
-pub enum InputMode {
-    Exit,
-    PromptInput,
-    Command {
-        selected: usize,
-        filtered: Vec<Command>,
-    },
-    Session {
-        selected: usize,
-        sessions: Vec<String>,
-    },
-    Models {
-        selected: usize,
-        models: Vec<AvailableModel>,
-    },
-    Agents {
-        selected: usize,
-        agents: Vec<AgentDefinition>,
-    },
-}
-
-pub struct TuiApp {
-    pub model: String,
-    pub agent_name: String,
-    pub input: String,
-    pub input_cursor: usize,
-    pub history_scroll: u16,
-    pub history_page_size: u16,
-    pub messages: Vec<TuiMessage>,
-    pub status: String,
-    pub mode: InputMode,
-    pub context_tokens: Option<i32>,
-}
-
 #[derive(Clone)]
 pub struct TuiMessage {
     pub role: MessageRole,
@@ -91,7 +55,41 @@ pub enum MessageRole {
 }
 
 pub struct TerminalGuard {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    pub terminal: Terminal<CrosstermBackend<Stdout>>,
+}
+
+impl TerminalGuard {
+    fn enter() -> io::Result<Self> {
+        enable_raw_mode()?;
+        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+        let terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+        Ok(Self { terminal })
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
+        let _ = self.terminal.show_cursor();
+    }
+}
+
+pub struct TuiApp {
+    pub model: String,
+    pub agent_name: String,
+    pub input: String,
+    pub input_cursor: usize,
+    pub history_scroll: u16,
+    pub history_page_size: u16,
+    pub messages: Vec<TuiMessage>,
+    pub status: String,
+    pub mode: InputMode,
+    pub context_tokens: Option<i32>,
 }
 
 impl TuiApp {
@@ -108,137 +106,6 @@ impl TuiApp {
             mode: InputMode::PromptInput,
             context_tokens: None,
         }
-    }
-
-    fn command_mode_for_input(&self) -> Option<InputMode> {
-        let input = self.input.as_str();
-        let query = input.strip_prefix('/')?.to_lowercase();
-        let filtered: Vec<Command> = Commands::commands()
-            .into_iter()
-            .filter(|cmd| cmd.name.to_lowercase().contains(&query))
-            .collect();
-
-        if filtered.is_empty() {
-            None
-        } else {
-            Some(InputMode::Command {
-                selected: 0,
-                filtered,
-            })
-        }
-    }
-
-    pub fn mode_for_input(&self) -> InputMode {
-        self.command_mode_for_input()
-            .unwrap_or(InputMode::PromptInput)
-    }
-
-    fn input_len(&self) -> usize {
-        self.input.chars().count()
-    }
-
-    fn input_cursor_byte_index(&self) -> usize {
-        if self.input_cursor == self.input_len() {
-            return self.input.len();
-        }
-
-        self.input
-            .char_indices()
-            .nth(self.input_cursor)
-            .map(|(index, _)| index)
-            .unwrap_or(self.input.len())
-    }
-
-    pub fn clear_input(&mut self) {
-        self.input.clear();
-        self.input_cursor = 0;
-    }
-
-    fn insert_input_char(&mut self, ch: char) {
-        let index = self.input_cursor_byte_index();
-        self.input.insert(index, ch);
-        self.input_cursor += 1;
-    }
-
-    fn delete_input_char_before_cursor(&mut self) {
-        if self.input_cursor == 0 {
-            return;
-        }
-
-        self.input_cursor -= 1;
-        let index = self.input_cursor_byte_index();
-        self.input.remove(index);
-    }
-
-    fn delete_input_char_at_cursor(&mut self) {
-        if self.input_cursor == self.input_len() {
-            return;
-        }
-
-        let index = self.input_cursor_byte_index();
-        self.input.remove(index);
-    }
-
-    fn delete_input_to_start(&mut self) {
-        let index = self.input_cursor_byte_index();
-        self.input.drain(..index);
-        self.input_cursor = 0;
-    }
-
-    fn delete_input_to_end(&mut self) {
-        let index = self.input_cursor_byte_index();
-        self.input.truncate(index);
-    }
-
-    fn move_input_cursor_left(&mut self) {
-        self.input_cursor = self.input_cursor.saturating_sub(1);
-    }
-
-    fn move_input_cursor_right(&mut self) {
-        self.input_cursor = (self.input_cursor + 1).min(self.input_len());
-    }
-
-    fn move_input_cursor_home(&mut self) {
-        self.input_cursor = 0;
-    }
-
-    fn move_input_cursor_end(&mut self) {
-        self.input_cursor = self.input_len();
-    }
-
-    pub fn reset_history_scroll(&mut self) {
-        self.history_scroll = 0;
-    }
-
-    fn scroll_history_up(&mut self, amount: u16) {
-        self.history_scroll = self.history_scroll.saturating_add(amount);
-    }
-
-    fn scroll_history_down(&mut self, amount: u16) {
-        self.history_scroll = self.history_scroll.saturating_sub(amount);
-    }
-
-    fn history_page_scroll_amount(&self) -> u16 {
-        self.history_page_size.saturating_sub(1).max(1)
-    }
-
-    fn append_agent_message_chunk(&mut self, chunk: String) {
-        if chunk.is_empty() {
-            return;
-        }
-
-        if let Some(message) = self.messages.last_mut()
-            && message.role == MessageRole::Agent
-        {
-            message.text.push_str(&chunk);
-        } else {
-            self.messages.push(TuiMessage {
-                role: MessageRole::Agent,
-                text: chunk,
-                is_markdown: true,
-            });
-        }
-        self.reset_history_scroll();
     }
 
     pub async fn run(
@@ -263,8 +130,8 @@ impl TuiApp {
                 Event::Key(key) if key.kind == KeyEventKind::Press => key,
                 Event::Mouse(mouse) => {
                     match mouse.kind {
-                        MouseEventKind::ScrollUp => self.scroll_history_up(3),
-                        MouseEventKind::ScrollDown => self.scroll_history_down(3),
+                        MouseEventKind::ScrollUp => Input::scroll_history_up(self, 3),
+                        MouseEventKind::ScrollDown => Input::scroll_history_down(self, 3),
                         _ => {}
                     }
                     continue;
@@ -274,11 +141,11 @@ impl TuiApp {
 
             match key.code {
                 KeyCode::PageUp => {
-                    self.scroll_history_up(self.history_page_scroll_amount());
+                    Input::scroll_history_up(self, Input::history_page_scroll_amount(self));
                     continue;
                 }
                 KeyCode::PageDown => {
-                    self.scroll_history_down(self.history_page_scroll_amount());
+                    Input::scroll_history_down(self, Input::history_page_scroll_amount(self));
                     continue;
                 }
                 _ => {}
@@ -294,128 +161,77 @@ impl TuiApp {
         }
     }
 
-    pub fn handle_input_cursor(&mut self, key: event::KeyEvent) {
-        match key.code {
-            KeyCode::Esc => {
-                self.clear_input();
-            }
-            KeyCode::Backspace => {
-                self.delete_input_char_before_cursor();
-            }
-            KeyCode::Delete => {
-                self.delete_input_char_at_cursor();
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.delete_input_to_start();
-            }
-            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.delete_input_to_end();
-            }
-            KeyCode::Left => {
-                self.move_input_cursor_left();
-            }
-            KeyCode::Right => {
-                self.move_input_cursor_right();
-            }
-            KeyCode::Home => {
-                self.move_input_cursor_home();
-            }
-            KeyCode::End => {
-                self.move_input_cursor_end();
-            }
-            KeyCode::Char(ch)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                self.insert_input_char(ch);
-            }
-            _ => {}
-        }
-    }
-
-    pub async fn handle_prompt_input(
+    pub async fn send_prompt(
         &mut self,
-        key: event::KeyEvent,
-        guard: &mut TerminalGuard,
+        prompt: String,
         harness: &mut Harness,
-        config: &Config,
-    ) -> Result<InputMode, Box<dyn Error>> {
-        self.handle_input_cursor(key);
-        match key.code {
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(InputMode::Exit);
-            }
-            KeyCode::Backspace | KeyCode::Delete => {
-                return Ok(self.mode_for_input());
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(self.mode_for_input());
-            }
-            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(self.mode_for_input());
-            }
-            KeyCode::Enter => {
-                let prompt = self.input.trim().to_string();
-                if prompt.is_empty() {
-                    return Ok(InputMode::PromptInput);
-                }
+        guard: &mut TerminalGuard,
+    ) -> Result<(), Box<dyn Error>> {
+        Input::clear_input(self);
+        Input::reset_history_scroll(self);
+        self.messages.push(TuiMessage {
+            role: MessageRole::User,
+            text: prompt.clone(),
+            is_markdown: false,
+        });
+        self.status = "Waiting for agent...".to_string();
+        guard.terminal.draw(|frame| Render::draw(self, frame))?;
 
-                if let Some(command) = prompt.strip_prefix('/') {
-                    return Ok(Commands::execute_command(self, harness, config, command).await);
-                }
-
-                self.clear_input();
-                self.reset_history_scroll();
-                self.messages.push(TuiMessage {
-                    role: MessageRole::User,
-                    text: prompt.clone(),
-                    is_markdown: false,
-                });
-                self.status = "Waiting for agent...".to_string();
-                guard.terminal.draw(|frame| Render::draw(self, frame))?;
-
-                let result = harness
-                    .run_turn_with_events(prompt, |event| {
-                        match event {
-                            HarnessEvent::AgentMessageChunk(text) => {
-                                self.append_agent_message_chunk(text);
-                            }
-                            HarnessEvent::ToolCall { name, arguments } => {
-                                self.messages.push(TuiMessage {
-                                    role: MessageRole::ToolCall,
-                                    text: format!("{} ({})", name, arguments),
-                                    is_markdown: false,
-                                });
-                                self.reset_history_scroll();
-                            }
-                        }
-                        let _ = guard.terminal.draw(|frame| Render::draw(self, frame));
-                    })
-                    .await;
-
-                match result {
-                    Ok(()) => {
-                        self.status = "Ctrl-C to quit".to_string();
-                        self.context_tokens = harness.context_tokens();
+        let result = harness
+            .run_turn_with_events(prompt, |event| {
+                match event {
+                    HarnessEvent::AgentMessageChunk(text) => {
+                        self.append_agent_message_chunk(text);
                     }
-                    Err(err) => {
+                    HarnessEvent::ToolCall { name, arguments } => {
                         self.messages.push(TuiMessage {
-                            role: MessageRole::Agent,
-                            text: format!("Error: {}", err),
+                            role: MessageRole::ToolCall,
+                            text: format!("{} ({})", name, arguments),
                             is_markdown: false,
                         });
-                        self.reset_history_scroll();
-                        self.status = "Agent request failed".to_string();
+                        Input::reset_history_scroll(self);
                     }
-                };
+                }
+                let _ = guard.terminal.draw(|frame| Render::draw(self, frame));
+            })
+            .await;
+
+        match result {
+            Ok(()) => {
+                self.status = "Ctrl-C to quit".to_string();
+                self.context_tokens = harness.context_tokens();
             }
-            KeyCode::Char(_) => {
-                return Ok(self.mode_for_input());
+            Err(err) => {
+                self.messages.push(TuiMessage {
+                    role: MessageRole::Agent,
+                    text: format!("Error: {}", err),
+                    is_markdown: false,
+                });
+                Input::reset_history_scroll(self);
+                self.status = "Agent request failed".to_string();
             }
-            _ => {}
         };
 
-        Ok(InputMode::PromptInput)
+        Ok(())
+    }
+
+    pub fn append_agent_message_chunk(&mut self, chunk: String) {
+        if chunk.is_empty() {
+            return;
+        }
+
+        if let Some(message) = self.messages.last_mut()
+            && message.role == MessageRole::Agent
+        {
+            message.text.push_str(&chunk);
+        } else {
+            self.messages.push(TuiMessage {
+                role: MessageRole::Agent,
+                text: chunk,
+                is_markdown: true,
+            });
+        }
+        Input::reset_history_scroll(self);
     }
 
     pub fn load_history(&mut self, history: &ChatRequest) {
@@ -498,27 +314,6 @@ impl MessageRole {
     }
 }
 
-impl TerminalGuard {
-    fn enter() -> io::Result<Self> {
-        enable_raw_mode()?;
-        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
-        let terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = execute!(
-            self.terminal.backend_mut(),
-            DisableMouseCapture,
-            LeaveAlternateScreen
-        );
-        let _ = self.terminal.show_cursor();
-    }
-}
-
 pub fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> u16 {
     let width = width.max(1) as usize;
     lines.iter().fold(0u16, |total, line| {
@@ -532,122 +327,6 @@ pub fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> u16 {
 mod tests {
     use super::*;
     use genai::chat::{ChatMessage, MessageContent, ToolCall, ToolResponse};
-
-    #[test]
-    fn edits_input_at_cursor() {
-        let mut app = TuiApp::new();
-        app.insert_input_char('a');
-        app.insert_input_char('c');
-
-        app.move_input_cursor_left();
-        app.insert_input_char('b');
-
-        assert_eq!(app.input, "abc");
-        assert_eq!(app.input_cursor, 2);
-
-        app.delete_input_char_before_cursor();
-
-        assert_eq!(app.input, "ac");
-        assert_eq!(app.input_cursor, 1);
-
-        app.delete_input_char_at_cursor();
-
-        assert_eq!(app.input, "a");
-        assert_eq!(app.input_cursor, 1);
-    }
-
-    #[test]
-    fn moves_input_cursor_home_and_end() {
-        let mut app = TuiApp::new();
-        for ch in "prompt".chars() {
-            app.insert_input_char(ch);
-        }
-
-        app.move_input_cursor_home();
-        assert_eq!(app.input_cursor, 0);
-
-        app.move_input_cursor_end();
-        assert_eq!(app.input_cursor, 6);
-    }
-
-    #[test]
-    fn edits_multibyte_input_at_cursor() {
-        let mut app = TuiApp::new();
-        for ch in "aéc".chars() {
-            app.insert_input_char(ch);
-        }
-
-        app.move_input_cursor_left();
-        app.insert_input_char('b');
-        app.move_input_cursor_left();
-        app.delete_input_char_before_cursor();
-
-        assert_eq!(app.input, "abc");
-        assert_eq!(app.input_cursor, 1);
-    }
-
-    #[test]
-    fn deletes_input_to_start_and_end() {
-        let mut app = TuiApp::new();
-        for ch in "abcdef".chars() {
-            app.insert_input_char(ch);
-        }
-
-        app.move_input_cursor_left();
-        app.move_input_cursor_left();
-        app.delete_input_to_start();
-
-        assert_eq!(app.input, "ef");
-        assert_eq!(app.input_cursor, 0);
-
-        app.move_input_cursor_end();
-        app.move_input_cursor_left();
-        app.delete_input_to_end();
-
-        assert_eq!(app.input, "e");
-        assert_eq!(app.input_cursor, 1);
-    }
-
-    #[test]
-    fn deletes_multibyte_input_to_start_and_end() {
-        let mut app = TuiApp::new();
-        for ch in "aé文z".chars() {
-            app.insert_input_char(ch);
-        }
-
-        app.move_input_cursor_left();
-        app.move_input_cursor_left();
-        app.delete_input_to_start();
-
-        assert_eq!(app.input, "文z");
-        assert_eq!(app.input_cursor, 0);
-
-        app.move_input_cursor_right();
-        app.delete_input_to_end();
-
-        assert_eq!(app.input, "文");
-        assert_eq!(app.input_cursor, 1);
-    }
-
-    #[test]
-    fn scrolls_history_with_saturating_offsets() {
-        let mut app = TuiApp::new();
-
-        assert_eq!(app.history_scroll, 0);
-
-        app.scroll_history_up(5);
-        assert_eq!(app.history_scroll, 5);
-
-        app.scroll_history_down(2);
-        assert_eq!(app.history_scroll, 3);
-
-        app.scroll_history_down(10);
-        assert_eq!(app.history_scroll, 0);
-
-        app.scroll_history_up(4);
-        app.reset_history_scroll();
-        assert_eq!(app.history_scroll, 0);
-    }
 
     #[test]
     fn counts_wrapped_history_lines() {

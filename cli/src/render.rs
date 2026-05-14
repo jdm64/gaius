@@ -25,8 +25,9 @@ use tui_markdown::{Options, from_str_with_options};
 use crate::{
     agents::AgentDefinition,
     commands::{Command, Commands},
+    input::InputMode,
     models::AvailableModel,
-    tui::{InputMode, TuiApp, TuiMessage, wrapped_line_count},
+    tui::{TuiApp, TuiMessage, wrapped_line_count},
 };
 
 pub const INPUT_HEIGHT: u16 = 3;

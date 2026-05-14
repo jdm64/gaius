@@ -17,6 +17,7 @@ mod agents;
 mod commands;
 mod config;
 mod harness;
+mod input;
 mod models;
 mod render;
 mod session;

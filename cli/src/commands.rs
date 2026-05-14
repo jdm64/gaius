@@ -17,9 +17,10 @@ use crate::{
     agents::AgentDefinition,
     config::Config,
     harness::Harness,
+    input::{Input, InputMode},
     models::{AvailableModel, Models},
     session::Session,
-    tui::{InputMode, MessageRole, TerminalGuard, TuiApp, TuiMessage},
+    tui::{MessageRole, TerminalGuard, TuiApp, TuiMessage},
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use std::{error::Error, mem};
@@ -67,7 +68,9 @@ impl Commands {
     ) -> Result<(), Box<dyn Error>> {
         let mode = mem::replace(&mut app.mode, InputMode::PromptInput);
         app.mode = match mode {
-            InputMode::PromptInput => app.handle_prompt_input(key, guard, harness, config).await?,
+            InputMode::PromptInput => {
+                Input::handle_prompt_input(app, key, guard, harness, config).await?
+            }
             InputMode::Command { selected, filtered } => {
                 Self::handle_command_mode(app, key, selected, filtered, harness, config).await
             }
@@ -96,7 +99,7 @@ impl Commands {
                 match harness.new_session() {
                     Ok(_) => {
                         app.messages.clear();
-                        app.reset_history_scroll();
+                        Input::reset_history_scroll(app);
                         app.status = "New session created".to_string();
                         app.context_tokens = None;
                     }
@@ -104,19 +107,19 @@ impl Commands {
                         app.status = e.to_string();
                     }
                 };
-                app.clear_input();
+                Input::clear_input(app);
                 InputMode::PromptInput
             }
             "sessions" => {
                 let sessions = Session::list();
-                app.clear_input();
+                Input::clear_input(app);
                 InputMode::Session {
                     selected: 0,
                     sessions,
                 }
             }
             "models" => {
-                app.clear_input();
+                Input::clear_input(app);
                 app.status = "Loading models...".to_string();
                 match Models::list(config).await {
                     Ok(models) => {
@@ -134,7 +137,7 @@ impl Commands {
             }
             "agents" => {
                 let agents = config.agents().all().to_vec();
-                app.clear_input();
+                Input::clear_input(app);
                 app.status = format!("Loaded {} agents", agents.len());
                 InputMode::Agents {
                     selected: 0,
@@ -144,7 +147,7 @@ impl Commands {
             "streaming" => {
                 harness.set_streaming(!harness.streaming());
                 app.status = format!("Streaming = {}", harness.streaming());
-                app.clear_input();
+                Input::clear_input(app);
                 InputMode::PromptInput
             }
             _ => {
@@ -153,8 +156,8 @@ impl Commands {
                     text: format!("Unknown command: /{}", command),
                     is_markdown: false,
                 });
-                app.reset_history_scroll();
-                app.clear_input();
+                Input::reset_history_scroll(app);
+                Input::clear_input(app);
                 InputMode::PromptInput
             }
         }
@@ -168,7 +171,7 @@ impl Commands {
         harness: &mut Harness,
         config: &Config,
     ) -> InputMode {
-        app.handle_input_cursor(key);
+        Input::handle_input_cursor(app, key);
         match key.code {
             KeyCode::Esc => return InputMode::PromptInput,
             KeyCode::Up => {
@@ -182,7 +185,7 @@ impl Commands {
                 return Self::execute_command(app, harness, config, command).await;
             }
             KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_) => {
-                return app.mode_for_input();
+                return Input::mode_for_input(app);
             }
             _ => {}
         }
@@ -210,7 +213,7 @@ impl Commands {
                 match harness.load_session_by_id(session_id) {
                     Ok(()) => {
                         app.messages.clear();
-                        app.reset_history_scroll();
+                        Input::reset_history_scroll(app);
                         app.status = format!("Loaded session: {}", session_id);
                         app.context_tokens = None;
                         app.load_history(harness.history());
@@ -249,7 +252,7 @@ impl Commands {
         harness: &mut Harness,
         config: &Config,
     ) -> InputMode {
-        app.handle_input_cursor(key);
+        Input::handle_input_cursor(app, key);
         match key.code {
             KeyCode::Esc => return InputMode::PromptInput,
             KeyCode::Up => {
@@ -274,7 +277,7 @@ impl Commands {
                         let model_id = selected_model.id.clone();
                         harness.set_model(client, model_id.clone());
                         app.model = model_id.clone();
-                        app.clear_input();
+                        Input::clear_input(app);
                         app.status = format!("Selected model: {}", model_id);
                         return InputMode::PromptInput;
                     }
@@ -343,7 +346,7 @@ impl Commands {
         agents: Vec<AgentDefinition>,
         harness: &mut Harness,
     ) -> InputMode {
-        app.handle_input_cursor(key);
+        Input::handle_input_cursor(app, key);
         match key.code {
             KeyCode::Esc => {
                 return InputMode::PromptInput;
@@ -367,7 +370,7 @@ impl Commands {
                 let selected_agent = agents[filtered[selected]].clone();
                 harness.set_agent(selected_agent.clone());
                 app.agent_name = selected_agent.name.clone();
-                app.clear_input();
+                Input::clear_input(app);
                 app.status = format!("Selected agent: {}", selected_agent.name);
                 return InputMode::PromptInput;
             }
