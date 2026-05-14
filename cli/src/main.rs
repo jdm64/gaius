@@ -13,21 +13,9 @@
  * limitations under the License.
  */
 
-mod agents;
-mod commands;
-mod config;
-mod harness;
-mod input;
-mod models;
-mod render;
-mod session;
-mod tools;
-mod tui;
-mod util;
-
-use crate::config::Config;
-use crate::harness::Harness;
-use crate::tui::TuiApp;
+use gaius::config::Config;
+use gaius::harness::Harness;
+use gaius::tui::TuiApp;
 use pico_args::Arguments;
 use std::error::Error;
 use std::path::PathBuf;

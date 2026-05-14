@@ -58,6 +58,12 @@ pub fn config_file() -> Result<PathBuf, Box<dyn Error>> {
     Ok(config_dir()?.join("config.toml"))
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Config {
     pub fn new() -> Config {
         Self {
