@@ -19,6 +19,7 @@ use crate::{
     harness::{Harness, HarnessEvent},
     input::{Input, InputMode},
     render::Render,
+    util::cache_dir,
 };
 use crossterm::{
     event::{
@@ -31,7 +32,9 @@ use genai::chat::{ChatRequest, ChatRole, ContentPart};
 use ratatui::{Terminal, backend::CrosstermBackend, text::Line};
 use std::{
     error::Error,
+    fs,
     io::{self, Stdout},
+    path::PathBuf,
     time::Duration,
 };
 
@@ -85,6 +88,8 @@ pub struct TuiApp {
     pub status: String,
     pub mode: InputMode,
     pub context_tokens: Option<i32>,
+    pub prompt_history: Vec<String>,
+    pub prompt_history_idx: Option<usize>,
 }
 
 impl Default for TuiApp {
@@ -106,6 +111,8 @@ impl TuiApp {
             status: "Ctrl-C to quit".to_string(),
             mode: InputMode::PromptInput,
             context_tokens: None,
+            prompt_history: Vec::new(),
+            prompt_history_idx: None,
         }
     }
 
@@ -117,6 +124,9 @@ impl TuiApp {
         self.model = harness.model().clone();
         self.agent_name = harness.agent_name().to_string();
         self.load_history(harness.history());
+        if let Err(e) = self.load_prompt_history() {
+            eprintln!("Failed to load prompt history: {}", e);
+        }
 
         let mut guard = TerminalGuard::enter()?;
 
@@ -169,6 +179,7 @@ impl TuiApp {
         harness: &mut Harness,
         guard: &mut TerminalGuard,
     ) -> Result<(), Box<dyn Error>> {
+        Input::update_prompt_history(self, prompt.clone());
         Input::clear_input(self);
         Input::reset_history_scroll(self);
         self.messages.push(TuiMessage {
@@ -248,6 +259,30 @@ impl TuiApp {
                 self.messages.push(tui_message);
             }
         }
+    }
+
+    pub fn prompt_history_file() -> Result<PathBuf, Box<dyn Error>> {
+        Ok(cache_dir()?.join("prompt_history.json"))
+    }
+
+    pub fn load_prompt_history(&mut self) -> Result<(), Box<dyn Error>> {
+        let path = Self::prompt_history_file()?;
+        if path.exists() {
+            let contents = fs::read_to_string(&path)?;
+            self.prompt_history = serde_json::from_str(&contents).unwrap_or_default();
+        }
+        self.prompt_history_idx = None;
+        Ok(())
+    }
+
+    pub fn save_prompt_history(&self) -> Result<(), Box<dyn Error>> {
+        let path = Self::prompt_history_file()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let contents = serde_json::to_string_pretty(&self.prompt_history)?;
+        fs::write(path, contents)?;
+        Ok(())
     }
 }
 

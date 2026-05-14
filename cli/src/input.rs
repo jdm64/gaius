@@ -24,6 +24,8 @@ use crate::{
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use std::error::Error;
 
+const MAX_HISTORY: usize = 16;
+
 pub enum InputMode {
     Exit,
     PromptInput,
@@ -108,14 +110,40 @@ impl Input {
             KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Ok(Self::mode_for_input(app));
             }
-
+            KeyCode::Up if app.input_cursor == 0 => {
+                let len = app.prompt_history.len();
+                if len > 0 {
+                    app.prompt_history_idx = match app.prompt_history_idx {
+                        None => Some(0),
+                        Some(i) if i + 1 < len => Some(i + 1),
+                        Some(i) => Some(i),
+                    };
+                    if let Some(idx) = app.prompt_history_idx {
+                        app.input = app.prompt_history[idx].clone();
+                    }
+                }
+                return Ok(Self::mode_for_input(app));
+            }
+            KeyCode::Down if app.input_cursor == 0 => {
+                app.prompt_history_idx = match app.prompt_history_idx {
+                    None => None,
+                    Some(0) => None,
+                    Some(i) => Some(i - 1),
+                };
+                if let Some(idx) = app.prompt_history_idx {
+                    app.input = app.prompt_history[idx].clone();
+                } else {
+                    Self::clear_input(app);
+                }
+                return Ok(Self::mode_for_input(app));
+            }
             KeyCode::Enter => {
                 let prompt = app.input.trim().to_string();
                 if prompt.is_empty() {
                     return Ok(InputMode::PromptInput);
                 }
 
-                if let Some(command) = prompt.strip_prefix('/') {
+                if let Some(command) = prompt.trim().strip_prefix('/') {
                     return Ok(Commands::execute_command(app, harness, config, command).await);
                 }
 
@@ -128,6 +156,33 @@ impl Input {
         };
 
         Ok(InputMode::PromptInput)
+    }
+
+    pub fn update_prompt_history(app: &mut TuiApp, prompt: String) {
+        if prompt.is_empty() {
+            return;
+        }
+
+        if let Some(idx) = app.prompt_history_idx
+            && idx < app.prompt_history.len()
+        {
+            app.prompt_history[idx] = prompt.clone();
+            if idx != 0 {
+                app.prompt_history.swap(0, idx);
+            }
+        } else {
+            app.prompt_history.insert(0, prompt.clone());
+        }
+
+        if app.prompt_history.len() > MAX_HISTORY {
+            app.prompt_history.truncate(MAX_HISTORY);
+        }
+
+        app.prompt_history_idx = None;
+
+        if let Err(e) = app.save_prompt_history() {
+            eprintln!("Failed to save prompt history: {}", e);
+        }
     }
 
     fn command_mode_for_input(app: &TuiApp) -> Option<InputMode> {
