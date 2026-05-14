@@ -151,11 +151,12 @@ impl TuiApp {
                 _ => {}
             }
 
-            if let Err(_) = Commands::handle_mode(self, key, &mut guard, harness, config).await {
+            if Commands::handle_mode(self, key, &mut guard, harness, config)
+                .await
+                .is_err()
+            {
                 return Ok(());
-            }
-
-            if let InputMode::Exit = self.mode {
+            } else if let InputMode::Exit = self.mode {
                 return Ok(());
             }
         }

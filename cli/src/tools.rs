@@ -281,10 +281,10 @@ impl ToolEngine {
             Some(p) => p,
             None => return "Error: Missing pattern".to_string(),
         };
-        let path_prefix = match args.get("path").and_then(|v| v.as_str()) {
-            Some(p) => p,
-            None => "",
-        };
+        let path_prefix = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         let full_pattern = if path_prefix.is_empty() {
             pattern.to_string()
         } else {
