@@ -104,8 +104,9 @@ impl Render {
         selected: usize,
         sessions: &[String],
     ) {
-        let session_count = sessions.len() as u16;
-        let visible_sessions = session_count.min(10);
+        let session_count = sessions.len();
+        let selected = selected.min(session_count.saturating_sub(1));
+        let visible_sessions = (session_count as u16).clamp(1, 10);
         let help_height = 3u16;
         let width = 50.min(input_area.width - 4);
         let height = visible_sessions + 2 + help_height;
@@ -113,17 +114,29 @@ impl Render {
         let y = input_area.y - height;
         let rect = Rect::new(x, y, width, height);
 
-        let items: Vec<ListItem> = sessions
-            .iter()
-            .enumerate()
-            .map(|(i, session_id)| {
-                if i == selected {
-                    ListItem::new(session_id.as_str()).style(Style::default().bg(Color::DarkGray))
-                } else {
-                    ListItem::new(session_id.as_str())
-                }
-            })
-            .collect();
+        let start = if selected >= visible_sessions as usize {
+            selected + 1 - visible_sessions as usize
+        } else {
+            0
+        };
+        let end = (start + visible_sessions as usize).min(session_count);
+
+        let items: Vec<ListItem> = if session_count == 0 {
+            vec![ListItem::new("No sessions")]
+        } else {
+            sessions[start..end]
+                .iter()
+                .enumerate()
+                .map(|(offset, session_id)| {
+                    let i = start + offset;
+                    if i == selected {
+                        ListItem::new(session_id.as_str()).style(Style::default().bg(Color::DarkGray))
+                    } else {
+                        ListItem::new(session_id.as_str())
+                    }
+                })
+                .collect()
+        };
 
         let sessions_list =
             List::new(items).block(Block::default().borders(Borders::ALL).title("Sessions"));
