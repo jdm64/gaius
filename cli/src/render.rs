@@ -13,6 +13,13 @@
  * limitations under the License.
  */
 
+use crate::{
+    agents::AgentDefinition,
+    commands::{Command, Commands},
+    input::InputMode,
+    models::AvailableModel,
+    tui::{TuiApp, TuiMessage, wrapped_line_count},
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -21,14 +28,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
 };
 use tui_markdown::{Options, from_str_with_options};
-
-use crate::{
-    agents::AgentDefinition,
-    commands::{Command, Commands},
-    input::InputMode,
-    models::AvailableModel,
-    tui::{TuiApp, TuiMessage, wrapped_line_count},
-};
 
 pub const INPUT_HEIGHT: u16 = 3;
 

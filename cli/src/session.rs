@@ -13,11 +13,10 @@
  * limitations under the License.
  */
 
-use std::{error::Error, fs::File, io::BufReader, path::PathBuf};
-
 use genai::chat::{ChatMessage, ChatRequest};
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
+use std::{error::Error, fs::File, io::BufReader, path::PathBuf};
 use uuid::Uuid;
 
 fn session_dir() -> Result<PathBuf, Box<dyn Error>> {

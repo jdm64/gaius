@@ -13,8 +13,6 @@
  * limitations under the License.
  */
 
-use std::error::Error;
-
 use crate::{
     agents::Agents,
     harness::{create_client, validate_model},
@@ -23,6 +21,7 @@ use crate::{
 use genai::Client;
 use genai::adapter::AdapterKind;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

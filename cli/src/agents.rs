@@ -13,9 +13,8 @@
  * limitations under the License.
  */
 
-use std::{error::Error, path::Path};
-
 use serde::{Deserialize, Serialize};
+use std::{error::Error, path::Path};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentDefinition {

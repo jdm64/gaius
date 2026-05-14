@@ -13,8 +13,6 @@
  * limitations under the License.
  */
 
-use std::{collections::BTreeMap, error::Error, path::PathBuf, time::Duration};
-
 use crate::{
     config::{Config, ProviderConfig},
     harness::create_client,
@@ -22,6 +20,7 @@ use crate::{
 use genai::{Client, adapter::AdapterKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::{collections::BTreeMap, error::Error, path::PathBuf, time::Duration};
 use url::Url;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

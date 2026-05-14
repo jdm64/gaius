@@ -13,11 +13,6 @@
  * limitations under the License.
  */
 
-use std::{
-    error::Error,
-    io::{self, Write},
-};
-
 use crate::{agents::AgentDefinition, session::Session, tools::ToolEngine, util::prompt_input};
 use futures::StreamExt;
 use genai::{
@@ -25,6 +20,10 @@ use genai::{
     adapter::AdapterKind,
     chat::{ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ToolCall, ToolResponse},
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
+};
+use std::{
+    error::Error,
+    io::{self, Write},
 };
 
 pub fn create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
