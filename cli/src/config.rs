@@ -16,12 +16,12 @@
 use crate::{
     agents::Agents,
     harness::{create_client, validate_model},
-    util::{config_dir, config_path, prompt_input},
+    util::{config_dir, prompt_input},
 };
 use genai::Client;
 use genai::adapter::AdapterKind;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
+use std::{error::Error, path::PathBuf};
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +54,10 @@ pub struct SelectedModel {
     pub model_id: String,
 }
 
+pub fn config_file() -> Result<PathBuf, Box<dyn Error>> {
+    Ok(config_dir()?.join("config.toml"))
+}
+
 impl Config {
     pub fn new() -> Config {
         Self {
@@ -64,7 +68,7 @@ impl Config {
     }
 
     pub async fn load(&mut self) -> Result<(), Box<dyn Error>> {
-        let path = config_path()?;
+        let path = config_file()?;
         if path.exists() {
             let contents = std::fs::read_to_string(&path)?;
             *self = toml::from_str(&contents)?;

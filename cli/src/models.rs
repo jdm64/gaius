@@ -16,6 +16,7 @@
 use crate::{
     config::{Config, ProviderConfig},
     harness::create_client,
+    util::cache_dir,
 };
 use genai::{Client, adapter::AdapterKind};
 use serde::{Deserialize, Serialize};
@@ -119,12 +120,7 @@ impl Models {
     }
 
     fn cache_path() -> Result<PathBuf, Box<dyn Error>> {
-        let home = std::env::var("HOME")?;
-        Ok(PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join("gaius")
-            .join("models_cache.json"))
+        Ok(cache_dir()?.join("models_cache.json"))
     }
 
     async fn fetch_provider_models(

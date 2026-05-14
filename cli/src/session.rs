@@ -19,18 +19,15 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, fs::File, io::BufReader, path::PathBuf};
 use uuid::Uuid;
 
-fn session_dir() -> Result<PathBuf, Box<dyn Error>> {
-    let home = std::env::var("HOME")?;
-    Ok(PathBuf::from(home)
-        .join(".local")
-        .join("share")
-        .join("gaius")
-        .join("sessions"))
+use crate::util::data_dir;
+
+fn sessions_dir() -> Result<PathBuf, Box<dyn Error>> {
+    Ok(data_dir()?.join("sessions"))
 }
 
 fn session_file(session_id: &str) -> Result<PathBuf, Box<dyn Error>> {
     validate_session_id(session_id)?;
-    Ok(session_dir()?.join(format!("{}.mpk", session_id)))
+    Ok(sessions_dir()?.join(format!("{}.mpk", session_id)))
 }
 
 fn validate_session_id(session_id: &str) -> Result<(), Box<dyn Error>> {
@@ -96,7 +93,7 @@ impl Session {
     }
 
     pub fn list() -> Vec<String> {
-        let dir = match session_dir() {
+        let dir = match sessions_dir() {
             Ok(d) => d,
             Err(_) => return Vec::new(),
         };
