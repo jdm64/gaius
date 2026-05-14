@@ -18,12 +18,12 @@ use crate::{
     commands::{Command, Commands},
     input::InputMode,
     models::AvailableModel,
-    tui::{TuiApp, TuiMessage, wrapped_line_count},
+    tui::{MessageRole, TuiApp, TuiMessage, wrapped_line_count},
 };
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
 };
@@ -316,7 +316,7 @@ impl Render {
             .block(
                 Block::default()
                     .title(title)
-                    .borders(Borders::ALL)
+                    .borders(Borders::TOP)
                     .padding(Padding::horizontal(1)),
             )
             .wrap(Wrap { trim: false })
@@ -328,6 +328,7 @@ impl Render {
 
     fn history_lines(app: &TuiApp) -> Vec<Line<'_>> {
         let mut lines = Vec::new();
+        lines.push(Line::from(""));
         for (index, message) in app.messages.iter().enumerate() {
             if index > 0 {
                 let previous = &app.messages[index - 1];
@@ -344,26 +345,25 @@ impl Render {
 
     pub fn render_message<'a>(msg: &'a TuiMessage) -> Vec<Line<'a>> {
         let mut lines = Vec::new();
-        let (label, style) = msg.role.parts();
 
-        if msg.is_markdown {
-            let options = Options::default();
-            lines.append(&mut from_str_with_options(&msg.text, &options).lines);
-        } else {
-            for line in msg.text.lines() {
-                lines.push(Line::from(line).style(style));
+        match msg.role {
+            MessageRole::Agent => {
+                let options = Options::default();
+                lines.append(&mut from_str_with_options(&msg.text, &options).lines);
+            }
+            MessageRole::User => {
+                let style = Style::default().bg(Color::Rgb(64, 64, 64)).italic().bold();
+                lines.push(Line::from(msg.text.clone()).style(style));
+            }
+            MessageRole::ToolCall => {
+                let style = Style::default().fg(Color::Cyan);
+                lines.push(Line::from(msg.text.clone()).style(style));
+            }
+            MessageRole::System => {
+                let style = Style::default().fg(Color::Rgb(64, 64, 0));
+                lines.push(Line::from(msg.text.clone()).style(style));
             }
         }
-
-        if let Some(first) = lines.get_mut(0) {
-            first.spans.insert(
-                0,
-                Span::styled(
-                    format!("{} ", label),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-            )
-        };
 
         lines
     }
@@ -377,6 +377,7 @@ impl Render {
             Block::default()
                 .title(format!(" {} ", app.status))
                 .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(64, 0, 64)))
                 .padding(Padding::horizontal(1)),
         )
         .wrap(Wrap { trim: false });

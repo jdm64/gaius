@@ -7,7 +7,6 @@ fn markdown_heading_has_bold_style() {
     let msg = TuiMessage {
         role: MessageRole::Agent,
         text: md.to_string(),
-        is_markdown: true,
     };
     let lines = Render::render_message(&msg);
     assert!(!lines.is_empty());
@@ -34,7 +33,6 @@ fn markdown_list_has_style() {
     let msg = TuiMessage {
         role: MessageRole::Agent,
         text: md.to_string(),
-        is_markdown: true,
     };
     let lines = Render::render_message(&msg);
     assert!(!lines.is_empty());

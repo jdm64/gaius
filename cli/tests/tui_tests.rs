@@ -42,7 +42,7 @@ fn loads_chat_request_into_tui_history() {
     app.load_history(&request);
 
     assert_eq!(app.messages.len(), 5);
-    assert_eq!(app.messages[0].role, gaius::tui::MessageRole::Agent);
+    assert_eq!(app.messages[0].role, gaius::tui::MessageRole::System);
     assert_eq!(app.messages[0].text, "system: be useful");
     assert_eq!(app.messages[1].role, gaius::tui::MessageRole::User);
     assert_eq!(app.messages[1].text, "hello");

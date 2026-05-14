@@ -152,9 +152,8 @@ impl Commands {
             }
             _ => {
                 app.messages.push(TuiMessage {
-                    role: MessageRole::Agent,
+                    role: MessageRole::System,
                     text: format!("Unknown command: /{}", command),
-                    is_markdown: false,
                 });
                 Input::reset_history_scroll(app);
                 Input::clear_input(app);

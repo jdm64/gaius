@@ -28,12 +28,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use genai::chat::{ChatRequest, ChatRole, ContentPart};
-use ratatui::{
-    Terminal,
-    backend::CrosstermBackend,
-    style::{Color, Style},
-    text::Line,
-};
+use ratatui::{Terminal, backend::CrosstermBackend, text::Line};
 use std::{
     error::Error,
     io::{self, Stdout},
@@ -44,7 +39,6 @@ use std::{
 pub struct TuiMessage {
     pub role: MessageRole,
     pub text: String,
-    pub is_markdown: bool,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -52,6 +46,7 @@ pub enum MessageRole {
     User,
     Agent,
     ToolCall,
+    System,
 }
 
 pub struct TerminalGuard {
@@ -179,7 +174,6 @@ impl TuiApp {
         self.messages.push(TuiMessage {
             role: MessageRole::User,
             text: prompt.clone(),
-            is_markdown: false,
         });
         self.status = "Waiting for agent...".to_string();
         guard.terminal.draw(|frame| Render::draw(self, frame))?;
@@ -194,7 +188,6 @@ impl TuiApp {
                         self.messages.push(TuiMessage {
                             role: MessageRole::ToolCall,
                             text: format!("{} ({})", name, arguments),
-                            is_markdown: false,
                         });
                         Input::reset_history_scroll(self);
                     }
@@ -210,9 +203,8 @@ impl TuiApp {
             }
             Err(err) => {
                 self.messages.push(TuiMessage {
-                    role: MessageRole::Agent,
+                    role: MessageRole::System,
                     text: format!("Error: {}", err),
-                    is_markdown: false,
                 });
                 Input::reset_history_scroll(self);
                 self.status = "Agent request failed".to_string();
@@ -235,7 +227,6 @@ impl TuiApp {
             self.messages.push(TuiMessage {
                 role: MessageRole::Agent,
                 text: chunk,
-                is_markdown: true,
             });
         }
         Input::reset_history_scroll(self);
@@ -246,9 +237,8 @@ impl TuiApp {
             && !system.trim().is_empty()
         {
             self.messages.push(TuiMessage {
-                role: MessageRole::Agent,
+                role: MessageRole::System,
                 text: format!("system: {}", system),
-                is_markdown: false,
             });
         }
 
@@ -273,21 +263,18 @@ fn tui_messages_for_chat_message(
                 messages.push(TuiMessage {
                     role: message_role_for_chat_role(&role),
                     text: text.clone(),
-                    is_markdown: matches!(role, ChatRole::Assistant),
                 });
             }
             ContentPart::ToolCall(tool_call) => {
                 messages.push(TuiMessage {
                     role: MessageRole::ToolCall,
                     text: format!("{} ({})", tool_call.fn_name, tool_call.fn_arguments),
-                    is_markdown: false,
                 });
             }
             ContentPart::ToolResponse(tool_response) => {
                 messages.push(TuiMessage {
                     role: MessageRole::ToolCall,
                     text: format!("{} => {}", tool_response.call_id, tool_response.content),
-                    is_markdown: false,
                 });
             }
             ContentPart::Text(_) | ContentPart::Binary(_) | ContentPart::ThoughtSignature(_) => {}
@@ -302,22 +289,6 @@ fn message_role_for_chat_role(role: &ChatRole) -> MessageRole {
         ChatRole::User => MessageRole::User,
         ChatRole::Assistant | ChatRole::System => MessageRole::Agent,
         ChatRole::Tool => MessageRole::ToolCall,
-    }
-}
-
-impl MessageRole {
-    pub fn parts(&self) -> (&'static str, Style) {
-        match self {
-            Self::User => (
-                "user>",
-                Style::default().fg(Color::White).bg(Color::DarkGray),
-            ),
-            Self::Agent => ("agent>", Style::default()),
-            Self::ToolCall => (
-                "tool-call>",
-                Style::default().fg(Color::Cyan).bg(Color::Black),
-            ),
-        }
     }
 }
 
