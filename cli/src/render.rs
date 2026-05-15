@@ -71,8 +71,9 @@ impl Render {
     ) {
         let command_count = filtered.len() as u16;
         let visible_commands = command_count.min(10);
+        let help_height = 1u16;
         let width = 50.min(input_area.width - 4);
-        let height = visible_commands + 2;
+        let height = visible_commands + 2 + help_height;
         let x = input_area.x + 2;
         let y = input_area.y - height;
         let rect = Rect::new(x, y, width, height);
@@ -90,10 +91,30 @@ impl Render {
             })
             .collect();
 
-        let list = List::new(items).block(Block::default().borders(Borders::ALL).title("Commands"));
+        let list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Commands")
+                .padding(Padding::horizontal(1)),
+        );
+
+        let help_text = "  Type: filter | Enter: select | Esc: close";
+        let help_para = Paragraph::new(help_text)
+            .block(Block::default().borders(Borders::NONE))
+            .style(Style::default().fg(Color::Yellow));
 
         frame.render_widget(Clear, rect);
-        frame.render_widget(list, rect);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(visible_commands + 2),
+                Constraint::Length(help_height),
+            ])
+            .split(rect);
+
+        frame.render_widget(list, chunks[0]);
+        frame.render_widget(help_para, chunks[1]);
     }
 
     fn draw_sessions(
@@ -106,7 +127,7 @@ impl Render {
         let session_count = sessions.len();
         let selected = selected.min(session_count.saturating_sub(1));
         let visible_sessions = (session_count as u16).clamp(1, 10);
-        let help_height = 3u16;
+        let help_height = 1u16;
         let width = 50.min(input_area.width - 4);
         let height = visible_sessions + 2 + help_height;
         let x = input_area.x + 2;
@@ -138,12 +159,16 @@ impl Render {
                 .collect()
         };
 
-        let sessions_list =
-            List::new(items).block(Block::default().borders(Borders::ALL).title("Sessions"));
+        let sessions_list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Sessions")
+                .padding(Padding::horizontal(1)),
+        );
 
-        let help_text = "Enter: load | Ctrl+D: delete | Esc: close";
+        let help_text = "  Enter: load | Ctrl+D: delete | Esc: close";
         let help_para = Paragraph::new(help_text)
-            .block(Block::default().borders(Borders::ALL))
+            .block(Block::default().borders(Borders::NONE))
             .style(Style::default().fg(Color::Yellow));
 
         frame.render_widget(Clear, rect);
@@ -171,7 +196,7 @@ impl Render {
         let result_count = filtered.len();
         let selected = selected.min(result_count.saturating_sub(1));
         let visible_models = (result_count as u16).clamp(1, 10);
-        let help_height = 3u16;
+        let help_height = 1u16;
         let width = 70.min(input_area.width - 4);
         let height = visible_models + 2 + help_height;
         let x = input_area.x + 2;
@@ -204,12 +229,16 @@ impl Render {
                 .collect()
         };
 
-        let models_list =
-            List::new(items).block(Block::default().borders(Borders::ALL).title("Models"));
+        let models_list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Models")
+                .padding(Padding::horizontal(1)),
+        );
 
-        let help_text = "Type: filter | Enter: select | Ctrl+R: reload | Esc: close";
+        let help_text = "  Type: filter | Enter: select | Ctrl+R: reload | Esc: close";
         let help_para = Paragraph::new(help_text)
-            .block(Block::default().borders(Borders::ALL))
+            .block(Block::default().borders(Borders::NONE))
             .style(Style::default().fg(Color::Yellow));
 
         frame.render_widget(Clear, rect);
@@ -237,7 +266,7 @@ impl Render {
         let result_count = filtered.len();
         let selected = selected.min(result_count.saturating_sub(1));
         let visible_agents = (result_count as u16).clamp(1, 10);
-        let help_height = 3u16;
+        let help_height = 1u16;
         let width = 60.min(input_area.width - 4);
         let height = visible_agents + 2 + help_height;
         let x = input_area.x + 2;
@@ -270,12 +299,16 @@ impl Render {
                 .collect()
         };
 
-        let agents_list =
-            List::new(items).block(Block::default().borders(Borders::ALL).title("Agents"));
+        let agents_list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Agents")
+                .padding(Padding::horizontal(1)),
+        );
 
-        let help_text = "Type: filter | Enter: select | Esc: close";
+        let help_text = "  Type: filter | Enter: select | Esc: close";
         let help_para = Paragraph::new(help_text)
-            .block(Block::default().borders(Borders::ALL))
+            .block(Block::default().borders(Borders::NONE))
             .style(Style::default().fg(Color::Yellow));
 
         frame.render_widget(Clear, rect);
