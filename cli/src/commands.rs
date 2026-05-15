@@ -173,6 +173,9 @@ impl Commands {
         Input::handle_input_cursor(app, key);
         match key.code {
             KeyCode::Esc => return InputMode::PromptInput,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return InputMode::Exit;
+            }
             KeyCode::Up => {
                 selected = wrap(selected as i32 - 1, filtered.len());
             }
@@ -201,6 +204,9 @@ impl Commands {
     ) -> InputMode {
         match key.code {
             KeyCode::Esc => return InputMode::PromptInput,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return InputMode::Exit;
+            }
             KeyCode::Up => {
                 selected = wrap(selected as i32 - 1, sessions.len());
             }
@@ -254,6 +260,9 @@ impl Commands {
         Input::handle_input_cursor(app, key);
         match key.code {
             KeyCode::Esc => return InputMode::PromptInput,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return InputMode::Exit;
+            }
             KeyCode::Up => {
                 let filtered_len = Self::filtered_model_indices(&app.input, &models).len();
                 selected = wrap(selected as i32 - 1, filtered_len);
@@ -349,6 +358,9 @@ impl Commands {
         match key.code {
             KeyCode::Esc => {
                 return InputMode::PromptInput;
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return InputMode::Exit;
             }
             KeyCode::Up => {
                 let filtered_len = Self::filtered_agent_indices(&app.input, &agents).len();
