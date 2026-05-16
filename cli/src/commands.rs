@@ -355,16 +355,12 @@ impl Commands {
             KeyCode::Up => {
                 let selectable_len =
                     model_picker_selectable_models(&app.input, &models, &recent_models).len();
-                if selectable_len > 0 {
-                    selected = wrap(selected as i32 - 1, selectable_len);
-                }
+                selected = wrap(selected as i32 - 1, selectable_len);
             }
             KeyCode::Down => {
                 let selectable_len =
                     model_picker_selectable_models(&app.input, &models, &recent_models).len();
-                if selectable_len > 0 {
-                    selected = wrap(selected as i32 + 1, selectable_len);
-                }
+                selected = wrap(selected as i32 + 1, selectable_len);
             }
             KeyCode::Enter => {
                 let selectable =
@@ -550,6 +546,10 @@ impl Commands {
 }
 
 pub fn wrap(i: i32, n: usize) -> usize {
-    let m = n as i32;
-    ((i % m + m) % m) as usize
+    if n > 0 {
+        let m = n as i32;
+        ((i % m + m) % m) as usize
+    } else {
+        i as usize
+    }
 }
