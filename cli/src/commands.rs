@@ -18,7 +18,7 @@ use crate::{
     config::Config,
     harness::Harness,
     input::{Input, InputMode},
-    models::{AvailableModel, Models},
+    models::{AvailableModel, Models, model_picker_selectable_models},
     session::Session,
     tui::{MessageRole, TerminalGuard, TuiApp, TuiMessage},
 };
@@ -80,8 +80,13 @@ impl Commands {
             InputMode::SessionRename { selected, sessions } => {
                 Self::handle_session_rename_mode(app, key, selected, sessions)
             }
-            InputMode::Models { selected, models } => {
-                Self::handle_models_mode(app, key, selected, models, harness, config).await
+            InputMode::Models {
+                selected,
+                models,
+                recent_models,
+            } => {
+                Self::handle_models_mode(app, key, selected, models, recent_models, harness, config)
+                    .await
             }
             InputMode::Agents { selected, agents } => {
                 Self::handle_agents_mode(app, key, selected, agents, harness)
@@ -126,10 +131,12 @@ impl Commands {
                 app.status = "Loading models...".to_string();
                 match Models::list(config).await {
                     Ok(models) => {
+                        let recent_models = Models::load_recent().unwrap_or_default();
                         app.status = format!("Loaded {} models", models.len());
                         InputMode::Models {
                             selected: 0,
                             models,
+                            recent_models,
                         }
                     }
                     Err(err) => {
@@ -334,7 +341,8 @@ impl Commands {
         app: &mut TuiApp,
         key: event::KeyEvent,
         mut selected: usize,
-        models: Vec<AvailableModel>,
+        mut models: Vec<AvailableModel>,
+        mut recent_models: Vec<AvailableModel>,
         harness: &mut Harness,
         config: &Config,
     ) -> InputMode {
@@ -345,27 +353,39 @@ impl Commands {
                 return InputMode::Exit;
             }
             KeyCode::Up => {
-                let filtered_len = Self::filtered_model_indices(&app.input, &models).len();
-                selected = wrap(selected as i32 - 1, filtered_len);
+                let selectable_len =
+                    model_picker_selectable_models(&app.input, &models, &recent_models).len();
+                if selectable_len > 0 {
+                    selected = wrap(selected as i32 - 1, selectable_len);
+                }
             }
             KeyCode::Down => {
-                let filtered_len = Self::filtered_model_indices(&app.input, &models).len();
-                selected = wrap(selected as i32 + 1, filtered_len);
+                let selectable_len =
+                    model_picker_selectable_models(&app.input, &models, &recent_models).len();
+                if selectable_len > 0 {
+                    selected = wrap(selected as i32 + 1, selectable_len);
+                }
             }
             KeyCode::Enter => {
-                let filtered = Self::filtered_model_indices(&app.input, &models);
-                if filtered.is_empty() {
+                let selectable =
+                    model_picker_selectable_models(&app.input, &models, &recent_models);
+                if selectable.is_empty() {
                     app.status = "No matching models".to_string();
-                    return InputMode::Models { selected, models };
+                    return InputMode::Models {
+                        selected,
+                        models,
+                        recent_models,
+                    };
                 }
 
-                selected = selected.min(filtered.len().saturating_sub(1));
-                let selected_model = &models[filtered[selected]];
+                selected = selected.min(selectable.len().saturating_sub(1));
+                let selected_model = &selectable[selected];
                 match selected_model.create_client(config) {
                     Ok(client) => {
                         let model_id = selected_model.id.clone();
                         harness.set_model(client, model_id.clone());
                         app.model = model_id.clone();
+                        let _ = Models::remember_recent_model(selected_model);
                         Input::clear_input(app);
                         app.status = format!("Selected model: {}", model_id);
                         return InputMode::PromptInput;
@@ -378,8 +398,15 @@ impl Commands {
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.status = "Reloading models...".to_string();
                 match Models::reload(config).await {
-                    Ok(models) => {
-                        selected = Self::clamp_model_selection(&app.input, selected, &models);
+                    Ok(reloaded_models) => {
+                        models = reloaded_models;
+                        recent_models = Models::load_recent().unwrap_or(recent_models);
+                        selected = Self::clamp_model_selection(
+                            &app.input,
+                            selected,
+                            &models,
+                            &recent_models,
+                        );
                         app.status = format!("Reloaded {} models", models.len());
                     }
                     Err(err) => {
@@ -388,27 +415,36 @@ impl Commands {
                 }
             }
             KeyCode::Backspace => {
-                selected = Self::clamp_model_selection(&app.input, selected, &models);
+                selected =
+                    Self::clamp_model_selection(&app.input, selected, &models, &recent_models);
             }
             KeyCode::Delete => {
-                selected = Self::clamp_model_selection(&app.input, selected, &models);
+                selected =
+                    Self::clamp_model_selection(&app.input, selected, &models, &recent_models);
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                selected = Self::clamp_model_selection(&app.input, selected, &models);
+                selected =
+                    Self::clamp_model_selection(&app.input, selected, &models, &recent_models);
             }
             KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                selected = Self::clamp_model_selection(&app.input, selected, &models);
+                selected =
+                    Self::clamp_model_selection(&app.input, selected, &models, &recent_models);
             }
             KeyCode::Char(ch)
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
                     && !key.modifiers.contains(KeyModifiers::ALT) =>
             {
-                selected = Self::clamp_model_selection(&app.input, selected, &models);
+                selected =
+                    Self::clamp_model_selection(&app.input, selected, &models, &recent_models);
             }
             _ => {}
         };
 
-        InputMode::Models { selected, models }
+        InputMode::Models {
+            selected,
+            models,
+            recent_models,
+        }
     }
 
     pub fn filtered_model_indices(input: &str, models: &[AvailableModel]) -> Vec<usize> {
@@ -423,8 +459,13 @@ impl Commands {
             .collect()
     }
 
-    fn clamp_model_selection(input: &str, selected: usize, models: &[AvailableModel]) -> usize {
-        let filtered_len = Self::filtered_model_indices(input, models).len();
+    fn clamp_model_selection(
+        input: &str,
+        selected: usize,
+        models: &[AvailableModel],
+        recent_models: &[AvailableModel],
+    ) -> usize {
+        let filtered_len = model_picker_selectable_models(input, models, recent_models).len();
         selected.min(filtered_len.saturating_sub(1))
     }
 

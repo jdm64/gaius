@@ -17,7 +17,7 @@ use crate::{
     agents::AgentDefinition,
     commands::{Command, Commands},
     input::InputMode,
-    models::AvailableModel,
+    models::{AvailableModel, ModelPickerRow, model_picker_rows},
     session::Session,
     tui::{MessageRole, TuiApp, TuiMessage, wrapped_line_count},
 };
@@ -56,8 +56,12 @@ impl Render {
             InputMode::SessionRename { selected, sessions } => {
                 Self::draw_sessions(app, frame, chunks[1], *selected, sessions, true);
             }
-            InputMode::Models { selected, models } => {
-                Self::draw_models(app, frame, chunks[1], *selected, models);
+            InputMode::Models {
+                selected,
+                models,
+                recent_models,
+            } => {
+                Self::draw_models(app, frame, chunks[1], *selected, models, recent_models);
             }
             InputMode::Agents { selected, agents } => {
                 Self::draw_agents(app, frame, chunks[1], *selected, agents);
@@ -200,10 +204,12 @@ impl Render {
         input_area: Rect,
         selected: usize,
         models: &[AvailableModel],
+        recent_models: &[AvailableModel],
     ) {
-        let filtered = Commands::filtered_model_indices(&app.input, models);
-        let result_count = filtered.len();
-        let selected = selected.min(result_count.saturating_sub(1));
+        let rows = model_picker_rows(&app.input, models, recent_models);
+        let result_count = rows.len();
+        let selected = selected.min(Self::selectable_row_count(&rows).saturating_sub(1));
+        let selected_row = Self::selected_row_index(&rows, selected);
         let visible_models = (result_count as u16).clamp(1, 10);
         let help_height = 1u16;
         let width = 70.min(input_area.width - 4);
@@ -212,8 +218,8 @@ impl Render {
         let y = input_area.y - height;
         let rect = Rect::new(x, y, width, height);
 
-        let start = if selected >= visible_models as usize {
-            selected + 1 - visible_models as usize
+        let start = if selected_row >= visible_models as usize {
+            selected_row + 1 - visible_models as usize
         } else {
             0
         };
@@ -222,17 +228,24 @@ impl Render {
         let items: Vec<ListItem> = if result_count == 0 {
             vec![ListItem::new("No matching models")]
         } else {
-            filtered[start..end]
+            rows[start..end]
                 .iter()
                 .enumerate()
-                .map(|(offset, model_index)| {
-                    let i = start + offset;
-                    let model = &models[*model_index];
-                    let label = model.label();
-                    if i == selected {
-                        ListItem::new(label).style(Style::default().bg(Color::DarkGray))
-                    } else {
-                        ListItem::new(label)
+                .map(|(offset, row)| {
+                    let row_index = start + offset;
+                    match row {
+                        ModelPickerRow::Header(label) => {
+                            ListItem::new(label.as_str()).style(Style::default().fg(Color::Yellow))
+                        }
+                        ModelPickerRow::Separator => ListItem::new(""),
+                        ModelPickerRow::Model(model) => {
+                            let item = ListItem::new(model.label());
+                            if row_index == selected_row {
+                                item.style(Style::default().bg(Color::DarkGray))
+                            } else {
+                                item
+                            }
+                        }
                     }
                 })
                 .collect()
@@ -262,6 +275,26 @@ impl Render {
 
         frame.render_widget(models_list, chunks[0]);
         frame.render_widget(help_para, chunks[1]);
+    }
+
+    fn selectable_row_count(rows: &[ModelPickerRow]) -> usize {
+        rows.iter()
+            .filter(|row| matches!(row, ModelPickerRow::Model(_)))
+            .count()
+    }
+
+    fn selected_row_index(rows: &[ModelPickerRow], selected: usize) -> usize {
+        let mut model_index = 0;
+        for (row_index, row) in rows.iter().enumerate() {
+            if matches!(row, ModelPickerRow::Model(_)) {
+                if model_index == selected {
+                    return row_index;
+                }
+                model_index += 1;
+            }
+        }
+
+        0
     }
 
     fn draw_agents(

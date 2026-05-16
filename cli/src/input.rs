@@ -45,6 +45,7 @@ pub enum InputMode {
     Models {
         selected: usize,
         models: Vec<AvailableModel>,
+        recent_models: Vec<AvailableModel>,
     },
     Agents {
         selected: usize,

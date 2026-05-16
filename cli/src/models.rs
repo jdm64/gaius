@@ -24,7 +24,9 @@ use serde_json::Value;
 use std::{collections::BTreeMap, error::Error, path::PathBuf, time::Duration};
 use url::Url;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+pub const RECENT_MODELS_LIMIT: usize = 8;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AvailableModel {
     pub provider: String,
     pub id: String,
@@ -60,6 +62,13 @@ impl AvailableModel {
 }
 
 type ProviderModelsCache = BTreeMap<String, Vec<String>>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModelPickerRow {
+    Header(String),
+    Separator,
+    Model(AvailableModel),
+}
 
 pub struct Models;
 
@@ -123,6 +132,40 @@ impl Models {
         Ok(cache_dir()?.join("models_cache.json"))
     }
 
+    pub fn load_recent() -> Result<Vec<AvailableModel>, Box<dyn Error>> {
+        let path = Self::recent_cache_path()?;
+        if !path.is_file() {
+            return Ok(Vec::new());
+        }
+
+        let contents = std::fs::read_to_string(path)?;
+        let models: Vec<AvailableModel> = serde_json::from_str(&contents)?;
+        Ok(models)
+    }
+
+    pub fn save_recent(models: &[AvailableModel]) -> Result<(), Box<dyn Error>> {
+        let path = Self::recent_cache_path()?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        std::fs::write(path, serde_json::to_string_pretty(models)?)?;
+        Ok(())
+    }
+
+    pub fn remember_recent_model(
+        model: &AvailableModel,
+    ) -> Result<Vec<AvailableModel>, Box<dyn Error>> {
+        let recent = Self::load_recent()?;
+        let recent = recent_models_with_model(&recent, model);
+        Self::save_recent(&recent)?;
+        Ok(recent)
+    }
+
+    fn recent_cache_path() -> Result<PathBuf, Box<dyn Error>> {
+        Ok(cache_dir()?.join("recent_models.json"))
+    }
+
     async fn fetch_provider_models(
         client: &reqwest::Client,
         provider: &ProviderConfig,
@@ -139,6 +182,74 @@ impl Models {
 
         Err(last_error.unwrap_or_else(|| "No model URLs generated".into()))
     }
+}
+
+pub fn recent_models_with_model(
+    recent: &[AvailableModel],
+    model: &AvailableModel,
+) -> Vec<AvailableModel> {
+    let mut models = Vec::with_capacity(RECENT_MODELS_LIMIT);
+    models.push(model.clone());
+
+    for recent_model in recent {
+        if recent_model != model && models.len() < RECENT_MODELS_LIMIT {
+            models.push(recent_model.clone());
+        }
+    }
+
+    models
+}
+
+pub fn model_picker_selectable_models(
+    input: &str,
+    models: &[AvailableModel],
+    recent: &[AvailableModel],
+) -> Vec<AvailableModel> {
+    model_picker_rows(input, models, recent)
+        .into_iter()
+        .filter_map(|row| match row {
+            ModelPickerRow::Model(model) => Some(model),
+            ModelPickerRow::Header(_) | ModelPickerRow::Separator => None,
+        })
+        .collect()
+}
+
+pub fn model_picker_rows(
+    input: &str,
+    models: &[AvailableModel],
+    recent: &[AvailableModel],
+) -> Vec<ModelPickerRow> {
+    let recent_models = matching_models(input, recent);
+    let remaining_models: Vec<AvailableModel> = matching_models(input, models)
+        .into_iter()
+        .filter(|model| !recent.iter().any(|recent_model| recent_model == model))
+        .collect();
+
+    let mut rows = Vec::new();
+    if !recent_models.is_empty() {
+        rows.push(ModelPickerRow::Header("Recent".to_string()));
+        rows.extend(recent_models.into_iter().map(ModelPickerRow::Model));
+    }
+
+    if rows
+        .iter()
+        .any(|row| matches!(row, ModelPickerRow::Model(_)))
+        && !remaining_models.is_empty()
+    {
+        rows.push(ModelPickerRow::Separator);
+    }
+
+    rows.extend(remaining_models.into_iter().map(ModelPickerRow::Model));
+    rows
+}
+
+fn matching_models(input: &str, models: &[AvailableModel]) -> Vec<AvailableModel> {
+    let query = input.trim().to_lowercase();
+    models
+        .iter()
+        .filter(|model| query.is_empty() || model.id.to_lowercase().contains(&query))
+        .cloned()
+        .collect()
 }
 
 pub fn cache_from_models(models: &[AvailableModel]) -> ProviderModelsCache {
