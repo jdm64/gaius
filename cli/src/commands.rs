@@ -77,6 +77,9 @@ impl Commands {
             InputMode::Session { selected, sessions } => {
                 Self::handle_session_mode(app, key, selected, sessions, harness)
             }
+            InputMode::SessionRename { selected, sessions } => {
+                Self::handle_session_rename_mode(app, key, selected, sessions)
+            }
             InputMode::Models { selected, models } => {
                 Self::handle_models_mode(app, key, selected, models, harness, config).await
             }
@@ -199,7 +202,7 @@ impl Commands {
         app: &mut TuiApp,
         key: event::KeyEvent,
         mut selected: usize,
-        mut sessions: Vec<String>,
+        mut sessions: Vec<Session>,
         harness: &mut Harness,
     ) -> InputMode {
         match key.code {
@@ -207,46 +210,124 @@ impl Commands {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return InputMode::Exit;
             }
-            KeyCode::Up => {
+            KeyCode::Up if !sessions.is_empty() => {
                 selected = wrap(selected as i32 - 1, sessions.len());
             }
-            KeyCode::Down => {
+            KeyCode::Down if !sessions.is_empty() => {
                 selected = wrap(selected as i32 + 1, sessions.len());
             }
             KeyCode::Enter if !sessions.is_empty() => {
-                let session_id = &sessions[selected];
-                match harness.load_session_by_id(session_id) {
-                    Ok(()) => {
-                        app.messages.clear();
-                        Input::reset_history_scroll(app);
-                        app.status = format!("Loaded session: {}", session_id);
-                        app.context_tokens = None;
-                        app.load_history(harness.history());
-                        return InputMode::PromptInput;
+                let session = &sessions[selected];
+                if let Some(session_id) = &session.id {
+                    match harness.load_session_by_id(session_id) {
+                        Ok(()) => {
+                            app.messages.clear();
+                            Input::reset_history_scroll(app);
+                            app.status = format!("Loaded session: {}", session.display_name());
+                            app.context_tokens = None;
+                            app.load_history(harness.history());
+                            return InputMode::PromptInput;
+                        }
+                        Err(e) => {
+                            app.status = format!("Error loading session: {}", e);
+                        }
                     }
-                    Err(e) => {
-                        app.status = format!("Error loading session: {}", e);
-                    }
+                } else {
+                    app.status = "Error loading session: missing session id".to_string();
                 }
             }
             KeyCode::Char('d')
                 if key.modifiers.contains(KeyModifiers::CONTROL) && !sessions.is_empty() =>
             {
-                let session_id = sessions[selected].clone();
-                if let Err(e) = Session::delete(&session_id) {
-                    app.status = format!("Error deleting session: {}", e);
-                } else {
-                    sessions = Session::list();
-                    if selected >= sessions.len() && selected > 0 {
-                        selected -= 1;
+                let session = &sessions[selected];
+                if let Some(session_id) = &session.id {
+                    let display_name = session.display_name();
+                    if let Err(e) = Session::delete(session_id) {
+                        app.status = format!("Error deleting session: {}", e);
+                    } else {
+                        sessions = Session::list();
+                        if selected >= sessions.len() && selected > 0 {
+                            selected -= 1;
+                        }
+                        app.status = format!("Deleted session: {}", display_name);
                     }
-                    app.status = format!("Deleted session: {}", session_id);
+                } else {
+                    app.status = "Error deleting session: missing session id".to_string();
                 }
+            }
+            KeyCode::Char('e')
+                if key.modifiers.contains(KeyModifiers::CONTROL) && !sessions.is_empty() =>
+            {
+                let session = &sessions[selected];
+                app.input = session.display_name();
+                app.input_cursor = app.input.chars().count();
+                app.status = "Rename session".to_string();
+                return InputMode::SessionRename { selected, sessions };
             }
             _ => {}
         };
 
         InputMode::Session { selected, sessions }
+    }
+
+    pub fn handle_session_rename_mode(
+        app: &mut TuiApp,
+        key: event::KeyEvent,
+        mut selected: usize,
+        mut sessions: Vec<Session>,
+    ) -> InputMode {
+        match key.code {
+            KeyCode::Esc => {
+                Input::clear_input(app);
+                return InputMode::Session { selected, sessions };
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return InputMode::Exit;
+            }
+            KeyCode::Enter => {
+                let new_name = app.input.trim().to_string();
+                if new_name.is_empty() {
+                    app.status = "Session name cannot be empty".to_string();
+                    return InputMode::SessionRename { selected, sessions };
+                }
+
+                if sessions.is_empty() {
+                    app.status = "No session selected".to_string();
+                    Input::clear_input(app);
+                    return InputMode::Session { selected, sessions };
+                }
+
+                selected = selected.min(sessions.len().saturating_sub(1));
+                let selected_id = sessions[selected].id.clone();
+                match sessions[selected].rename(new_name.clone()) {
+                    Ok(()) => {
+                        sessions = Session::list();
+                        if let Some(selected_id) = selected_id {
+                            selected = sessions
+                                .iter()
+                                .position(|session| {
+                                    session.id.as_deref() == Some(selected_id.as_str())
+                                })
+                                .unwrap_or_else(|| selected.min(sessions.len().saturating_sub(1)));
+                        } else {
+                            selected = selected.min(sessions.len().saturating_sub(1));
+                        }
+                        Input::clear_input(app);
+                        app.status = format!("Renamed session: {}", new_name);
+                        return InputMode::Session { selected, sessions };
+                    }
+                    Err(e) => {
+                        app.status = format!("Error renaming session: {}", e);
+                        return InputMode::SessionRename { selected, sessions };
+                    }
+                }
+            }
+            _ => {
+                Input::handle_input_cursor(app, key);
+            }
+        }
+
+        InputMode::SessionRename { selected, sessions }
     }
 
     pub async fn handle_models_mode(

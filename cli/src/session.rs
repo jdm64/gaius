@@ -13,10 +13,15 @@
  * limitations under the License.
  */
 
-use genai::chat::{ChatMessage, ChatRequest};
+use genai::chat::{ChatMessage, ChatRequest, ChatRole, MessageContent};
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fs::File, io::BufReader, path::PathBuf};
+use std::{
+    error::Error,
+    fs::File,
+    io::BufReader,
+    path::{Path, PathBuf},
+};
 use uuid::Uuid;
 
 use crate::util::data_dir;
@@ -42,8 +47,15 @@ fn validate_session_id(session_id: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+pub struct SessionFile {
+    _id: i32,
+    name: String,
+    messages: Option<Vec<ChatMessage>>,
+}
+
 pub struct Session {
     pub id: Option<String>,
+    pub name: Option<String>,
 }
 
 impl Default for Session {
@@ -56,16 +68,54 @@ impl Session {
     pub fn new() -> Self {
         Self {
             id: Some(Uuid::now_v7().to_string()),
+            name: None,
         }
     }
 
     pub fn new_named(name: String) -> Result<Self, Box<dyn Error>> {
         validate_session_id(name.as_str())?;
-        Ok(Self { id: Some(name) })
+        Ok(Self {
+            id: Some(name),
+            name: None,
+        })
     }
 
     pub fn new_empty() -> Self {
-        Self { id: None }
+        Self {
+            id: None,
+            name: None,
+        }
+    }
+
+    fn deserialize_session(path: &Path, read_msgs: bool) -> Result<SessionFile, Box<dyn Error>> {
+        let file = File::open(path)?;
+        let buf = BufReader::new(file);
+        let mut des = Deserializer::new(buf);
+
+        let version: i32 = Deserialize::deserialize(&mut des)?;
+        let name: String = Deserialize::deserialize(&mut des)?;
+        let mut messages: Option<Vec<ChatMessage>> = None;
+        if read_msgs {
+            messages = Deserialize::deserialize(&mut des)?;
+        }
+
+        Ok(SessionFile {
+            _id: version,
+            name,
+            messages,
+        })
+    }
+
+    fn serialize_session(&self, path: &Path, history: &ChatRequest) -> Result<(), Box<dyn Error>> {
+        let file = File::create(path)?;
+        let mut ser = Serializer::new(file).with_struct_map();
+
+        1.serialize(&mut ser)?;
+        let name = self.name.clone().unwrap_or(Self::derived_name(history));
+        name.serialize(&mut ser)?;
+        history.messages.serialize(&mut ser)?;
+
+        Ok(())
     }
 
     pub fn load(&self) -> Result<ChatRequest, Box<dyn Error>> {
@@ -75,43 +125,42 @@ impl Session {
 
         let path = session_file(session_id.as_str())?;
         if path.is_file() {
-            let file = File::open(path)?;
-            let reader = BufReader::new(file);
-            let mut des = Deserializer::new(reader);
-            let _version: i32 = Deserialize::deserialize(&mut des)?;
-            let messages: Vec<ChatMessage> = Deserialize::deserialize(&mut des)?;
-            Ok(ChatRequest::new(messages))
+            let data = Self::deserialize_session(path.as_path(), true)?;
+            Ok(ChatRequest::new(data.messages.unwrap_or_default()))
         } else {
             Ok(ChatRequest::new(vec![]))
         }
     }
 
     pub fn save(&self, history: &ChatRequest) -> Result<(), Box<dyn Error>> {
-        if let Some(session_id) = self.id.clone() {
+        if let Some(session_id) = &self.id {
             let path = session_file(session_id.as_str())?;
-            let file = File::create(path)?;
-            let mut ser = Serializer::new(file).with_struct_map();
-            1.serialize(&mut ser)?;
-            history.messages.serialize(&mut ser)?;
+            self.serialize_session(path.as_path(), history)?;
         }
 
         Ok(())
     }
 
-    pub fn list() -> Vec<String> {
+    pub fn list() -> Vec<Session> {
         let dir = match sessions_dir() {
             Ok(d) => d,
             Err(_) => return Vec::new(),
         };
 
-        let mut sessions: Vec<String> = std::fs::read_dir(dir)
+        let mut sessions: Vec<Session> = std::fs::read_dir(dir)
             .map(|entries| {
                 entries
                     .filter_map(|entry| entry.ok())
                     .filter_map(|entry| {
                         let path = entry.path();
                         if path.extension()? == "mpk" {
-                            path.file_stem()?.to_str().map(|s| s.to_string())
+                            let data = Self::deserialize_session(path.as_path(), false).ok()?;
+                            let id = path.file_stem()?.to_str().map(|s| s.to_string());
+
+                            Some(Session {
+                                id,
+                                name: Some(data.name),
+                            })
                         } else {
                             None
                         }
@@ -120,7 +169,7 @@ impl Session {
             })
             .unwrap_or_default();
 
-        sessions.sort();
+        sessions.sort_by(|a, b| a.id.cmp(&b.id));
         sessions
     }
 
@@ -131,5 +180,58 @@ impl Session {
             std::fs::remove_file(path)?;
         }
         Ok(())
+    }
+
+    pub fn name(session_id: &str) -> Result<String, Box<dyn Error>> {
+        let path = session_file(session_id)?;
+        if path.is_file() {
+            let data = Self::deserialize_session(path.as_path(), false)?;
+            Ok(data.name)
+        } else {
+            Err("Session file not found".into())
+        }
+    }
+
+    pub fn rename(&mut self, new_name: String) -> Result<(), Box<dyn Error>> {
+        let Some(session_id) = &self.id else {
+            return Err("Cannot rename a session without an id".into());
+        };
+
+        let history = self.load()?;
+        let path = session_file(session_id.as_str())?;
+        let tmp_path = path.with_extension("tmp");
+
+        self.name = Some(new_name);
+        self.serialize_session(tmp_path.as_path(), &history)?;
+        std::fs::rename(&tmp_path, &path)?;
+
+        Ok(())
+    }
+
+    pub fn display_name(&self) -> String {
+        self.name
+            .as_deref()
+            .or(self.id.as_deref())
+            .unwrap_or("<none>")
+            .to_string()
+    }
+
+    fn derived_name(history: &ChatRequest) -> String {
+        fn first_text(content: &MessageContent) -> Option<String> {
+            content.first_text().map(|s| s.to_string())
+        }
+
+        history
+            .messages
+            .iter()
+            .find(|m| m.role == ChatRole::User)
+            .and_then(|m| first_text(&m.content))
+            .map(|s| {
+                s.chars()
+                    .take(40)
+                    .filter(|c| !c.is_control())
+                    .collect::<String>()
+            })
+            .unwrap_or("<unamed>".to_string())
     }
 }

@@ -18,6 +18,7 @@ use crate::{
     commands::{Command, Commands},
     input::InputMode,
     models::AvailableModel,
+    session::Session,
     tui::{MessageRole, TuiApp, TuiMessage, wrapped_line_count},
 };
 use ratatui::{
@@ -50,7 +51,10 @@ impl Render {
                 Self::draw_commands(app, frame, chunks[1], *selected, filtered);
             }
             InputMode::Session { selected, sessions } => {
-                Self::draw_sessions(app, frame, chunks[1], *selected, sessions);
+                Self::draw_sessions(app, frame, chunks[1], *selected, sessions, false);
+            }
+            InputMode::SessionRename { selected, sessions } => {
+                Self::draw_sessions(app, frame, chunks[1], *selected, sessions, true);
             }
             InputMode::Models { selected, models } => {
                 Self::draw_models(app, frame, chunks[1], *selected, models);
@@ -122,7 +126,8 @@ impl Render {
         frame: &mut Frame<'_>,
         input_area: Rect,
         selected: usize,
-        sessions: &[String],
+        sessions: &[Session],
+        renaming: bool,
     ) {
         let session_count = sessions.len();
         let selected = selected.min(session_count.saturating_sub(1));
@@ -147,13 +152,13 @@ impl Render {
             sessions[start..end]
                 .iter()
                 .enumerate()
-                .map(|(offset, session_id)| {
+                .map(|(offset, session)| {
                     let i = start + offset;
+                    let label = session.display_name();
                     if i == selected {
-                        ListItem::new(session_id.as_str())
-                            .style(Style::default().bg(Color::DarkGray))
+                        ListItem::new(label).style(Style::default().bg(Color::DarkGray))
                     } else {
-                        ListItem::new(session_id.as_str())
+                        ListItem::new(label)
                     }
                 })
                 .collect()
@@ -166,7 +171,11 @@ impl Render {
                 .padding(Padding::horizontal(1)),
         );
 
-        let help_text = "  Enter: load | Ctrl+D: delete | Esc: close";
+        let help_text = if renaming {
+            "  Enter: save | Esc: cancel"
+        } else {
+            "  Enter: load | Ctrl+E: rename | Ctrl+D: delete | Esc: close"
+        };
         let help_para = Paragraph::new(help_text)
             .block(Block::default().borders(Borders::NONE))
             .style(Style::default().fg(Color::Yellow));

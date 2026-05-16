@@ -19,6 +19,7 @@ use crate::{
     config::Config,
     harness::Harness,
     models::AvailableModel,
+    session::Session,
     tui::{TerminalGuard, TuiApp},
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
@@ -35,7 +36,11 @@ pub enum InputMode {
     },
     Session {
         selected: usize,
-        sessions: Vec<String>,
+        sessions: Vec<Session>,
+    },
+    SessionRename {
+        selected: usize,
+        sessions: Vec<Session>,
     },
     Models {
         selected: usize,
