@@ -31,6 +31,7 @@ impl Agents {
     pub fn load(config_dir: &Path) -> Result<Self, Box<dyn Error>> {
         let mut agents = hardcoded_agents();
         let agents_dir = config_dir.join("agents");
+        std::fs::create_dir_all(&agents_dir)?;
 
         if agents_dir.is_dir() {
             let mut files = std::fs::read_dir(&agents_dir)?

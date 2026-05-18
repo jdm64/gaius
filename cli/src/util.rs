@@ -19,20 +19,26 @@ use std::path::PathBuf;
 
 pub fn config_dir() -> Result<PathBuf, Box<dyn Error>> {
     let home = std::env::var("HOME")?;
-    Ok(PathBuf::from(home).join(".config").join("gaius"))
+    let dir = PathBuf::from(home).join(".config").join("gaius");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
 pub fn data_dir() -> Result<PathBuf, Box<dyn Error>> {
     let home = std::env::var("HOME")?;
-    Ok(PathBuf::from(home)
+    let dir = PathBuf::from(home)
         .join(".local")
         .join("share")
-        .join("gaius"))
+        .join("gaius");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
 pub fn cache_dir() -> Result<PathBuf, Box<dyn Error>> {
     let home = std::env::var("HOME")?;
-    Ok(PathBuf::from(home).join(".cache").join("gaius"))
+    let dir = PathBuf::from(home).join(".cache").join("gaius");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
 pub fn prompt_input(label: &str) -> Result<String, Box<dyn Error>> {

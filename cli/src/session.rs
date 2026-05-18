@@ -32,7 +32,9 @@ fn sessions_dir() -> Result<PathBuf, Box<dyn Error>> {
 
 fn session_file(session_id: &str) -> Result<PathBuf, Box<dyn Error>> {
     validate_session_id(session_id)?;
-    Ok(sessions_dir()?.join(format!("{}.mpk", session_id)))
+    let sessions_dir = sessions_dir()?;
+    std::fs::create_dir_all(&sessions_dir)?;
+    Ok(sessions_dir.join(format!("{}.mpk", session_id)))
 }
 
 fn validate_session_id(session_id: &str) -> Result<(), Box<dyn Error>> {
