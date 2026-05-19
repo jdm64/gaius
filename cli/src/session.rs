@@ -171,7 +171,7 @@ impl Session {
             })
             .unwrap_or_default();
 
-        sessions.sort_by(|a, b| a.id.cmp(&b.id));
+        sessions.sort_by(|a, b| b.id.cmp(&a.id));
         sessions
     }
 
