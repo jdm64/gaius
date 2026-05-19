@@ -504,27 +504,43 @@ impl Render {
                 let style = Style::default().bg(Color::Rgb(64, 64, 64)).italic().bold();
                 vec![Line::from(text.clone()).style(style)]
             }
-            TuiMessage::ToolCall { name, arguments, result: _result } => {
+            TuiMessage::ToolCall {
+                name,
+                arguments,
+                result: _result,
+            } => {
                 let style = Style::default().fg(Color::Cyan);
                 if let Ok(args) = serde_json::from_str::<Value>(arguments) {
                     if let Some(file_path) = args.get("file_path").and_then(|v| v.as_str()) {
-                        let bold_name =
-                            Span::styled(name, style.add_modifier(Modifier::BOLD));
+                        let bold_name = Span::styled(name, style.add_modifier(Modifier::BOLD));
                         let italic_file = Span::styled(
                             file_path.to_string(),
                             style.add_modifier(Modifier::ITALIC),
                         );
                         vec![Line::from(vec![bold_name, Span::raw(" "), italic_file])]
-                    } else if let Some(command) =
-                        args.get("command").and_then(|v| v.as_str())
-                    {
-                        let bold_name =
-                            Span::styled(name, style.add_modifier(Modifier::BOLD));
-                        let italic_cmd = Span::styled(
-                            command.to_string(),
-                            style.add_modifier(Modifier::ITALIC),
-                        );
+                    } else if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
+                        let bold_name = Span::styled(name, style.add_modifier(Modifier::BOLD));
+                        let italic_cmd =
+                            Span::styled(command.to_string(), style.add_modifier(Modifier::ITALIC));
                         vec![Line::from(vec![bold_name, Span::raw(" "), italic_cmd])]
+                    } else if name == "grep" && args.get("path").and_then(|v| v.as_str()).is_some()
+                    {
+                        let bold_name = Span::styled(name, style.add_modifier(Modifier::BOLD));
+                        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                        let pattern = args.get("include").and_then(|v| v.as_str()).unwrap_or("");
+                        let mut spans = vec![
+                            bold_name,
+                            Span::raw(" "),
+                            Span::styled(path.to_string(), style.add_modifier(Modifier::ITALIC)),
+                        ];
+                        if !pattern.is_empty() {
+                            spans.push(Span::raw(" "));
+                            spans.push(Span::styled(
+                                pattern.to_string(),
+                                style.add_modifier(Modifier::ITALIC),
+                            ));
+                        }
+                        vec![Line::from(spans)]
                     } else {
                         let text = format!("{} ({})", name, arguments);
                         vec![Line::from(text).style(style)]
