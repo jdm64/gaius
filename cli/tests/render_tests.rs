@@ -1,5 +1,6 @@
 use gaius::render::Render;
 use gaius::tui::{MessageRole, TuiMessage};
+use ratatui::text::Line;
 
 #[test]
 fn markdown_heading_has_bold_style() {
@@ -45,4 +46,46 @@ fn markdown_list_has_style() {
     let joined = content.join(" ");
     assert!(joined.contains("item1"));
     assert!(joined.contains("item2"));
+}
+
+#[test]
+fn visible_history_lines_returns_bottom_window() {
+    let lines = vec![
+        Line::from("one"),
+        Line::from("two"),
+        Line::from("three"),
+        Line::from("four"),
+    ];
+
+    let visible = Render::visible_history_lines(&lines, 20, 2, 2);
+
+    assert_eq!(line_texts(&visible), vec!["three", "four"]);
+}
+
+#[test]
+fn visible_history_lines_slices_wrapped_lines() {
+    let lines = vec![Line::from("abcdef"), Line::from("gh")];
+
+    let visible = Render::visible_history_lines(&lines, 2, 1, 3);
+
+    assert_eq!(line_texts(&visible), vec!["cd", "ef", "gh"]);
+}
+
+#[test]
+fn visible_history_lines_handles_empty_history() {
+    let visible = Render::visible_history_lines(&[], 20, 0, 5);
+
+    assert!(visible.is_empty());
+}
+
+fn line_texts(lines: &[Line<'_>]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect()
+        })
+        .collect()
 }

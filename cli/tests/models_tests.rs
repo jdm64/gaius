@@ -186,6 +186,22 @@ fn model_picker_rows_hide_empty_filtered_sections() {
 }
 
 #[test]
+fn model_picker_filter_selects_only_model_rows() {
+    let available = vec![model("provider", "alpha"), model("provider", "beta")];
+    let recent = vec![model("provider", "beta")];
+    let rows = gaius::models::model_picker_rows("", &available, &recent);
+
+    assert_eq!(
+        gaius::input::Input::filter_model_rows("", &rows),
+        vec![1, 3]
+    );
+    assert_eq!(
+        gaius::input::Input::filter_model_rows("alp", &rows),
+        vec![3]
+    );
+}
+
+#[test]
 fn models_cache_loads_provider_model_map() {
     let cache = serde_json::from_value(json!({
         "provider 1": ["model 2", "model 1"],

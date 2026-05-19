@@ -90,6 +90,9 @@ pub struct TuiApp {
     pub context_tokens: Option<i32>,
     pub prompt_history: Vec<String>,
     pub prompt_history_idx: Option<usize>,
+    pub history_lines: Vec<Line<'static>>,
+    pub history_generation: u64,
+    pub rendered_history_generation: u64,
 }
 
 impl Default for TuiApp {
@@ -113,6 +116,9 @@ impl TuiApp {
             context_tokens: None,
             prompt_history: Vec::new(),
             prompt_history_idx: None,
+            history_lines: Vec::new(),
+            history_generation: 0,
+            rendered_history_generation: u64::MAX,
         }
     }
 
@@ -182,7 +188,7 @@ impl TuiApp {
         Input::update_prompt_history(self, prompt.clone());
         Input::clear_input(self);
         Input::reset_history_scroll(self);
-        self.messages.push(TuiMessage {
+        self.push_message(TuiMessage {
             role: MessageRole::User,
             text: prompt.clone(),
         });
@@ -196,7 +202,7 @@ impl TuiApp {
                         self.append_agent_message_chunk(text);
                     }
                     HarnessEvent::ToolCall { name, arguments } => {
-                        self.messages.push(TuiMessage {
+                        self.push_message(TuiMessage {
                             role: MessageRole::ToolCall,
                             text: format!("{} ({})", name, arguments),
                         });
@@ -213,7 +219,7 @@ impl TuiApp {
                 self.context_tokens = harness.context_tokens();
             }
             Err(err) => {
-                self.messages.push(TuiMessage {
+                self.push_message(TuiMessage {
                     role: MessageRole::System,
                     text: format!("Error: {}", err),
                 });
@@ -235,11 +241,12 @@ impl TuiApp {
         {
             message.text.push_str(&chunk);
         } else {
-            self.messages.push(TuiMessage {
+            self.push_message(TuiMessage {
                 role: MessageRole::Agent,
                 text: chunk,
             });
         }
+        self.mark_history_dirty();
         Input::reset_history_scroll(self);
     }
 
@@ -247,7 +254,7 @@ impl TuiApp {
         if let Some(system) = &history.system
             && !system.trim().is_empty()
         {
-            self.messages.push(TuiMessage {
+            self.push_message(TuiMessage {
                 role: MessageRole::System,
                 text: format!("system: {}", system),
             });
@@ -256,9 +263,23 @@ impl TuiApp {
         for message in &history.messages {
             for tui_message in tui_messages_for_chat_message(message.role.clone(), &message.content)
             {
-                self.messages.push(tui_message);
+                self.push_message(tui_message);
             }
         }
+    }
+
+    pub fn clear_messages(&mut self) {
+        self.messages.clear();
+        self.mark_history_dirty();
+    }
+
+    pub fn push_message(&mut self, message: TuiMessage) {
+        self.messages.push(message);
+        self.mark_history_dirty();
+    }
+
+    pub fn mark_history_dirty(&mut self) {
+        self.history_generation = self.history_generation.wrapping_add(1);
     }
 
     pub fn prompt_history_file() -> Result<PathBuf, Box<dyn Error>> {

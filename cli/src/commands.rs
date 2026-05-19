@@ -17,8 +17,8 @@ use crate::{
     agents::AgentDefinition,
     config::Config,
     harness::Harness,
-    input::{Input, InputMode},
-    models::{AvailableModel, Models, model_picker_selectable_models},
+    input::{Input, InputMode, PickList},
+    models::{ModelPickerRow, Models, model_picker_rows},
     session::Session,
     tui::{MessageRole, TerminalGuard, TuiApp, TuiMessage},
 };
@@ -71,26 +71,17 @@ impl Commands {
             InputMode::PromptInput => {
                 Input::handle_prompt_input(app, key, guard, harness, config).await?
             }
-            InputMode::Command { selected, filtered } => {
-                Self::handle_command_mode(app, key, selected, filtered, harness, config).await
+            InputMode::Command { picker } => {
+                Self::handle_command_mode(app, key, picker, harness, config).await
             }
-            InputMode::Session { selected, sessions } => {
-                Self::handle_session_mode(app, key, selected, sessions, harness)
+            InputMode::Session { picker } => Self::handle_session_mode(app, key, picker, harness),
+            InputMode::SessionRename { picker } => {
+                Self::handle_session_rename_mode(app, key, picker)
             }
-            InputMode::SessionRename { selected, sessions } => {
-                Self::handle_session_rename_mode(app, key, selected, sessions)
+            InputMode::Models { picker } => {
+                Self::handle_models_mode(app, key, picker, harness, config).await
             }
-            InputMode::Models {
-                selected,
-                models,
-                recent_models,
-            } => {
-                Self::handle_models_mode(app, key, selected, models, recent_models, harness, config)
-                    .await
-            }
-            InputMode::Agents { selected, agents } => {
-                Self::handle_agents_mode(app, key, selected, agents, harness)
-            }
+            InputMode::Agents { picker } => Self::handle_agents_mode(app, key, picker, harness),
             InputMode::Exit => InputMode::Exit,
         };
         Ok(())
@@ -106,7 +97,7 @@ impl Commands {
             "new" => {
                 match harness.new_session() {
                     Ok(_) => {
-                        app.messages.clear();
+                        app.clear_messages();
                         Input::reset_history_scroll(app);
                         app.status = "New session created".to_string();
                         app.context_tokens = None;
@@ -122,8 +113,7 @@ impl Commands {
                 let sessions = Session::list();
                 Input::clear_input(app);
                 InputMode::Session {
-                    selected: 0,
-                    sessions,
+                    picker: PickList::all(sessions),
                 }
             }
             "models" => {
@@ -132,11 +122,11 @@ impl Commands {
                 match Models::list(config).await {
                     Ok(models) => {
                         let recent_models = Models::load_recent().unwrap_or_default();
+                        let rows = model_picker_rows("", &models, &recent_models);
+                        let filtered = Input::filter_model_rows("", &rows);
                         app.status = format!("Loaded {} models", models.len());
                         InputMode::Models {
-                            selected: 0,
-                            models,
-                            recent_models,
+                            picker: PickList::new(rows, filtered),
                         }
                     }
                     Err(err) => {
@@ -150,8 +140,7 @@ impl Commands {
                 Input::clear_input(app);
                 app.status = format!("Loaded {} agents", agents.len());
                 InputMode::Agents {
-                    selected: 0,
-                    agents,
+                    picker: PickList::all(agents),
                 }
             }
             "streaming" => {
@@ -161,7 +150,7 @@ impl Commands {
                 InputMode::PromptInput
             }
             _ => {
-                app.messages.push(TuiMessage {
+                app.push_message(TuiMessage {
                     role: MessageRole::System,
                     text: format!("Unknown command: /{}", command),
                 });
@@ -175,8 +164,7 @@ impl Commands {
     pub async fn handle_command_mode(
         app: &mut TuiApp,
         key: event::KeyEvent,
-        mut selected: usize,
-        filtered: Vec<Command>,
+        mut picker: PickList<Command>,
         harness: &mut Harness,
         config: &Config,
     ) -> InputMode {
@@ -187,29 +175,33 @@ impl Commands {
                 return InputMode::Exit;
             }
             KeyCode::Up => {
-                selected = wrap(selected as i32 - 1, filtered.len());
+                picker.move_up();
             }
             KeyCode::Down => {
-                selected = wrap(selected as i32 + 1, filtered.len());
+                picker.move_down();
             }
-            KeyCode::Enter if !filtered.is_empty() => {
-                let command = filtered[selected].name;
-                return Self::execute_command(app, harness, config, command).await;
+            KeyCode::Enter if !picker.is_empty() => {
+                let command = picker.selected_row().map(|row| row.name);
+                if let Some(command) = command {
+                    return Self::execute_command(app, harness, config, command).await;
+                }
             }
             KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_) => {
-                return Input::mode_for_input(app);
+                picker.replace_filter(Input::filter_commands(&app.input, &picker.rows));
+                if picker.is_empty() {
+                    return InputMode::PromptInput;
+                }
             }
             _ => {}
         }
 
-        InputMode::Command { selected, filtered }
+        InputMode::Command { picker }
     }
 
     pub fn handle_session_mode(
         app: &mut TuiApp,
         key: event::KeyEvent,
-        mut selected: usize,
-        mut sessions: Vec<Session>,
+        mut picker: PickList<Session>,
         harness: &mut Harness,
     ) -> InputMode {
         match key.code {
@@ -217,18 +209,20 @@ impl Commands {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return InputMode::Exit;
             }
-            KeyCode::Up if !sessions.is_empty() => {
-                selected = wrap(selected as i32 - 1, sessions.len());
+            KeyCode::Up if !picker.is_empty() => {
+                picker.move_up();
             }
-            KeyCode::Down if !sessions.is_empty() => {
-                selected = wrap(selected as i32 + 1, sessions.len());
+            KeyCode::Down if !picker.is_empty() => {
+                picker.move_down();
             }
-            KeyCode::Enter if !sessions.is_empty() => {
-                let session = &sessions[selected];
+            KeyCode::Enter if !picker.is_empty() => {
+                let Some(session) = picker.selected_row() else {
+                    return InputMode::Session { picker };
+                };
                 if let Some(session_id) = &session.id {
                     match harness.load_session_by_id(session_id) {
                         Ok(()) => {
-                            app.messages.clear();
+                            app.clear_messages();
                             Input::reset_history_scroll(app);
                             app.status = format!("Loaded session: {}", session.display_name());
                             app.context_tokens = None;
@@ -244,18 +238,19 @@ impl Commands {
                 }
             }
             KeyCode::Char('d')
-                if key.modifiers.contains(KeyModifiers::CONTROL) && !sessions.is_empty() =>
+                if key.modifiers.contains(KeyModifiers::CONTROL) && !picker.is_empty() =>
             {
-                let session = &sessions[selected];
+                let Some(session) = picker.selected_row() else {
+                    return InputMode::Session { picker };
+                };
                 if let Some(session_id) = &session.id {
                     let display_name = session.display_name();
                     if let Err(e) = Session::delete(session_id) {
                         app.status = format!("Error deleting session: {}", e);
                     } else {
-                        sessions = Session::list();
-                        if selected >= sessions.len() && selected > 0 {
-                            selected -= 1;
-                        }
+                        let sessions = Session::list();
+                        let filtered = (0..sessions.len()).collect();
+                        picker.replace_rows(sessions, filtered);
                         app.status = format!("Deleted session: {}", display_name);
                     }
                 } else {
@@ -263,30 +258,31 @@ impl Commands {
                 }
             }
             KeyCode::Char('e')
-                if key.modifiers.contains(KeyModifiers::CONTROL) && !sessions.is_empty() =>
+                if key.modifiers.contains(KeyModifiers::CONTROL) && !picker.is_empty() =>
             {
-                let session = &sessions[selected];
+                let Some(session) = picker.selected_row() else {
+                    return InputMode::Session { picker };
+                };
                 app.input = session.display_name();
                 app.input_cursor = app.input.chars().count();
                 app.status = "Rename session".to_string();
-                return InputMode::SessionRename { selected, sessions };
+                return InputMode::SessionRename { picker };
             }
             _ => {}
         };
 
-        InputMode::Session { selected, sessions }
+        InputMode::Session { picker }
     }
 
     pub fn handle_session_rename_mode(
         app: &mut TuiApp,
         key: event::KeyEvent,
-        mut selected: usize,
-        mut sessions: Vec<Session>,
+        mut picker: PickList<Session>,
     ) -> InputMode {
         match key.code {
             KeyCode::Esc => {
                 Input::clear_input(app);
-                return InputMode::Session { selected, sessions };
+                return InputMode::Session { picker };
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return InputMode::Exit;
@@ -295,37 +291,46 @@ impl Commands {
                 let new_name = app.input.trim().to_string();
                 if new_name.is_empty() {
                     app.status = "Session name cannot be empty".to_string();
-                    return InputMode::SessionRename { selected, sessions };
+                    return InputMode::SessionRename { picker };
                 }
 
-                if sessions.is_empty() {
+                if picker.is_empty() {
                     app.status = "No session selected".to_string();
                     Input::clear_input(app);
-                    return InputMode::Session { selected, sessions };
+                    return InputMode::Session { picker };
                 }
 
-                selected = selected.min(sessions.len().saturating_sub(1));
-                let selected_id = sessions[selected].id.clone();
-                match sessions[selected].rename(new_name.clone()) {
+                let selected_id = picker.selected_row().and_then(|session| session.id.clone());
+                let Some(session) = picker.selected_row_mut() else {
+                    app.status = "No session selected".to_string();
+                    Input::clear_input(app);
+                    return InputMode::Session { picker };
+                };
+                match session.rename(new_name.clone()) {
                     Ok(()) => {
-                        sessions = Session::list();
+                        let sessions = Session::list();
+                        let filtered = (0..sessions.len()).collect();
+                        picker.replace_rows(sessions, filtered);
                         if let Some(selected_id) = selected_id {
-                            selected = sessions
+                            picker.selected = picker
+                                .filtered
                                 .iter()
-                                .position(|session| {
-                                    session.id.as_deref() == Some(selected_id.as_str())
+                                .position(|row_index| {
+                                    picker.rows[*row_index].id.as_deref()
+                                        == Some(selected_id.as_str())
                                 })
-                                .unwrap_or_else(|| selected.min(sessions.len().saturating_sub(1)));
-                        } else {
-                            selected = selected.min(sessions.len().saturating_sub(1));
+                                .unwrap_or_else(|| {
+                                    picker.selected.min(picker.filtered.len().saturating_sub(1))
+                                });
                         }
+                        picker.clamp_selected();
                         Input::clear_input(app);
                         app.status = format!("Renamed session: {}", new_name);
-                        return InputMode::Session { selected, sessions };
+                        return InputMode::Session { picker };
                     }
                     Err(e) => {
                         app.status = format!("Error renaming session: {}", e);
-                        return InputMode::SessionRename { selected, sessions };
+                        return InputMode::SessionRename { picker };
                     }
                 }
             }
@@ -334,15 +339,13 @@ impl Commands {
             }
         }
 
-        InputMode::SessionRename { selected, sessions }
+        InputMode::SessionRename { picker }
     }
 
     pub async fn handle_models_mode(
         app: &mut TuiApp,
         key: event::KeyEvent,
-        mut selected: usize,
-        mut models: Vec<AvailableModel>,
-        mut recent_models: Vec<AvailableModel>,
+        mut picker: PickList<ModelPickerRow>,
         harness: &mut Harness,
         config: &Config,
     ) -> InputMode {
@@ -353,29 +356,16 @@ impl Commands {
                 return InputMode::Exit;
             }
             KeyCode::Up => {
-                let selectable_len =
-                    model_picker_selectable_models(&app.input, &models, &recent_models).len();
-                selected = wrap(selected as i32 - 1, selectable_len);
+                picker.move_up();
             }
             KeyCode::Down => {
-                let selectable_len =
-                    model_picker_selectable_models(&app.input, &models, &recent_models).len();
-                selected = wrap(selected as i32 + 1, selectable_len);
+                picker.move_down();
             }
             KeyCode::Enter => {
-                let selectable =
-                    model_picker_selectable_models(&app.input, &models, &recent_models);
-                if selectable.is_empty() {
+                let Some(ModelPickerRow::Model(selected_model)) = picker.selected_row() else {
                     app.status = "No matching models".to_string();
-                    return InputMode::Models {
-                        selected,
-                        models,
-                        recent_models,
-                    };
-                }
-
-                selected = selected.min(selectable.len().saturating_sub(1));
-                let selected_model = &selectable[selected];
+                    return InputMode::Models { picker };
+                };
                 match selected_model.create_client(config) {
                     Ok(client) => {
                         let model_id = selected_model.id.clone();
@@ -395,81 +385,35 @@ impl Commands {
                 app.status = "Reloading models...".to_string();
                 match Models::reload(config).await {
                     Ok(reloaded_models) => {
-                        models = reloaded_models;
-                        recent_models = Models::load_recent().unwrap_or(recent_models);
-                        selected = Self::clamp_model_selection(
-                            &app.input,
-                            selected,
-                            &models,
-                            &recent_models,
-                        );
-                        app.status = format!("Reloaded {} models", models.len());
+                        let recent_models = Models::load_recent().unwrap_or_default();
+                        let rows = model_picker_rows(&app.input, &reloaded_models, &recent_models);
+                        let filtered = Input::filter_model_rows(&app.input, &rows);
+                        let count = reloaded_models.len();
+                        picker.replace_rows(rows, filtered);
+                        app.status = format!("Reloaded {} models", count);
                     }
                     Err(err) => {
                         app.status = format!("Error reloading models: {}", err);
                     }
                 }
             }
-            KeyCode::Backspace => {
-                selected =
-                    Self::clamp_model_selection(&app.input, selected, &models, &recent_models);
-            }
-            KeyCode::Delete => {
-                selected =
-                    Self::clamp_model_selection(&app.input, selected, &models, &recent_models);
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                selected =
-                    Self::clamp_model_selection(&app.input, selected, &models, &recent_models);
-            }
-            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                selected =
-                    Self::clamp_model_selection(&app.input, selected, &models, &recent_models);
-            }
-            KeyCode::Char(ch)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                selected =
-                    Self::clamp_model_selection(&app.input, selected, &models, &recent_models);
+            _ if input_changed_key(key) => {
+                picker.replace_filter(Input::filter_model_rows(&app.input, &picker.rows));
             }
             _ => {}
         };
 
-        InputMode::Models {
-            selected,
-            models,
-            recent_models,
-        }
+        InputMode::Models { picker }
     }
 
-    pub fn filtered_model_indices(input: &str, models: &[AvailableModel]) -> Vec<usize> {
-        let query = input.trim().to_lowercase();
-        models
-            .iter()
-            .enumerate()
-            .filter_map(|(index, model)| {
-                let is_match = query.is_empty() || model.id.to_lowercase().contains(&query);
-                is_match.then_some(index)
-            })
-            .collect()
-    }
-
-    fn clamp_model_selection(
-        input: &str,
-        selected: usize,
-        models: &[AvailableModel],
-        recent_models: &[AvailableModel],
-    ) -> usize {
-        let filtered_len = model_picker_selectable_models(input, models, recent_models).len();
-        selected.min(filtered_len.saturating_sub(1))
+    pub fn filtered_model_indices(input: &str, rows: &[ModelPickerRow]) -> Vec<usize> {
+        Input::filter_model_rows(input, rows)
     }
 
     pub fn handle_agents_mode(
         app: &mut TuiApp,
         key: event::KeyEvent,
-        mut selected: usize,
-        agents: Vec<AgentDefinition>,
+        mut picker: PickList<AgentDefinition>,
         harness: &mut Harness,
     ) -> InputMode {
         Input::handle_input_cursor(app, key);
@@ -481,67 +425,33 @@ impl Commands {
                 return InputMode::Exit;
             }
             KeyCode::Up => {
-                let filtered_len = Self::filtered_agent_indices(&app.input, &agents).len();
-                selected = wrap(selected as i32 - 1, filtered_len);
+                picker.move_up();
             }
             KeyCode::Down => {
-                let filtered_len = Self::filtered_agent_indices(&app.input, &agents).len();
-                selected = wrap(selected as i32 + 1, filtered_len);
+                picker.move_down();
             }
             KeyCode::Enter => {
-                let filtered = Self::filtered_agent_indices(&app.input, &agents);
-                if filtered.is_empty() {
+                let Some(selected_agent) = picker.selected_row().cloned() else {
                     app.status = "No matching agents".to_string();
-                    return InputMode::Agents { selected, agents };
-                }
-
-                selected = selected.min(filtered.len().saturating_sub(1));
-                let selected_agent = agents[filtered[selected]].clone();
+                    return InputMode::Agents { picker };
+                };
                 harness.set_agent(selected_agent.clone());
                 app.agent_name = selected_agent.name.clone();
                 Input::clear_input(app);
                 app.status = format!("Selected agent: {}", selected_agent.name);
                 return InputMode::PromptInput;
             }
-            KeyCode::Backspace => {
-                selected = Self::clamp_agent_selection(&app.input, selected, &agents);
-            }
-            KeyCode::Delete => {
-                selected = Self::clamp_agent_selection(&app.input, selected, &agents);
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                selected = Self::clamp_agent_selection(&app.input, selected, &agents);
-            }
-            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                selected = Self::clamp_agent_selection(&app.input, selected, &agents);
-            }
-            KeyCode::Char(ch)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                selected = Self::clamp_agent_selection(&app.input, selected, &agents);
+            _ if input_changed_key(key) => {
+                picker.replace_filter(Input::filter_agents(&app.input, &picker.rows));
             }
             _ => {}
-        };
+        }
 
-        InputMode::Agents { selected, agents }
+        InputMode::Agents { picker }
     }
 
     pub fn filtered_agent_indices(input: &str, agents: &[AgentDefinition]) -> Vec<usize> {
-        let query = input.trim().to_lowercase();
-        agents
-            .iter()
-            .enumerate()
-            .filter_map(|(index, agent)| {
-                let is_match = query.is_empty() || agent.name.to_lowercase().contains(&query);
-                is_match.then_some(index)
-            })
-            .collect()
-    }
-
-    fn clamp_agent_selection(input: &str, selected: usize, agents: &[AgentDefinition]) -> usize {
-        let filtered_len = Self::filtered_agent_indices(input, agents).len();
-        selected.min(filtered_len.saturating_sub(1))
+        Input::filter_agents(input, agents)
     }
 }
 
@@ -552,4 +462,15 @@ pub fn wrap(i: i32, n: usize) -> usize {
     } else {
         i as usize
     }
+}
+
+fn input_changed_key(key: event::KeyEvent) -> bool {
+    matches!(
+        key.code,
+        KeyCode::Backspace | KeyCode::Delete | KeyCode::Char('u') | KeyCode::Char('k')
+    ) && key.modifiers.contains(KeyModifiers::CONTROL)
+        || matches!(key.code, KeyCode::Backspace | KeyCode::Delete)
+        || matches!(key.code, KeyCode::Char(_))
+            && !key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT)
 }

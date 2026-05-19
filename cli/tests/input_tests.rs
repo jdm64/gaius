@@ -1,4 +1,4 @@
-use gaius::input::Input;
+use gaius::input::{Input, PickList};
 use gaius::tui::TuiApp;
 
 #[test]
@@ -115,4 +115,43 @@ fn scrolls_history_with_saturating_offsets() {
     Input::scroll_history_up(&mut app, 4);
     Input::reset_history_scroll(&mut app);
     assert_eq!(app.history_scroll, 0);
+}
+
+#[test]
+fn pick_list_wraps_selection_through_filtered_rows() {
+    let mut list = PickList::new(vec!["a", "b", "c"], vec![0, 2]);
+
+    assert_eq!(list.selected_row(), Some(&"a"));
+
+    list.move_up();
+    assert_eq!(list.selected, 1);
+    assert_eq!(list.selected_row(), Some(&"c"));
+
+    list.move_down();
+    assert_eq!(list.selected, 0);
+    assert_eq!(list.selected_row(), Some(&"a"));
+}
+
+#[test]
+fn pick_list_clamps_after_filter_shrinks() {
+    let mut list = PickList::new(vec!["a", "b", "c"], vec![0, 1, 2]);
+    list.selected = 2;
+
+    list.replace_filter(vec![1]);
+
+    assert_eq!(list.selected, 0);
+    assert_eq!(list.selected_row_index(), Some(1));
+    assert_eq!(list.selected_row(), Some(&"b"));
+}
+
+#[test]
+fn pick_list_handles_empty_filters() {
+    let mut list = PickList::new(vec!["a", "b"], Vec::new());
+
+    assert!(list.is_empty());
+    assert_eq!(list.selected, 0);
+    assert_eq!(list.selected_row(), None);
+
+    list.move_down();
+    assert_eq!(list.selected, 0);
 }

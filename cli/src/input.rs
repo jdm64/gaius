@@ -18,7 +18,7 @@ use crate::{
     commands::{Command, Commands},
     config::Config,
     harness::Harness,
-    models::AvailableModel,
+    models::ModelPickerRow,
     session::Session,
     tui::{TerminalGuard, TuiApp},
 };
@@ -27,30 +27,86 @@ use std::error::Error;
 
 const MAX_HISTORY: usize = 16;
 
+pub struct PickList<T> {
+    pub selected: usize,
+    pub rows: Vec<T>,
+    pub filtered: Vec<usize>,
+}
+
+impl<T> PickList<T> {
+    pub fn new(rows: Vec<T>, filtered: Vec<usize>) -> Self {
+        let mut list = Self {
+            selected: 0,
+            rows,
+            filtered,
+        };
+        list.clamp_selected();
+        list
+    }
+
+    pub fn all(rows: Vec<T>) -> Self {
+        let filtered = (0..rows.len()).collect();
+        Self::new(rows, filtered)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.filtered.is_empty()
+    }
+
+    pub fn selected_row_index(&self) -> Option<usize> {
+        self.filtered.get(self.selected).copied()
+    }
+
+    pub fn selected_row(&self) -> Option<&T> {
+        self.selected_row_index()
+            .and_then(|index| self.rows.get(index))
+    }
+
+    pub fn selected_row_mut(&mut self) -> Option<&mut T> {
+        let index = self.selected_row_index()?;
+        self.rows.get_mut(index)
+    }
+
+    pub fn move_up(&mut self) {
+        self.selected = wrap_selection(self.selected as i32 - 1, self.filtered.len());
+    }
+
+    pub fn move_down(&mut self) {
+        self.selected = wrap_selection(self.selected as i32 + 1, self.filtered.len());
+    }
+
+    pub fn replace_filter(&mut self, filtered: Vec<usize>) {
+        self.filtered = filtered;
+        self.clamp_selected();
+    }
+
+    pub fn replace_rows(&mut self, rows: Vec<T>, filtered: Vec<usize>) {
+        self.rows = rows;
+        self.filtered = filtered;
+        self.clamp_selected();
+    }
+
+    pub fn clamp_selected(&mut self) {
+        self.selected = self.selected.min(self.filtered.len().saturating_sub(1));
+    }
+
+    pub fn visible_row_range(&self, max_visible: usize) -> (usize, usize) {
+        let visible = self.rows.len().clamp(1, max_visible);
+        let selected_row = self.selected_row_index().unwrap_or(0);
+        let start = selected_row.saturating_add(1).saturating_sub(visible);
+        let end = (start + visible).min(self.rows.len());
+        (start, end)
+    }
+}
+
 pub enum InputMode {
     Exit,
     PromptInput,
-    Command {
-        selected: usize,
-        filtered: Vec<Command>,
-    },
-    Session {
-        selected: usize,
-        sessions: Vec<Session>,
-    },
-    SessionRename {
-        selected: usize,
-        sessions: Vec<Session>,
-    },
-    Models {
-        selected: usize,
-        models: Vec<AvailableModel>,
-        recent_models: Vec<AvailableModel>,
-    },
-    Agents {
-        selected: usize,
-        agents: Vec<AgentDefinition>,
-    },
+    Command { picker: PickList<Command> },
+    Session { picker: PickList<Session> },
+    SessionRename { picker: PickList<Session> },
+    Models { picker: PickList<ModelPickerRow> },
+    Agents { picker: PickList<AgentDefinition> },
 }
 
 pub struct Input {}
@@ -194,19 +250,61 @@ impl Input {
     fn command_mode_for_input(app: &TuiApp) -> Option<InputMode> {
         let input = app.input.as_str();
         let query = input.strip_prefix('/')?.to_lowercase();
-        let filtered: Vec<Command> = Commands::commands()
-            .into_iter()
-            .filter(|cmd| cmd.name.to_lowercase().contains(&query))
+        let rows = Commands::commands();
+        let filtered: Vec<usize> = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cmd)| cmd.name.to_lowercase().contains(&query).then_some(index))
             .collect();
 
         if filtered.is_empty() {
             None
         } else {
             Some(InputMode::Command {
-                selected: 0,
-                filtered,
+                picker: PickList::new(rows, filtered),
             })
         }
+    }
+
+    pub fn filter_commands(input: &str, commands: &[Command]) -> Vec<usize> {
+        let query = input
+            .strip_prefix('/')
+            .unwrap_or(input)
+            .trim()
+            .to_lowercase();
+        commands
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cmd)| cmd.name.to_lowercase().contains(&query).then_some(index))
+            .collect()
+    }
+
+    pub fn filter_model_rows(input: &str, rows: &[ModelPickerRow]) -> Vec<usize> {
+        let query = input.trim().to_lowercase();
+        rows.iter()
+            .enumerate()
+            .filter_map(|(index, row)| match row {
+                ModelPickerRow::Model(model)
+                    if query.is_empty() || model.id.to_lowercase().contains(&query) =>
+                {
+                    Some(index)
+                }
+                ModelPickerRow::Header(_)
+                | ModelPickerRow::Separator
+                | ModelPickerRow::Model(_) => None,
+            })
+            .collect()
+    }
+
+    pub fn filter_agents(input: &str, agents: &[AgentDefinition]) -> Vec<usize> {
+        let query = input.trim().to_lowercase();
+        agents
+            .iter()
+            .enumerate()
+            .filter_map(|(index, agent)| {
+                (query.is_empty() || agent.name.to_lowercase().contains(&query)).then_some(index)
+            })
+            .collect()
     }
 
     pub fn mode_for_input(app: &TuiApp) -> InputMode {
@@ -300,5 +398,14 @@ impl Input {
 
     pub fn history_page_scroll_amount(app: &TuiApp) -> u16 {
         app.history_page_size.saturating_sub(1).max(1)
+    }
+}
+
+fn wrap_selection(i: i32, n: usize) -> usize {
+    if n > 0 {
+        let m = n as i32;
+        ((i % m + m) % m) as usize
+    } else {
+        0
     }
 }

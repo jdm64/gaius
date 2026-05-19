@@ -14,11 +14,8 @@
  */
 
 use crate::{
-    agents::AgentDefinition,
-    commands::{Command, Commands},
-    input::InputMode,
-    models::{AvailableModel, ModelPickerRow, model_picker_rows},
-    session::Session,
+    input::{InputMode, PickList},
+    models::ModelPickerRow,
     tui::{MessageRole, TuiApp, TuiMessage, wrapped_line_count},
 };
 use ratatui::{
@@ -31,6 +28,13 @@ use ratatui::{
 use tui_markdown::{Options, from_str_with_options};
 
 pub const INPUT_HEIGHT: u16 = 3;
+
+struct PickListRenderSpec {
+    title: &'static str,
+    max_width: u16,
+    empty_text: &'static str,
+    help_text: &'static str,
+}
 
 pub struct Render {}
 
@@ -47,67 +51,269 @@ impl Render {
         Self::draw_input(app, frame, chunks[1]);
 
         match &app.mode {
-            InputMode::Command { selected, filtered } => {
-                Self::draw_commands(app, frame, chunks[1], *selected, filtered);
+            InputMode::Command { picker } => {
+                Self::draw_commands(frame, chunks[1], picker);
             }
-            InputMode::Session { selected, sessions } => {
-                Self::draw_sessions(app, frame, chunks[1], *selected, sessions, false);
+            InputMode::Session { picker } => {
+                Self::draw_sessions(frame, chunks[1], picker, false);
             }
-            InputMode::SessionRename { selected, sessions } => {
-                Self::draw_sessions(app, frame, chunks[1], *selected, sessions, true);
+            InputMode::SessionRename { picker } => {
+                Self::draw_sessions(frame, chunks[1], picker, true);
             }
-            InputMode::Models {
-                selected,
-                models,
-                recent_models,
-            } => {
-                Self::draw_models(app, frame, chunks[1], *selected, models, recent_models);
+            InputMode::Models { picker } => {
+                Self::draw_models(frame, chunks[1], picker);
             }
-            InputMode::Agents { selected, agents } => {
-                Self::draw_agents(app, frame, chunks[1], *selected, agents);
+            InputMode::Agents { picker } => {
+                Self::draw_agents(frame, chunks[1], picker);
             }
             InputMode::PromptInput | InputMode::Exit => {}
         }
     }
 
     fn draw_commands(
-        _app: &TuiApp,
         frame: &mut Frame<'_>,
         input_area: Rect,
-        selected: usize,
-        filtered: &[Command],
+        picker: &PickList<crate::commands::Command>,
     ) {
-        let command_count = filtered.len() as u16;
-        let visible_commands = command_count.min(10);
-        let help_height = 1u16;
-        let width = 50.min(input_area.width - 4);
-        let height = visible_commands + 2 + help_height;
-        let x = input_area.x + 2;
-        let y = input_area.y - height;
-        let rect = Rect::new(x, y, width, height);
-
-        let items: Vec<ListItem> = filtered
-            .iter()
-            .enumerate()
-            .map(|(i, cmd)| {
+        Self::draw_pick_list(
+            frame,
+            input_area,
+            picker,
+            PickListRenderSpec {
+                title: "Commands",
+                max_width: 50,
+                empty_text: "No matching commands",
+                help_text: "  Type: filter | Enter: select | Esc: close",
+            },
+            |cmd, row_index, selected_row| {
                 let content = format!("/{} - {}", cmd.name, cmd.description);
-                if i == selected {
+                if row_index == selected_row {
                     ListItem::new(content).style(Style::default().bg(Color::DarkGray))
                 } else {
                     ListItem::new(content)
                 }
+            },
+        );
+    }
+
+    fn draw_sessions(
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        picker: &PickList<crate::session::Session>,
+        renaming: bool,
+    ) {
+        let help_text = if renaming {
+            "  Enter: save | Esc: cancel"
+        } else {
+            "  Enter: load | Ctrl+E: rename | Ctrl+D: delete | Esc: close"
+        };
+        Self::draw_pick_list(
+            frame,
+            input_area,
+            picker,
+            PickListRenderSpec {
+                title: "Sessions",
+                max_width: 50,
+                empty_text: "No sessions",
+                help_text,
+            },
+            |session, row_index, selected_row| {
+                let item = ListItem::new(session.display_name());
+                if row_index == selected_row {
+                    item.style(Style::default().bg(Color::DarkGray))
+                } else {
+                    item
+                }
+            },
+        );
+    }
+
+    fn draw_models(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<ModelPickerRow>) {
+        let display_rows = Self::model_display_rows(picker);
+        Self::draw_indexed_pick_list(
+            frame,
+            input_area,
+            picker,
+            &display_rows,
+            PickListRenderSpec {
+                title: "Models",
+                max_width: 70,
+                empty_text: "No matching models",
+                help_text: "  Type: filter | Enter: select | Ctrl+R: reload | Esc: close",
+            },
+            |row, row_index, selected_row| match row {
+                ModelPickerRow::Header(label) => {
+                    ListItem::new(label.as_str()).style(Style::default().fg(Color::Yellow))
+                }
+                ModelPickerRow::Separator => ListItem::new(""),
+                ModelPickerRow::Model(model) => {
+                    let item = ListItem::new(model.label());
+                    if row_index == selected_row {
+                        item.style(Style::default().bg(Color::DarkGray))
+                    } else {
+                        item
+                    }
+                }
+            },
+        );
+    }
+
+    fn model_display_rows(picker: &PickList<ModelPickerRow>) -> Vec<usize> {
+        if picker.filtered.is_empty() {
+            return Vec::new();
+        }
+
+        let mut display_rows = Vec::new();
+        let selected: std::collections::BTreeSet<usize> = picker.filtered.iter().copied().collect();
+
+        for (index, row) in picker.rows.iter().enumerate() {
+            match row {
+                ModelPickerRow::Model(_) if selected.contains(&index) => display_rows.push(index),
+                ModelPickerRow::Header(_)
+                    if Self::section_has_selected_model(index, picker, &selected) =>
+                {
+                    display_rows.push(index);
+                }
+                ModelPickerRow::Separator
+                    if Self::separator_has_selected_models(index, picker, &selected) =>
+                {
+                    display_rows.push(index);
+                }
+                ModelPickerRow::Header(_)
+                | ModelPickerRow::Separator
+                | ModelPickerRow::Model(_) => {}
+            }
+        }
+
+        display_rows
+    }
+
+    fn section_has_selected_model(
+        header_index: usize,
+        picker: &PickList<ModelPickerRow>,
+        selected: &std::collections::BTreeSet<usize>,
+    ) -> bool {
+        picker.rows[header_index + 1..]
+            .iter()
+            .enumerate()
+            .take_while(|(_, row)| {
+                !matches!(row, ModelPickerRow::Header(_) | ModelPickerRow::Separator)
             })
-            .collect();
+            .any(|(offset, row)| {
+                matches!(row, ModelPickerRow::Model(_))
+                    && selected.contains(&(header_index + 1 + offset))
+            })
+    }
+
+    fn separator_has_selected_models(
+        separator_index: usize,
+        picker: &PickList<ModelPickerRow>,
+        selected: &std::collections::BTreeSet<usize>,
+    ) -> bool {
+        let has_before = picker.rows[..separator_index]
+            .iter()
+            .enumerate()
+            .rev()
+            .take_while(|(_, row)| !matches!(row, ModelPickerRow::Separator))
+            .any(|(index, row)| {
+                matches!(row, ModelPickerRow::Model(_)) && selected.contains(&index)
+            });
+        let has_after =
+            picker.rows[separator_index + 1..]
+                .iter()
+                .enumerate()
+                .any(|(offset, row)| {
+                    matches!(row, ModelPickerRow::Model(_))
+                        && selected.contains(&(separator_index + 1 + offset))
+                });
+
+        has_before && has_after
+    }
+
+    fn draw_agents(
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        picker: &PickList<crate::agents::AgentDefinition>,
+    ) {
+        Self::draw_pick_list(
+            frame,
+            input_area,
+            picker,
+            PickListRenderSpec {
+                title: "Agents",
+                max_width: 60,
+                empty_text: "No matching agents",
+                help_text: "  Type: filter | Enter: select | Esc: close",
+            },
+            |agent, row_index, selected_row| {
+                let item = ListItem::new(agent.name.as_str());
+                if row_index == selected_row {
+                    item.style(Style::default().bg(Color::DarkGray))
+                } else {
+                    item
+                }
+            },
+        );
+    }
+
+    fn draw_pick_list<'a, T, F>(
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        picker: &'a PickList<T>,
+        spec: PickListRenderSpec,
+        row_item: F,
+    ) where
+        F: Fn(&'a T, usize, usize) -> ListItem<'a>,
+    {
+        Self::draw_indexed_pick_list(frame, input_area, picker, &picker.filtered, spec, row_item);
+    }
+
+    fn draw_indexed_pick_list<'a, T, F>(
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        picker: &'a PickList<T>,
+        display_rows: &[usize],
+        spec: PickListRenderSpec,
+        row_item: F,
+    ) where
+        F: Fn(&'a T, usize, usize) -> ListItem<'a>,
+    {
+        let row_count = display_rows.len().max(1);
+        let visible_rows = (row_count as u16).clamp(1, 10);
+        let help_height = 1u16;
+        let width = spec
+            .max_width
+            .min(input_area.width.saturating_sub(4).max(1));
+        let height = visible_rows + 2 + help_height;
+        let x = input_area.x + 2;
+        let y = input_area.y - height;
+        let rect = Rect::new(x, y, width, height);
+
+        let selected_row = picker.selected_row_index().unwrap_or(0);
+        let items: Vec<ListItem> = if display_rows.is_empty() {
+            vec![ListItem::new(spec.empty_text)]
+        } else {
+            let selected_display = display_rows
+                .iter()
+                .position(|row_index| *row_index == selected_row)
+                .unwrap_or(0);
+            let visible = display_rows.len().clamp(1, 10);
+            let start = selected_display.saturating_add(1).saturating_sub(visible);
+            let end = (start + visible).min(display_rows.len());
+            display_rows[start..end]
+                .iter()
+                .map(|row_index| row_item(&picker.rows[*row_index], *row_index, selected_row))
+                .collect()
+        };
 
         let list = List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Commands")
+                .title(spec.title)
                 .padding(Padding::horizontal(1)),
         );
 
-        let help_text = "  Type: filter | Enter: select | Esc: close";
-        let help_para = Paragraph::new(help_text)
+        let help_para = Paragraph::new(spec.help_text)
             .block(Block::default().borders(Borders::NONE))
             .style(Style::default().fg(Color::Yellow));
 
@@ -116,7 +322,7 @@ impl Render {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(visible_commands + 2),
+                Constraint::Min(visible_rows + 2),
                 Constraint::Length(help_height),
             ])
             .split(rect);
@@ -125,258 +331,23 @@ impl Render {
         frame.render_widget(help_para, chunks[1]);
     }
 
-    fn draw_sessions(
-        _app: &TuiApp,
-        frame: &mut Frame<'_>,
-        input_area: Rect,
-        selected: usize,
-        sessions: &[Session],
-        renaming: bool,
-    ) {
-        let session_count = sessions.len();
-        let selected = selected.min(session_count.saturating_sub(1));
-        let visible_sessions = (session_count as u16).clamp(1, 10);
-        let help_height = 1u16;
-        let width = 50.min(input_area.width - 4);
-        let height = visible_sessions + 2 + help_height;
-        let x = input_area.x + 2;
-        let y = input_area.y - height;
-        let rect = Rect::new(x, y, width, height);
-
-        let start = if selected >= visible_sessions as usize {
-            selected + 1 - visible_sessions as usize
-        } else {
-            0
-        };
-        let end = (start + visible_sessions as usize).min(session_count);
-
-        let items: Vec<ListItem> = if session_count == 0 {
-            vec![ListItem::new("No sessions")]
-        } else {
-            sessions[start..end]
-                .iter()
-                .enumerate()
-                .map(|(offset, session)| {
-                    let i = start + offset;
-                    let label = session.display_name();
-                    if i == selected {
-                        ListItem::new(label).style(Style::default().bg(Color::DarkGray))
-                    } else {
-                        ListItem::new(label)
-                    }
-                })
-                .collect()
-        };
-
-        let sessions_list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Sessions")
-                .padding(Padding::horizontal(1)),
-        );
-
-        let help_text = if renaming {
-            "  Enter: save | Esc: cancel"
-        } else {
-            "  Enter: load | Ctrl+E: rename | Ctrl+D: delete | Esc: close"
-        };
-        let help_para = Paragraph::new(help_text)
-            .block(Block::default().borders(Borders::NONE))
-            .style(Style::default().fg(Color::Yellow));
-
-        frame.render_widget(Clear, rect);
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(visible_sessions + 2),
-                Constraint::Length(help_height),
-            ])
-            .split(rect);
-
-        frame.render_widget(sessions_list, chunks[0]);
-        frame.render_widget(help_para, chunks[1]);
-    }
-
-    fn draw_models(
-        app: &TuiApp,
-        frame: &mut Frame<'_>,
-        input_area: Rect,
-        selected: usize,
-        models: &[AvailableModel],
-        recent_models: &[AvailableModel],
-    ) {
-        let rows = model_picker_rows(&app.input, models, recent_models);
-        let result_count = rows.len();
-        let selected = selected.min(Self::selectable_row_count(&rows).saturating_sub(1));
-        let selected_row = Self::selected_row_index(&rows, selected);
-        let visible_models = (result_count as u16).clamp(1, 10);
-        let help_height = 1u16;
-        let width = 70.min(input_area.width - 4);
-        let height = visible_models + 2 + help_height;
-        let x = input_area.x + 2;
-        let y = input_area.y - height;
-        let rect = Rect::new(x, y, width, height);
-
-        let start = if selected_row >= visible_models as usize {
-            selected_row + 1 - visible_models as usize
-        } else {
-            0
-        };
-        let end = (start + visible_models as usize).min(result_count);
-
-        let items: Vec<ListItem> = if result_count == 0 {
-            vec![ListItem::new("No matching models")]
-        } else {
-            rows[start..end]
-                .iter()
-                .enumerate()
-                .map(|(offset, row)| {
-                    let row_index = start + offset;
-                    match row {
-                        ModelPickerRow::Header(label) => {
-                            ListItem::new(label.as_str()).style(Style::default().fg(Color::Yellow))
-                        }
-                        ModelPickerRow::Separator => ListItem::new(""),
-                        ModelPickerRow::Model(model) => {
-                            let item = ListItem::new(model.label());
-                            if row_index == selected_row {
-                                item.style(Style::default().bg(Color::DarkGray))
-                            } else {
-                                item
-                            }
-                        }
-                    }
-                })
-                .collect()
-        };
-
-        let models_list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Models")
-                .padding(Padding::horizontal(1)),
-        );
-
-        let help_text = "  Type: filter | Enter: select | Ctrl+R: reload | Esc: close";
-        let help_para = Paragraph::new(help_text)
-            .block(Block::default().borders(Borders::NONE))
-            .style(Style::default().fg(Color::Yellow));
-
-        frame.render_widget(Clear, rect);
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(visible_models + 2),
-                Constraint::Length(help_height),
-            ])
-            .split(rect);
-
-        frame.render_widget(models_list, chunks[0]);
-        frame.render_widget(help_para, chunks[1]);
-    }
-
-    fn selectable_row_count(rows: &[ModelPickerRow]) -> usize {
-        rows.iter()
-            .filter(|row| matches!(row, ModelPickerRow::Model(_)))
-            .count()
-    }
-
-    fn selected_row_index(rows: &[ModelPickerRow], selected: usize) -> usize {
-        let mut model_index = 0;
-        for (row_index, row) in rows.iter().enumerate() {
-            if matches!(row, ModelPickerRow::Model(_)) {
-                if model_index == selected {
-                    return row_index;
-                }
-                model_index += 1;
-            }
-        }
-
-        0
-    }
-
-    fn draw_agents(
-        app: &TuiApp,
-        frame: &mut Frame<'_>,
-        input_area: Rect,
-        selected: usize,
-        agents: &[AgentDefinition],
-    ) {
-        let filtered = Commands::filtered_agent_indices(&app.input, agents);
-        let result_count = filtered.len();
-        let selected = selected.min(result_count.saturating_sub(1));
-        let visible_agents = (result_count as u16).clamp(1, 10);
-        let help_height = 1u16;
-        let width = 60.min(input_area.width - 4);
-        let height = visible_agents + 2 + help_height;
-        let x = input_area.x + 2;
-        let y = input_area.y - height;
-        let rect = Rect::new(x, y, width, height);
-
-        let start = if selected >= visible_agents as usize {
-            selected + 1 - visible_agents as usize
-        } else {
-            0
-        };
-        let end = (start + visible_agents as usize).min(result_count);
-
-        let items: Vec<ListItem> = if result_count == 0 {
-            vec![ListItem::new("No matching agents")]
-        } else {
-            filtered[start..end]
-                .iter()
-                .enumerate()
-                .map(|(offset, agent_index)| {
-                    let i = start + offset;
-                    let agent = &agents[*agent_index];
-                    if i == selected {
-                        ListItem::new(agent.name.as_str())
-                            .style(Style::default().bg(Color::DarkGray))
-                    } else {
-                        ListItem::new(agent.name.as_str())
-                    }
-                })
-                .collect()
-        };
-
-        let agents_list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Agents")
-                .padding(Padding::horizontal(1)),
-        );
-
-        let help_text = "  Type: filter | Enter: select | Esc: close";
-        let help_para = Paragraph::new(help_text)
-            .block(Block::default().borders(Borders::NONE))
-            .style(Style::default().fg(Color::Yellow));
-
-        frame.render_widget(Clear, rect);
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(visible_agents + 2),
-                Constraint::Length(help_height),
-            ])
-            .split(rect);
-
-        frame.render_widget(agents_list, chunks[0]);
-        frame.render_widget(help_para, chunks[1]);
-    }
-
     fn draw_history(app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
         let text_width = area.width.saturating_sub(4).max(1);
         let text_height = area.height.saturating_sub(2).max(1);
         app.history_page_size = text_height;
 
-        let lines = Self::history_lines(&*app);
-        let wrapped_height = wrapped_line_count(&lines, text_width);
+        Self::sync_history_lines(app);
+
+        let wrapped_height = wrapped_line_count(&app.history_lines, text_width);
         let max_scroll = wrapped_height.saturating_sub(text_height);
         let clamped_scroll = app.history_scroll.min(max_scroll);
-        let scroll_offset = max_scroll.saturating_sub(clamped_scroll);
+        let start = max_scroll.saturating_sub(clamped_scroll);
+        let lines = Self::visible_history_lines(
+            &app.history_lines,
+            text_width,
+            start as usize,
+            text_height as usize,
+        );
 
         let title = if let Some(tokens) = app.context_tokens {
             format!(
@@ -394,11 +365,34 @@ impl Render {
                     .borders(Borders::TOP)
                     .padding(Padding::horizontal(1)),
             )
-            .wrap(Wrap { trim: false })
-            .scroll((scroll_offset, 0));
+            .wrap(Wrap { trim: false });
         frame.render_widget(history, area);
 
         app.history_scroll = clamped_scroll;
+    }
+
+    fn sync_history_lines(app: &mut TuiApp) {
+        if app.rendered_history_generation == app.history_generation {
+            return;
+        }
+
+        app.history_lines = Self::history_lines(app)
+            .into_iter()
+            .map(Self::owned_line)
+            .collect();
+        app.rendered_history_generation = app.history_generation;
+    }
+
+    fn owned_line(line: Line<'_>) -> Line<'static> {
+        let mut owned = Line::from(
+            line.spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.to_string(), span.style))
+                .collect::<Vec<_>>(),
+        );
+        owned.style = line.style;
+        owned.alignment = line.alignment;
+        owned
     }
 
     fn history_lines(app: &TuiApp) -> Vec<Line<'_>> {
@@ -416,6 +410,85 @@ impl Render {
         }
 
         lines
+    }
+
+    pub fn visible_history_lines(
+        lines: &[Line<'static>],
+        width: u16,
+        start: usize,
+        height: usize,
+    ) -> Vec<Line<'static>> {
+        let mut visible = Vec::with_capacity(height);
+        let mut wrapped_index = 0usize;
+        let end = start.saturating_add(height);
+
+        for line in lines {
+            for wrapped in Self::wrap_line(line, width) {
+                if wrapped_index >= start && wrapped_index < end {
+                    visible.push(wrapped);
+                }
+                wrapped_index += 1;
+                if wrapped_index >= end {
+                    return visible;
+                }
+            }
+        }
+
+        visible
+    }
+
+    fn wrap_line(line: &Line<'static>, width: u16) -> Vec<Line<'static>> {
+        let width = width.max(1) as usize;
+        let line_width = line.width();
+        if line_width <= width {
+            return vec![line.clone()];
+        }
+
+        let mut wrapped = Vec::new();
+        let mut current_spans = Vec::new();
+        let mut current_width = 0usize;
+
+        for span in &line.spans {
+            let mut content = String::new();
+            for ch in span.content.chars() {
+                if current_width == width {
+                    wrapped.push(Self::line_from_spans(
+                        line,
+                        std::mem::take(&mut current_spans),
+                    ));
+                    current_width = 0;
+                }
+
+                content.push(ch);
+                current_width += 1;
+
+                if current_width == width {
+                    current_spans.push(Span::styled(std::mem::take(&mut content), span.style));
+                    wrapped.push(Self::line_from_spans(
+                        line,
+                        std::mem::take(&mut current_spans),
+                    ));
+                    current_width = 0;
+                }
+            }
+
+            if !content.is_empty() {
+                current_spans.push(Span::styled(content, span.style));
+            }
+        }
+
+        if !current_spans.is_empty() || wrapped.is_empty() {
+            wrapped.push(Self::line_from_spans(line, current_spans));
+        }
+
+        wrapped
+    }
+
+    fn line_from_spans(source: &Line<'static>, spans: Vec<Span<'static>>) -> Line<'static> {
+        let mut line = Line::from(spans);
+        line.style = source.style;
+        line.alignment = source.alignment;
+        line
     }
 
     pub fn render_message<'a>(msg: &'a TuiMessage) -> Vec<Line<'a>> {
