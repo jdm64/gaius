@@ -35,7 +35,6 @@ use std::{
     fs,
     io::{self, Stdout},
     path::PathBuf,
-    time::Duration,
 };
 
 #[derive(Clone)]
@@ -135,22 +134,22 @@ impl TuiApp {
         }
 
         let mut guard = TerminalGuard::enter()?;
+        guard.terminal.draw(|frame| Render::draw(self, frame))?;
 
         loop {
-            guard.terminal.draw(|frame| Render::draw(self, frame))?;
-
-            if !event::poll(Duration::from_millis(100))? {
-                continue;
-            }
-
             let key = match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => key,
                 Event::Mouse(mouse) => {
                     match mouse.kind {
                         MouseEventKind::ScrollUp => Input::scroll_history_up(self, 3),
                         MouseEventKind::ScrollDown => Input::scroll_history_down(self, 3),
-                        _ => {}
+                        _ => continue,
                     }
+                    guard.terminal.draw(|frame| Render::draw(self, frame))?;
+                    continue;
+                }
+                Event::Resize(_, _) => {
+                    guard.terminal.draw(|frame| Render::draw(self, frame))?;
                     continue;
                 }
                 _ => continue,
@@ -159,10 +158,12 @@ impl TuiApp {
             match key.code {
                 KeyCode::PageUp => {
                     Input::scroll_history_up(self, Input::history_page_scroll_amount(self));
+                    guard.terminal.draw(|frame| Render::draw(self, frame))?;
                     continue;
                 }
                 KeyCode::PageDown => {
                     Input::scroll_history_down(self, Input::history_page_scroll_amount(self));
+                    guard.terminal.draw(|frame| Render::draw(self, frame))?;
                     continue;
                 }
                 _ => {}
@@ -176,6 +177,8 @@ impl TuiApp {
             } else if let InputMode::Exit = self.mode {
                 return Ok(());
             }
+
+            guard.terminal.draw(|frame| Render::draw(self, frame))?;
         }
     }
 
