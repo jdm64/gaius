@@ -402,9 +402,7 @@ impl Render {
         for (index, message) in app.messages.iter().enumerate() {
             if index > 0 {
                 let previous = &app.messages[index - 1];
-                if !matches!(previous, TuiMessage::AgentMessage(_))
-                    || !matches!(message, TuiMessage::AgentMessage(_))
-                {
+                if std::mem::discriminant(previous) != std::mem::discriminant(message) {
                     lines.push(Line::from(""));
                 }
             }
