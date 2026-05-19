@@ -25,7 +25,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
 };
-use serde_json::Value;
+use serde_json;
 use tui_markdown::{Options, from_str_with_options};
 
 pub const INPUT_HEIGHT: u16 = 3;
@@ -508,50 +508,45 @@ impl Render {
                 result: _result,
             } => {
                 let style = Style::default().fg(Color::Cyan);
-                if let Ok(args) = serde_json::from_str::<Value>(arguments) {
-                    if let Some(file_path) = args.get("file_path").and_then(|v| v.as_str()) {
-                        let bold_name = Span::styled(name, style.add_modifier(Modifier::BOLD));
-                        let italic_file = Span::styled(
-                            file_path.to_string(),
-                            style.add_modifier(Modifier::ITALIC),
-                        );
-                        vec![Line::from(vec![bold_name, Span::raw(" "), italic_file])]
-                    } else if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
-                        let bold_name = Span::styled(name, style.add_modifier(Modifier::BOLD));
-                        let italic_cmd =
-                            Span::styled(command.to_string(), style.add_modifier(Modifier::ITALIC));
-                        vec![Line::from(vec![bold_name, Span::raw(" "), italic_cmd])]
-                    } else if name == "grep" && args.get("path").and_then(|v| v.as_str()).is_some()
-                    {
-                        let bold_name = Span::styled(name, style.add_modifier(Modifier::BOLD));
-                        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-                        let pattern = args.get("include").and_then(|v| v.as_str()).unwrap_or("");
-                        let mut spans = vec![
-                            bold_name,
-                            Span::raw(" "),
-                            Span::styled(path.to_string(), style.add_modifier(Modifier::ITALIC)),
-                        ];
-                        if !pattern.is_empty() {
-                            spans.push(Span::raw(" "));
-                            spans.push(Span::styled(
-                                pattern.to_string(),
-                                style.add_modifier(Modifier::ITALIC),
-                            ));
-                        }
-                        vec![Line::from(spans)]
-                    } else {
-                        let text = format!("{} ({})", name, arguments);
-                        vec![Line::from(text).style(style)]
+                let display = match name.as_str() {
+                    "read_file" => Self::arguments_json_fields(arguments, &["file_path"]),
+                    "write_file" => Self::arguments_json_fields(arguments, &["file_path"]),
+                    "edit_file" => Self::arguments_json_fields(arguments, &["file_path"]),
+                    "bash" => Self::arguments_json_fields(arguments, &["command"]),
+                    "glob" => Self::arguments_json_fields(arguments, &["path", "pattern"]),
+                    "grep" => {
+                        Self::arguments_json_fields(arguments, &["path", "include", "pattern"])
                     }
+                    _ => name.clone(),
+                };
+
+                if display != *name {
+                    vec![Line::from(vec![
+                        Span::styled(name, style.add_modifier(Modifier::BOLD)),
+                        Span::raw(" "),
+                        Span::styled(display, style.add_modifier(Modifier::ITALIC)),
+                    ])]
                 } else {
-                    let text = format!("{} ({})", name, arguments);
-                    vec![Line::from(text).style(style)]
+                    vec![Line::from(display).style(style)]
                 }
             }
             TuiMessage::SystemMessage(text) => {
-                let style = Style::default().fg(Color::Rgb(64, 0, 0));
+                let style = Style::default()
+                    .fg(Color::Rgb(64, 0, 0))
+                    .add_modifier(Modifier::BOLD);
                 vec![Line::from(text.clone()).style(style)]
             }
+        }
+    }
+
+    fn arguments_json_fields(arguments: &str, fields: &[&str]) -> String {
+        match serde_json::from_str::<serde_json::Value>(arguments) {
+            Ok(val) => fields
+                .iter()
+                .filter_map(|&f| val.get(f).and_then(|v| v.as_str()))
+                .collect::<Vec<_>>()
+                .join(" "),
+            Err(_) => String::new(),
         }
     }
 
