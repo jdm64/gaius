@@ -20,7 +20,7 @@ use crate::{
     input::{Input, InputMode, PickList},
     models::{ModelPickerRow, Models, model_picker_rows},
     session::Session,
-    tui::{MessageRole, TerminalGuard, TuiApp, TuiMessage},
+    tui::{TerminalGuard, TuiApp, TuiMessage},
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use std::{error::Error, mem};
@@ -150,10 +150,10 @@ impl Commands {
                 InputMode::PromptInput
             }
             _ => {
-                app.push_message(TuiMessage {
-                    role: MessageRole::System,
-                    text: format!("Unknown command: /{}", command),
-                });
+                app.push_message(TuiMessage::SystemMessage(format!(
+                    "Unknown command: /{}",
+                    command
+                )));
                 Input::reset_history_scroll(app);
                 Input::clear_input(app);
                 InputMode::PromptInput
@@ -226,7 +226,7 @@ impl Commands {
                             Input::reset_history_scroll(app);
                             app.status = format!("Loaded session: {}", session.display_name());
                             app.context_tokens = None;
-                            app.load_history(harness.history());
+                            app.load_history(harness);
                             return InputMode::PromptInput;
                         }
                         Err(e) => {

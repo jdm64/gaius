@@ -16,15 +16,16 @@
 use crate::{
     input::{InputMode, PickList},
     models::ModelPickerRow,
-    tui::{MessageRole, TuiApp, TuiMessage, wrapped_line_count},
+    tui::{TuiApp, TuiMessage, wrapped_line_count},
 };
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
 };
+use serde_json::Value;
 use tui_markdown::{Options, from_str_with_options};
 
 pub const INPUT_HEIGHT: u16 = 3;
@@ -401,7 +402,9 @@ impl Render {
         for (index, message) in app.messages.iter().enumerate() {
             if index > 0 {
                 let previous = &app.messages[index - 1];
-                if previous.role != message.role {
+                if !matches!(previous, TuiMessage::AgentMessage(_))
+                    || !matches!(message, TuiMessage::AgentMessage(_))
+                {
                     lines.push(Line::from(""));
                 }
             }
@@ -491,29 +494,51 @@ impl Render {
         line
     }
 
-    pub fn render_message<'a>(msg: &'a TuiMessage) -> Vec<Line<'a>> {
-        let mut lines = Vec::new();
-
-        match msg.role {
-            MessageRole::Agent => {
+    pub fn render_message(msg: &TuiMessage) -> Vec<Line<'_>> {
+        match msg {
+            TuiMessage::AgentMessage(text) => {
                 let options = Options::default();
-                lines.append(&mut from_str_with_options(&msg.text, &options).lines);
+                from_str_with_options(text, &options).lines
             }
-            MessageRole::User => {
+            TuiMessage::UserPrompt(text) => {
                 let style = Style::default().bg(Color::Rgb(64, 64, 64)).italic().bold();
-                lines.push(Line::from(msg.text.clone()).style(style));
+                vec![Line::from(text.clone()).style(style)]
             }
-            MessageRole::ToolCall => {
+            TuiMessage::ToolCall { name, arguments, result: _result } => {
                 let style = Style::default().fg(Color::Cyan);
-                lines.push(Line::from(msg.text.clone()).style(style));
+                if let Ok(args) = serde_json::from_str::<Value>(arguments) {
+                    if let Some(file_path) = args.get("file_path").and_then(|v| v.as_str()) {
+                        let bold_name =
+                            Span::styled(name, style.add_modifier(Modifier::BOLD));
+                        let italic_file = Span::styled(
+                            file_path.to_string(),
+                            style.add_modifier(Modifier::ITALIC),
+                        );
+                        vec![Line::from(vec![bold_name, Span::raw(" "), italic_file])]
+                    } else if let Some(command) =
+                        args.get("command").and_then(|v| v.as_str())
+                    {
+                        let bold_name =
+                            Span::styled(name, style.add_modifier(Modifier::BOLD));
+                        let italic_cmd = Span::styled(
+                            command.to_string(),
+                            style.add_modifier(Modifier::ITALIC),
+                        );
+                        vec![Line::from(vec![bold_name, Span::raw(" "), italic_cmd])]
+                    } else {
+                        let text = format!("{} ({})", name, arguments);
+                        vec![Line::from(text).style(style)]
+                    }
+                } else {
+                    let text = format!("{} ({})", name, arguments);
+                    vec![Line::from(text).style(style)]
+                }
             }
-            MessageRole::System => {
-                let style = Style::default().fg(Color::Rgb(64, 64, 0));
-                lines.push(Line::from(msg.text.clone()).style(style));
+            TuiMessage::SystemMessage(text) => {
+                let style = Style::default().fg(Color::Rgb(64, 0, 0));
+                vec![Line::from(text.clone()).style(style)]
             }
         }
-
-        lines
     }
 
     fn draw_input(app: &TuiApp, frame: &mut Frame<'_>, area: Rect) {

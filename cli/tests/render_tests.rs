@@ -1,14 +1,11 @@
 use gaius::render::Render;
-use gaius::tui::{MessageRole, TuiMessage};
+use gaius::tui::TuiMessage;
 use ratatui::text::Line;
 
 #[test]
 fn markdown_heading_has_bold_style() {
     let md = "# Heading";
-    let msg = TuiMessage {
-        role: MessageRole::Agent,
-        text: md.to_string(),
-    };
+    let msg = TuiMessage::AgentMessage(md.to_string());
     let lines = Render::render_message(&msg);
     assert!(!lines.is_empty());
     // The heading style should be applied to the Line's style, not the span.
@@ -31,10 +28,7 @@ fn markdown_heading_has_bold_style() {
 #[test]
 fn markdown_list_has_style() {
     let md = "- item1\n- item2";
-    let msg = TuiMessage {
-        role: MessageRole::Agent,
-        text: md.to_string(),
-    };
+    let msg = TuiMessage::AgentMessage(md.to_string());
     let lines = Render::render_message(&msg);
     assert!(!lines.is_empty());
     // List items should have a style (maybe a marker).

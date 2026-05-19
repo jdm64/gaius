@@ -1,5 +1,4 @@
-use gaius::tui::{TuiApp, wrapped_line_count};
-use genai::chat::{ChatMessage, ChatRequest, ContentPart, MessageContent, ToolCall, ToolResponse};
+use gaius::tui::{TuiApp, TuiMessage, wrapped_line_count};
 
 #[test]
 fn counts_wrapped_history_lines() {
@@ -13,43 +12,52 @@ fn counts_wrapped_history_lines() {
 }
 
 #[test]
-fn loads_chat_request_into_tui_history() {
-    let request = ChatRequest {
-        system: Some("be useful".to_string()),
-        messages: vec![
-            ChatMessage::user("hello"),
-            ChatMessage::assistant(MessageContent::from_parts(vec![
-                ContentPart::Text("hi".to_string()),
-                ContentPart::ToolCall(ToolCall {
-                    call_id: "123".to_string(),
-                    fn_name: "weather".to_string(),
-                    fn_arguments: serde_json::json!({"city": "Atlanta"}),
-                    thought_signatures: None,
-                }),
-            ])),
-            ChatMessage {
-                role: genai::chat::ChatRole::Tool,
-                content: MessageContent::from_parts(vec![ContentPart::ToolResponse(
-                    ToolResponse::new("123", "sunny"),
-                )]),
-                options: None,
-            },
-        ],
-        tools: None,
-    };
-
+fn build_tui_app_messages_with_all_variants() {
     let mut app = TuiApp::new();
-    app.load_history(&request);
+    app.push_message(TuiMessage::SystemMessage("system: be useful".to_string()));
+    app.push_message(TuiMessage::UserPrompt("hello".to_string()));
+    app.push_message(TuiMessage::AgentMessage("hi".to_string()));
+    app.push_message(TuiMessage::ToolCall {
+        name: "weather".to_string(),
+        arguments: serde_json::json!({"city":"Atlanta"}).to_string(),
+        result: String::new(),
+    });
+    app.push_message(TuiMessage::ToolCall {
+        name: "123".to_string(),
+        arguments: String::new(),
+        result: "sunny".to_string(),
+    });
 
     assert_eq!(app.messages.len(), 5);
-    assert_eq!(app.messages[0].role, gaius::tui::MessageRole::System);
-    assert_eq!(app.messages[0].text, "system: be useful");
-    assert_eq!(app.messages[1].role, gaius::tui::MessageRole::User);
-    assert_eq!(app.messages[1].text, "hello");
-    assert_eq!(app.messages[2].role, gaius::tui::MessageRole::Agent);
-    assert_eq!(app.messages[2].text, "hi");
-    assert_eq!(app.messages[3].role, gaius::tui::MessageRole::ToolCall);
-    assert_eq!(app.messages[3].text, "weather ({\"city\":\"Atlanta\"})");
-    assert_eq!(app.messages[4].role, gaius::tui::MessageRole::ToolCall);
-    assert_eq!(app.messages[4].text, "123 => sunny");
+    match &app.messages[0] {
+        TuiMessage::SystemMessage(t) => assert_eq!(t, "system: be useful"),
+        _ => panic!("expected SystemMessage"),
+    }
+    match &app.messages[1] {
+        TuiMessage::UserPrompt(t) => assert_eq!(t, "hello"),
+        _ => panic!("expected UserPrompt"),
+    }
+    match &app.messages[2] {
+        TuiMessage::AgentMessage(t) => assert_eq!(t, "hi"),
+        _ => panic!("expected AgentMessage"),
+    }
+    match &app.messages[3] {
+        TuiMessage::ToolCall {
+            name,
+            arguments,
+            result,
+        } => {
+            assert_eq!(name, "weather");
+            assert_eq!(arguments, r#"{"city":"Atlanta"}"#);
+            assert!(result.is_empty());
+        }
+        _ => panic!("expected ToolCall"),
+    }
+    match &app.messages[4] {
+        TuiMessage::ToolCall { name, result, .. } => {
+            assert_eq!(name, "123");
+            assert_eq!(result, "sunny");
+        }
+        _ => panic!("expected ToolCall"),
+    }
 }

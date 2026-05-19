@@ -28,7 +28,6 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use genai::chat::{ChatRequest, ChatRole, ContentPart};
 use ratatui::{Terminal, backend::CrosstermBackend, text::Line};
 use std::{
     error::Error,
@@ -38,17 +37,15 @@ use std::{
 };
 
 #[derive(Clone)]
-pub struct TuiMessage {
-    pub role: MessageRole,
-    pub text: String,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum MessageRole {
-    User,
-    Agent,
-    ToolCall,
-    System,
+pub enum TuiMessage {
+    UserPrompt(String),
+    AgentMessage(String),
+    SystemMessage(String),
+    ToolCall {
+        name: String,
+        arguments: String,
+        result: String,
+    },
 }
 
 pub struct TerminalGuard {
@@ -128,7 +125,7 @@ impl TuiApp {
     ) -> Result<(), Box<dyn Error>> {
         self.model = harness.model().clone();
         self.agent_name = harness.agent_name().to_string();
-        self.load_history(harness.history());
+        self.load_history(harness);
         if let Err(e) = self.load_prompt_history() {
             eprintln!("Failed to load prompt history: {}", e);
         }
@@ -191,23 +188,27 @@ impl TuiApp {
         Input::update_prompt_history(self, prompt.clone());
         Input::clear_input(self);
         Input::reset_history_scroll(self);
-        self.push_message(TuiMessage {
-            role: MessageRole::User,
-            text: prompt.clone(),
-        });
         self.status = "Waiting for agent...".to_string();
         guard.terminal.draw(|frame| Render::draw(self, frame))?;
 
         let result = harness
             .run_turn_with_events(prompt, |event| {
                 match event {
-                    HarnessEvent::AgentMessageChunk(text) => {
-                        self.append_agent_message_chunk(text);
+                    HarnessEvent::UserPrompt(prompt_msg) => {
+                        self.push_message(TuiMessage::UserPrompt(prompt_msg));
                     }
-                    HarnessEvent::ToolCall { name, arguments } => {
-                        self.push_message(TuiMessage {
-                            role: MessageRole::ToolCall,
-                            text: format!("{} ({})", name, arguments),
+                    HarnessEvent::AgentMessage(chunk) => {
+                        self.append_agent_message(chunk);
+                    }
+                    HarnessEvent::ToolCall {
+                        name,
+                        arguments,
+                        result,
+                    } => {
+                        self.push_message(TuiMessage::ToolCall {
+                            name,
+                            arguments,
+                            result,
                         });
                         Input::reset_history_scroll(self);
                     }
@@ -222,10 +223,7 @@ impl TuiApp {
                 self.context_tokens = harness.context_tokens();
             }
             Err(err) => {
-                self.push_message(TuiMessage {
-                    role: MessageRole::System,
-                    text: format!("Error: {}", err),
-                });
+                self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
                 Input::reset_history_scroll(self);
                 self.status = "Agent request failed".to_string();
             }
@@ -234,41 +232,43 @@ impl TuiApp {
         Ok(())
     }
 
-    pub fn append_agent_message_chunk(&mut self, chunk: String) {
+    pub fn append_agent_message(&mut self, chunk: String) {
         if chunk.is_empty() {
             return;
         }
 
         if let Some(message) = self.messages.last_mut()
-            && message.role == MessageRole::Agent
+            && matches!(message, TuiMessage::AgentMessage(_))
         {
-            message.text.push_str(&chunk);
+            if let TuiMessage::AgentMessage(text) = message {
+                text.push_str(&chunk);
+            }
         } else {
-            self.push_message(TuiMessage {
-                role: MessageRole::Agent,
-                text: chunk,
-            });
+            self.push_message(TuiMessage::AgentMessage(chunk));
         }
         self.mark_history_dirty();
         Input::reset_history_scroll(self);
     }
 
-    pub fn load_history(&mut self, history: &ChatRequest) {
-        if let Some(system) = &history.system
-            && !system.trim().is_empty()
-        {
-            self.push_message(TuiMessage {
-                role: MessageRole::System,
-                text: format!("system: {}", system),
-            });
-        }
-
-        for message in &history.messages {
-            for tui_message in tui_messages_for_chat_message(message.role.clone(), &message.content)
-            {
-                self.push_message(tui_message);
+    pub fn load_history(&mut self, harness: &Harness) {
+        self.messages.clear();
+        harness.replay_history(|event| match event {
+            HarnessEvent::UserPrompt(text) => {
+                self.push_message(TuiMessage::UserPrompt(text));
             }
-        }
+            HarnessEvent::AgentMessage(text) => {
+                self.append_agent_message(text);
+            }
+            HarnessEvent::ToolCall {
+                name, arguments, result, ..
+            } => {
+                self.push_message(TuiMessage::ToolCall {
+                    name,
+                    arguments,
+                    result,
+                });
+            }
+        });
     }
 
     pub fn clear_messages(&mut self) {
@@ -307,47 +307,6 @@ impl TuiApp {
         let contents = serde_json::to_string_pretty(&self.prompt_history)?;
         fs::write(path, contents)?;
         Ok(())
-    }
-}
-
-fn tui_messages_for_chat_message(
-    role: ChatRole,
-    content: &genai::chat::MessageContent,
-) -> Vec<TuiMessage> {
-    let mut messages = Vec::new();
-
-    for part in content {
-        match part {
-            ContentPart::Text(text) if !text.is_empty() => {
-                messages.push(TuiMessage {
-                    role: message_role_for_chat_role(&role),
-                    text: text.clone(),
-                });
-            }
-            ContentPart::ToolCall(tool_call) => {
-                messages.push(TuiMessage {
-                    role: MessageRole::ToolCall,
-                    text: format!("{} ({})", tool_call.fn_name, tool_call.fn_arguments),
-                });
-            }
-            ContentPart::ToolResponse(tool_response) => {
-                messages.push(TuiMessage {
-                    role: MessageRole::ToolCall,
-                    text: format!("{} => {}", tool_response.call_id, tool_response.content),
-                });
-            }
-            ContentPart::Text(_) | ContentPart::Binary(_) | ContentPart::ThoughtSignature(_) => {}
-        }
-    }
-
-    messages
-}
-
-fn message_role_for_chat_role(role: &ChatRole) -> MessageRole {
-    match role {
-        ChatRole::User => MessageRole::User,
-        ChatRole::Assistant | ChatRole::System => MessageRole::Agent,
-        ChatRole::Tool => MessageRole::ToolCall,
     }
 }
 

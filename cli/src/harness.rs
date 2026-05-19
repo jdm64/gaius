@@ -18,7 +18,9 @@ use futures::StreamExt;
 use genai::{
     Client, ModelIden, ServiceTarget,
     adapter::AdapterKind,
-    chat::{ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ToolCall, ToolResponse},
+    chat::{
+        ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, ToolCall, ToolResponse,
+    },
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
 };
 use std::{
@@ -62,8 +64,13 @@ pub struct Harness {
 }
 
 pub enum HarnessEvent {
-    AgentMessageChunk(String),
-    ToolCall { name: String, arguments: String },
+    UserPrompt(String),
+    AgentMessage(String),
+    ToolCall {
+        name: String,
+        arguments: String,
+        result: String,
+    },
 }
 
 impl Harness {
@@ -157,6 +164,94 @@ impl Harness {
         &self.history
     }
 
+    /// Replay the entire chat history as `HarnessEvent` callbacks, pairing
+    /// assistant tool-calls with their following tool-response messages.
+    ///
+    /// TUI and CLI callers can use this as the single code path for rendering
+    /// both live turns and previously-saved history.
+    pub fn replay_history<F>(&self, mut on_event: F)
+    where
+        F: FnMut(HarnessEvent),
+    {
+        let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
+        let mut messages = self.history.messages.iter().peekable();
+
+        while let Some(message) = messages.next() {
+            match message.role {
+                ChatRole::User => {
+                    pending_tool_calls.clear();
+                    let text = message.content.texts().join("");
+                    if !text.is_empty() {
+                        on_event(HarnessEvent::UserPrompt(text));
+                    }
+                }
+                ChatRole::Assistant => {
+                    let text = message.content.texts().join("");
+
+                    // Collect pending tool calls from this assistant turn
+                    for tc in message.content.tool_calls() {
+                        pending_tool_calls.push((tc.fn_name.clone(), tc.fn_arguments.to_string()));
+                    }
+
+                    if !text.is_empty() {
+                        on_event(HarnessEvent::AgentMessage(text));
+                    }
+
+                    // Match consecutive Tool-role response messages to the pending
+                    // tool calls in order.
+                    loop {
+                        let is_tool = match messages.peek() {
+                            Some(m) => m.role == ChatRole::Tool,
+                            None => false,
+                        };
+                        if !is_tool {
+                            break;
+                        }
+                        let next_msg = messages.next().unwrap();
+                        let responses: Vec<&genai::chat::ToolResponse> =
+                            next_msg.content.tool_responses();
+                        for resp in responses {
+                            if let Some((name, args)) = pending_tool_calls.first() {
+                                on_event(HarnessEvent::ToolCall {
+                                    name: (*name).clone(),
+                                    arguments: (*args).clone(),
+                                    result: resp.content.clone(),
+                                });
+                                pending_tool_calls.remove(0);
+                            }
+                        }
+                    }
+
+                    // Any remaining unmatched calls — emit with empty result so
+                    // the UI always renders something.
+                    for (name, args) in pending_tool_calls.drain(..) {
+                        on_event(HarnessEvent::ToolCall {
+                            name,
+                            arguments: args,
+                            result: String::new(),
+                        });
+                    }
+                }
+                ChatRole::Tool => {
+                    // Unmatched tool response — display inline as agent text.
+                    let text = message.content.texts().join("");
+                    if !text.is_empty() {
+                        on_event(HarnessEvent::AgentMessage(text));
+                    }
+                    for tr in message.content.tool_responses() {
+                        on_event(HarnessEvent::AgentMessage(format!(
+                            "[tool {}]: {}",
+                            tr.call_id, tr.content
+                        )));
+                    }
+                }
+                ChatRole::System => {
+                    pending_tool_calls.clear();
+                }
+            }
+        }
+    }
+
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(prompt) = self.oneshot_prompt.take() {
             self.run_turn(prompt).await?;
@@ -176,7 +271,11 @@ impl Harness {
     pub async fn run_turn(&mut self, prompt: String) -> Result<(), Box<dyn std::error::Error>> {
         let mut agent_started = false;
         self.run_turn_with_events(prompt, |event| match event {
-            HarnessEvent::AgentMessageChunk(text) => {
+            HarnessEvent::UserPrompt(text) => {
+                println!("user> {}", text);
+                let _ = io::stdout().flush();
+            }
+            HarnessEvent::AgentMessage(text) => {
                 if !agent_started {
                     print!("agent> ");
                     agent_started = true;
@@ -184,12 +283,17 @@ impl Harness {
                 print!("{}", text);
                 let _ = io::stdout().flush();
             }
-            HarnessEvent::ToolCall { name, arguments } => {
+            HarnessEvent::ToolCall {
+                name,
+                arguments,
+                result,
+            } => {
                 if agent_started {
                     println!();
                     agent_started = false;
                 }
                 println!("tool-call> {} ({})", name, arguments);
+                println!("tool-result> {}", result);
             }
         })
         .await?;
@@ -209,6 +313,7 @@ impl Harness {
     where
         F: FnMut(HarnessEvent),
     {
+        on_event(HarnessEvent::UserPrompt(prompt.clone()));
         self.history.messages.push(ChatMessage::user(prompt));
 
         loop {
@@ -249,7 +354,7 @@ impl Harness {
             match event? {
                 ChatStreamEvent::Chunk(chunk) if !chunk.content.is_empty() => {
                     emitted_text = true;
-                    on_event(HarnessEvent::AgentMessageChunk(chunk.content));
+                    on_event(HarnessEvent::AgentMessage(chunk.content));
                 }
                 ChatStreamEvent::End(end) => {
                     stream_end = Some(end);
@@ -267,7 +372,7 @@ impl Harness {
         if !emitted_text {
             let text = content.texts().join("");
             if !text.is_empty() {
-                on_event(HarnessEvent::AgentMessageChunk(text));
+                on_event(HarnessEvent::AgentMessage(text));
             }
         }
 
@@ -298,7 +403,7 @@ impl Harness {
 
         let full_text = response.content.texts().join("");
         if !full_text.is_empty() {
-            on_event(HarnessEvent::AgentMessageChunk(full_text.clone()));
+            on_event(HarnessEvent::AgentMessage(full_text.clone()));
         }
 
         self.history
@@ -320,6 +425,7 @@ impl Harness {
     {
         for tc in tool_calls {
             let result = self.tool_engine.execute(&tc.fn_name, &tc.fn_arguments);
+            let result_for_event = result.clone();
             self.history
                 .messages
                 .push(ToolResponse::new(&tc.call_id, result).into());
@@ -327,6 +433,7 @@ impl Harness {
             on_event(HarnessEvent::ToolCall {
                 name: tc.fn_name.to_string(),
                 arguments: tc.fn_arguments.to_string(),
+                result: result_for_event,
             });
         }
     }
