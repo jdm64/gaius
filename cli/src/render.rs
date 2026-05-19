@@ -499,8 +499,11 @@ impl Render {
                 from_str_with_options(text, &options).lines
             }
             TuiMessage::UserPrompt(text) => {
-                let style = Style::default().bg(Color::Rgb(64, 64, 64)).italic().bold();
-                vec![Line::from(text.clone()).style(style)]
+                let style = Style::default().bg(Color::Rgb(64, 64, 64));
+                vec![Line::from(vec![
+                    Span::styled("\u{2503} ", style.fg(Color::Magenta)),
+                    Span::raw(text.clone()).style(style.italic().bold()),
+                ])]
             }
             TuiMessage::ToolCall {
                 name,
