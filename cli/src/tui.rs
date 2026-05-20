@@ -14,6 +14,7 @@
  */
 
 use crate::{
+    agents::Agents,
     commands::Commands,
     config::Config,
     harness::{Harness, HarnessEvent},
@@ -76,6 +77,7 @@ impl Drop for TerminalGuard {
 pub struct TuiApp {
     pub model: String,
     pub agent_name: String,
+    pub agents: Agents,
     pub input: String,
     pub input_cursor: usize,
     pub history_scroll: u16,
@@ -102,6 +104,7 @@ impl TuiApp {
         Self {
             model: String::new(),
             agent_name: String::new(),
+            agents: Agents::default(),
             input: String::new(),
             input_cursor: 0,
             history_scroll: 0,
@@ -118,6 +121,13 @@ impl TuiApp {
         }
     }
 
+    pub fn set_agent(&mut self, harness: &mut Harness, name: &str) {
+        if let Some(agent) = self.agents.find(name) {
+            harness.set_agent(agent.clone());
+            self.agent_name = name.to_string();
+        }
+    }
+
     pub async fn run(
         &mut self,
         harness: &mut Harness,
@@ -125,6 +135,7 @@ impl TuiApp {
     ) -> Result<(), Box<dyn Error>> {
         self.model = harness.model().clone();
         self.agent_name = harness.agent_name().to_string();
+        self.agents = config.agents().clone();
         self.load_history(harness);
         if let Err(e) = self.load_prompt_history() {
             eprintln!("Failed to load prompt history: {}", e);
@@ -185,6 +196,7 @@ impl TuiApp {
         harness: &mut Harness,
         guard: &mut TerminalGuard,
     ) -> Result<(), Box<dyn Error>> {
+        self.agents.mark_recent(harness.agent_name());
         Input::update_prompt_history(self, prompt.clone());
         Input::clear_input(self);
         Input::reset_history_scroll(self);

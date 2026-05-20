@@ -64,6 +64,21 @@ impl Agents {
     pub fn find(&self, name: &str) -> Option<&AgentDefinition> {
         self.agents.iter().find(|agent| agent.name == name)
     }
+
+    pub fn next_agent(&self, name: &str) -> Option<&AgentDefinition> {
+        let current_index = self.agents.iter().position(|agent| agent.name == name)?;
+        let next_index = (current_index + 1) % self.agents.len();
+        self.agents.get(next_index)
+    }
+
+    pub fn mark_recent(&mut self, name: &str) {
+        if let Some(current_index) = self.agents.iter().position(|agent| agent.name == name)
+            && current_index != 0
+        {
+            let agent = self.agents.remove(current_index);
+            self.agents.insert(0, agent);
+        }
+    }
 }
 
 fn hardcoded_agents() -> Vec<AgentDefinition> {

@@ -199,6 +199,13 @@ impl Input {
                 }
                 return Ok(Self::mode_for_input(app));
             }
+            KeyCode::Tab => {
+                let agent = app.agents.next_agent(app.agent_name.as_str());
+                let next_name = agent.map(|a| a.name.clone());
+                if let Some(name) = next_name {
+                    app.set_agent(harness, &name);
+                }
+            }
             KeyCode::Enter => {
                 let prompt = app.input.trim().to_string();
                 if prompt.is_empty() {
