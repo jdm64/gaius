@@ -317,14 +317,13 @@ impl Harness {
         self.history.messages.push(ChatMessage::user(prompt));
 
         loop {
-            self.save_history()?;
-
             let tool_calls = if self.streaming {
                 self.send_request_streaming(&mut on_event).await?
             } else {
                 self.send_request_waiting(&mut on_event).await?
             };
             self.call_tools(&tool_calls, &mut on_event);
+            self.save_history()?;
             if tool_calls.is_empty() {
                 return Ok(());
             }
