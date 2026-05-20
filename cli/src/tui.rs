@@ -260,7 +260,9 @@ impl TuiApp {
                 self.append_agent_message(text);
             }
             HarnessEvent::ToolCall {
-                name, arguments, result, ..
+                name,
+                arguments,
+                result,
             } => {
                 self.push_message(TuiMessage::ToolCall {
                     name,
