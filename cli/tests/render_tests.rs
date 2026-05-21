@@ -1,6 +1,6 @@
 use gaius::render::Render;
 use gaius::tui::TuiMessage;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 
 #[test]
 fn markdown_heading_has_bold_style() {
@@ -44,13 +44,26 @@ fn markdown_list_has_style() {
 
 #[test]
 fn visible_history_lines_returns_bottom_window() {
-    let lines = vec![
+    let raw = vec![
         Line::from("one"),
         Line::from("two"),
         Line::from("three"),
         Line::from("four"),
     ];
-
+    let lines: Vec<Line<'static>> = raw
+        .into_iter()
+        .map(|l| {
+            let mut owned = Line::from(
+                l.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>(),
+            );
+            owned.style = l.style;
+            owned.alignment = l.alignment;
+            owned
+        })
+        .collect();
     let visible = Render::visible_history_lines(&lines, 20, 2, 2);
 
     assert_eq!(line_texts(&visible), vec!["three", "four"]);
@@ -58,8 +71,21 @@ fn visible_history_lines_returns_bottom_window() {
 
 #[test]
 fn visible_history_lines_slices_wrapped_lines() {
-    let lines = vec![Line::from("abcdef"), Line::from("gh")];
-
+    let raw = vec![Line::from("abcdef"), Line::from("gh")];
+    let lines: Vec<Line<'static>> = raw
+        .into_iter()
+        .map(|l| {
+            let mut owned = Line::from(
+                l.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>(),
+            );
+            owned.style = l.style;
+            owned.alignment = l.alignment;
+            owned
+        })
+        .collect();
     let visible = Render::visible_history_lines(&lines, 2, 1, 3);
 
     assert_eq!(line_texts(&visible), vec!["cd", "ef", "gh"]);
@@ -70,6 +96,21 @@ fn visible_history_lines_handles_empty_history() {
     let visible = Render::visible_history_lines(&[], 20, 0, 5);
 
     assert!(visible.is_empty());
+}
+
+#[test]
+fn visible_history_lines_pads_user_prompts_to_width() {
+    let lines = Render::render_message(&TuiMessage::UserPrompt("hello".to_string()));
+
+    let visible = Render::visible_history_lines(&lines, 10, 0, 3);
+
+    assert_eq!(visible.len(), 3);
+    assert_eq!(visible[0].width(), 10);
+    assert_eq!(visible[1].width(), 10);
+    assert_eq!(visible[2].width(), 10);
+    assert_eq!(visible[0].spans[0].content.as_ref(), "\u{2503} ");
+    assert_eq!(visible[1].spans[0].content.as_ref(), "\u{2503} ");
+    assert_eq!(visible[2].spans[0].content.as_ref(), "\u{2503} ");
 }
 
 fn line_texts(lines: &[Line<'_>]) -> Vec<String> {

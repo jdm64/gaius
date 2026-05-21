@@ -424,18 +424,34 @@ impl Render {
         let end = start.saturating_add(height);
 
         for line in lines {
+            let user_prompt = Self::is_user_prompt_line(line);
             for wrapped in Self::wrap_line(line, width) {
-                if wrapped_index >= start && wrapped_index < end {
-                    visible.push(wrapped);
-                }
-                wrapped_index += 1;
-                if wrapped_index >= end {
+                let line = if user_prompt {
+                    Self::pad_user_prompt_line(wrapped, width)
+                } else {
+                    wrapped
+                };
+                if Self::push_visible_line(&mut visible, line, &mut wrapped_index, start, end) {
                     return visible;
                 }
             }
         }
 
         visible
+    }
+
+    fn push_visible_line(
+        visible: &mut Vec<Line<'static>>,
+        line: Line<'static>,
+        wrapped_index: &mut usize,
+        start: usize,
+        end: usize,
+    ) -> bool {
+        if *wrapped_index >= start && *wrapped_index < end {
+            visible.push(line);
+        }
+        *wrapped_index += 1;
+        *wrapped_index >= end
     }
 
     fn wrap_line(line: &Line<'static>, width: u16) -> Vec<Line<'static>> {
@@ -492,18 +508,26 @@ impl Render {
         line
     }
 
-    pub fn render_message(msg: &TuiMessage) -> Vec<Line<'_>> {
+    pub fn render_message(msg: &TuiMessage) -> Vec<Line<'static>> {
         match msg {
             TuiMessage::AgentMessage(text) => {
                 let options = Options::default();
-                from_str_with_options(text, &options).lines
+                from_str_with_options(text, &options)
+                    .lines
+                    .into_iter()
+                    .map(Self::owned_line)
+                    .collect()
             }
             TuiMessage::UserPrompt(text) => {
-                let style = Style::default().bg(Color::Rgb(64, 64, 64));
-                vec![Line::from(vec![
-                    Span::styled("\u{2503} ", style.fg(Color::Magenta)),
-                    Span::raw(text.clone()).style(style.italic().bold()),
-                ])]
+                let style = Self::user_prompt_style();
+                vec![
+                    Self::user_prompt_bar_line(),
+                    Line::from(vec![
+                        Span::styled("\u{2503} ", style.fg(Color::Magenta)),
+                        Span::raw(text.clone()).style(style.italic().bold()),
+                    ]),
+                    Self::user_prompt_bar_line(),
+                ]
             }
             TuiMessage::ToolCall {
                 name,
@@ -523,12 +547,13 @@ impl Render {
                     _ => name.clone(),
                 };
 
-                if display != *name {
-                    vec![Line::from(vec![
-                        Span::styled(name, style.add_modifier(Modifier::BOLD)),
+                if display != name.as_str() {
+                    let spans = vec![
+                        Span::styled(name.clone(), style.add_modifier(Modifier::BOLD)),
                         Span::raw(" "),
                         Span::styled(display, style.add_modifier(Modifier::ITALIC)),
-                    ])]
+                    ];
+                    vec![Line::from(spans)]
                 } else {
                     vec![Line::from(display).style(style)]
                 }
@@ -540,6 +565,35 @@ impl Render {
                 vec![Line::from(text.clone()).style(style)]
             }
         }
+    }
+
+    fn pad_user_prompt_line(mut line: Line<'static>, width: u16) -> Line<'static> {
+        let width = width.max(1) as usize;
+        let used = line.width() % width;
+        let pad = if used == 0 { 0 } else { width - used };
+        if pad == 0 {
+            return line;
+        }
+
+        line.spans
+            .push(Span::styled(" ".repeat(pad), Self::user_prompt_style()));
+        line
+    }
+
+    fn user_prompt_bar_line() -> Line<'static> {
+        let style = Self::user_prompt_style();
+        Line::from(vec![Span::styled("\u{2503} ", style.fg(Color::Magenta))])
+    }
+
+    fn is_user_prompt_line(line: &Line<'_>) -> bool {
+        line.spans
+            .first()
+            .map(|span| span.content == "\u{2503} ")
+            .unwrap_or(false)
+    }
+
+    fn user_prompt_style() -> Style {
+        Style::default().bg(Color::Rgb(64, 64, 64))
     }
 
     fn arguments_json_fields(arguments: &str, fields: &[&str]) -> String {

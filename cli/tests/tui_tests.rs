@@ -6,7 +6,6 @@ fn counts_wrapped_history_lines() {
         ratatui::text::Line::from("12345"),
         ratatui::text::Line::from("123456"),
     ];
-
     assert_eq!(wrapped_line_count(&lines, 5), 3);
     assert_eq!(wrapped_line_count(&lines, 0), 11);
 }
