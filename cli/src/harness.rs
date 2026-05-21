@@ -13,7 +13,10 @@
  * limitations under the License.
  */
 
-use crate::{agents::AgentDefinition, session::Session, tools::ToolEngine, util::prompt_input};
+use crate::{
+    agents::AgentDefinition, session::Session, tools::ToolEngine, tools::ToolResult,
+    util::prompt_input,
+};
 use futures::StreamExt;
 use genai::{
     Client, ModelIden, ServiceTarget,
@@ -70,6 +73,10 @@ pub enum HarnessEvent {
         name: String,
         arguments: String,
         result: String,
+    },
+    AskUser {
+        title: String,
+        options: Vec<String>,
     },
 }
 
@@ -274,6 +281,7 @@ impl Harness {
             HarnessEvent::UserPrompt(text) => {
                 println!("user> {}", text);
                 let _ = io::stdout().flush();
+                None
             }
             HarnessEvent::AgentMessage(text) => {
                 if !agent_started {
@@ -282,6 +290,7 @@ impl Harness {
                 }
                 print!("{}", text);
                 let _ = io::stdout().flush();
+                None
             }
             HarnessEvent::ToolCall {
                 name,
@@ -294,6 +303,18 @@ impl Harness {
                 }
                 println!("tool-call> {} ({})", name, arguments);
                 println!("tool-result> {}", result);
+                None
+            }
+            HarnessEvent::AskUser { title, options } => {
+                if agent_started {
+                    println!();
+                    agent_started = false;
+                }
+                println!("question> {}", title);
+                for (index, option) in options.iter().enumerate() {
+                    println!("  {}) {}", index + 1, option);
+                }
+                prompt_input("answer> ").ok()
             }
         })
         .await?;
@@ -311,7 +332,7 @@ impl Harness {
         mut on_event: F,
     ) -> Result<(), Box<dyn std::error::Error>>
     where
-        F: FnMut(HarnessEvent),
+        F: FnMut(HarnessEvent) -> Option<String>,
     {
         on_event(HarnessEvent::UserPrompt(prompt.clone()));
         self.history.messages.push(ChatMessage::user(prompt));
@@ -335,7 +356,7 @@ impl Harness {
         on_event: &mut F,
     ) -> Result<Vec<ToolCall>, Box<dyn std::error::Error>>
     where
-        F: FnMut(HarnessEvent),
+        F: FnMut(HarnessEvent) -> Option<String>,
     {
         let chat_options = ChatOptions::default()
             .with_capture_content(true)
@@ -393,7 +414,7 @@ impl Harness {
         on_event: &mut F,
     ) -> Result<Vec<ToolCall>, Box<dyn std::error::Error>>
     where
-        F: FnMut(HarnessEvent),
+        F: FnMut(HarnessEvent) -> Option<String>,
     {
         let response = self
             .client
@@ -420,21 +441,38 @@ impl Harness {
 
     fn call_tools<F>(&mut self, tool_calls: &[ToolCall], on_event: &mut F)
     where
-        F: FnMut(HarnessEvent),
+        F: FnMut(HarnessEvent) -> Option<String>,
     {
         for tc in tool_calls {
             let result = self.tool_engine.execute(&tc.fn_name, &tc.fn_arguments);
-            let result_for_event = result.clone();
-            self.history
-                .messages
-                .push(ToolResponse::new(&tc.call_id, result).into());
-
-            on_event(HarnessEvent::ToolCall {
-                name: tc.fn_name.to_string(),
-                arguments: tc.fn_arguments.to_string(),
-                result: result_for_event,
-            });
+            match result {
+                ToolResult::Question(title, options) => {
+                    let answer =
+                        on_event(HarnessEvent::AskUser { title, options }).unwrap_or_default();
+                    self.send_tool_call_event(tc, answer, on_event);
+                }
+                ToolResult::Text(text) => {
+                    self.send_tool_call_event(tc, text, on_event);
+                }
+                ToolResult::Error(err) => {
+                    self.send_tool_call_event(tc, err, on_event);
+                }
+            }
         }
+    }
+
+    fn send_tool_call_event<F>(&mut self, tc: &ToolCall, result: String, on_event: &mut F)
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        self.history
+            .messages
+            .push(ToolResponse::new(&tc.call_id, result.clone()).into());
+        on_event(HarnessEvent::ToolCall {
+            name: tc.fn_name.to_string(),
+            arguments: tc.fn_arguments.to_string(),
+            result,
+        });
     }
 
     fn save_history(&mut self) -> Result<(), Box<dyn Error>> {

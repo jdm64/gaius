@@ -21,6 +21,13 @@ use serde_json::json;
 use std::io::Write;
 use std::process::Command;
 
+#[derive(Debug)]
+pub enum ToolResult {
+    Error(String),
+    Text(String),
+    Question(String, Vec<String>),
+}
+
 pub struct ToolEngine {}
 
 impl ToolEngine {
@@ -136,10 +143,27 @@ impl ToolEngine {
                     },
                     "required": ["pattern", "path"]
                 })),
+            Tool::new("question")
+                .with_description("Ask the user a question with optional choices")
+                .with_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The question or prompt to show the user"
+                        },
+                        "options": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Optional list of choices for the user"
+                        }
+                    },
+                    "required": ["title"]
+                })),
         ]
     }
 
-    pub fn execute(&self, name: &str, args: &Value) -> String {
+    pub fn execute(&self, name: &str, args: &Value) -> ToolResult {
         match name {
             "read_file" => self.read_file_tool(args),
             "write_file" => self.write_file_tool(args),
@@ -147,65 +171,66 @@ impl ToolEngine {
             "bash" => self.bash_tool(args),
             "glob" => self.glob_tool(args),
             "grep" => self.grep_tool(args),
-            _ => format!("Unknown tool call: {} ({})", name, args),
+            "question" => self.question_tool(args),
+            _ => ToolResult::Error(format!("Unknown tool call: {} ({})", name, args)),
         }
     }
 
-    fn read_file_tool(&self, args: &Value) -> String {
+    fn read_file_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return "Error: Missing file_path".to_string(),
+            None => return ToolResult::Error("Missing file_path".to_string()),
         };
         let start_line = match args.get("start_line") {
             Some(value) => match value.as_u64() {
                 Some(line) if line >= 1 => line as usize,
-                _ => {
-                    return "Error: start_line must be an integer greater than or equal to 1"
-                        .to_string();
-                }
+                _ => return ToolResult::Error(
+                    "start_line must be an integer greater than or equal to 1".to_string()
+                ),
             },
             None => 1,
         };
         let max_lines = match args.get("max_lines") {
             Some(value) => match value.as_u64() {
                 Some(lines) => Some(lines as usize),
-                _ => return "Error: max_lines must be a non-negative integer".to_string(),
+                _ => return ToolResult::Error("max_lines must be a non-negative integer".to_string()),
             },
             None => None,
         };
         let cwd = match std::env::current_dir() {
             Ok(c) => c,
-            Err(e) => return format!("Error getting current directory: {}", e),
+            Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
         };
         let full_path = cwd.join(file_path_str);
         match std::fs::read_to_string(full_path) {
             Ok(content) => {
                 if start_line == 1 && max_lines.is_none() {
-                    return content;
+                    return ToolResult::Text(content);
                 }
 
                 let lines = content.split_inclusive('\n').skip(start_line - 1);
-                match max_lines {
+                let result = match max_lines {
                     Some(max_lines) => lines.take(max_lines).collect(),
                     None => lines.collect(),
-                }
+                };
+                ToolResult::Text(result)
             }
-            Err(e) => format!("Error reading file: {}", e),
+            Err(e) => ToolResult::Error(format!("Error reading file: {}", e)),
         }
     }
 
-    fn write_file_tool(&self, args: &Value) -> String {
+    fn write_file_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return "Error: Missing file_path".to_string(),
+            None => return ToolResult::Error("Missing file_path".to_string()),
         };
         let contents = match args.get("contents").and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => return "Error: Missing contents".to_string(),
+            None => return ToolResult::Error("Missing contents".to_string()),
         };
         let cwd = match std::env::current_dir() {
             Ok(c) => c,
-            Err(e) => return format!("Error getting current directory: {}", e),
+            Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
         };
         let full_path = cwd.join(file_path_str);
         match std::fs::OpenOptions::new()
@@ -214,72 +239,72 @@ impl ToolEngine {
             .open(full_path)
         {
             Ok(mut file) => match file.write_all(contents.as_bytes()) {
-                Ok(()) => "File written successfully".to_string(),
-                Err(e) => format!("Error writing file: {}", e),
+                Ok(()) => ToolResult::Text("File written successfully".to_string()),
+                Err(e) => ToolResult::Error(format!("Error writing file: {}", e)),
             },
-            Err(e) => format!("Error creating file: {}", e),
+            Err(e) => ToolResult::Error(format!("Error creating file: {}", e)),
         }
     }
 
-    fn edit_file_tool(&self, args: &Value) -> String {
+    fn edit_file_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return "Error: Missing file_path".to_string(),
+            None => return ToolResult::Error("Missing file_path".to_string()),
         };
         let find = match args.get("find").and_then(|v| v.as_str()) {
             Some(f) => f,
-            None => return "Error: Missing find".to_string(),
+            None => return ToolResult::Error("Missing find".to_string()),
         };
         let replace = match args.get("replace").and_then(|v| v.as_str()) {
             Some(r) => r,
-            None => return "Error: Missing replace".to_string(),
+            None => return ToolResult::Error("Missing replace".to_string()),
         };
         let cwd = match std::env::current_dir() {
             Ok(c) => c,
-            Err(e) => return format!("Error getting current directory: {}", e),
+            Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
         };
         let full_path = cwd.join(file_path_str);
         let content = match std::fs::read_to_string(&full_path) {
             Ok(content) => content,
-            Err(e) => return format!("Error reading file: {}", e),
+            Err(e) => return ToolResult::Error(format!("Error reading file: {}", e)),
         };
         let match_count = content.matches(find).count();
         if match_count == 0 {
-            return "Error: find string not found".to_string();
+            return ToolResult::Error("find string not found".to_string());
         }
         if match_count > 1 {
-            return format!("Error: find string matched {} times", match_count);
+            return ToolResult::Error(format!("find string matched {} times", match_count));
         }
 
         let updated = content.replace(find, replace);
         match std::fs::write(full_path, updated) {
-            Ok(()) => "File edited successfully".to_string(),
-            Err(e) => format!("Error writing file: {}", e),
+            Ok(()) => ToolResult::Text("File edited successfully".to_string()),
+            Err(e) => ToolResult::Error(format!("Error writing file: {}", e)),
         }
     }
 
-    fn bash_tool(&self, args: &Value) -> String {
+    fn bash_tool(&self, args: &Value) -> ToolResult {
         let command = match args.get("command").and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => return "Error: Missing command".to_string(),
+            None => return ToolResult::Error("Missing command".to_string()),
         };
         match Command::new("bash").arg("-c").arg(command).output() {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                format!(
+                ToolResult::Text(format!(
                     "Exit status: {}\nstdout:\n{}\nstderr:\n{}",
                     output.status, stdout, stderr
-                )
+                ))
             }
-            Err(e) => format!("Error executing command: {}", e),
+            Err(e) => ToolResult::Error(format!("Error executing command: {}", e)),
         }
     }
 
-    fn glob_tool(&self, args: &Value) -> String {
+    fn glob_tool(&self, args: &Value) -> ToolResult {
         let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return "Error: Missing pattern".to_string(),
+            None => return ToolResult::Error("Missing pattern".to_string()),
         };
         let path_prefix = args
             .get("path")
@@ -292,7 +317,7 @@ impl ToolEngine {
         };
         let cwd = match std::env::current_dir() {
             Ok(c) => c,
-            Err(e) => return format!("Error getting current directory: {}", e),
+            Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
         };
         let full_pattern = if full_pattern.starts_with('/') {
             full_pattern
@@ -305,20 +330,37 @@ impl ToolEngine {
                 for entry in entries.filter_map(Result::ok) {
                     results.push(entry.to_string_lossy().into_owned());
                 }
-                results.join("\n")
+                ToolResult::Text(results.join("\n"))
             }
-            Err(e) => format!("Error in glob pattern: {}", e),
+            Err(e) => ToolResult::Error(format!("Error in glob pattern: {}", e)),
         }
     }
 
-    fn grep_tool(&self, args: &Value) -> String {
+    fn question_tool(&self, args: &Value) -> ToolResult {
+        let title = match args.get("title").and_then(|v| v.as_str()) {
+            Some(t) => t,
+            None => return ToolResult::Error("Missing title".to_string()),
+        };
+        let options: Vec<String> = args
+            .get("options")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        ToolResult::Question(title.to_string(), options)
+    }
+
+    fn grep_tool(&self, args: &Value) -> ToolResult {
         let pattern_str = match args.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return "Error: Missing pattern".to_string(),
+            None => return ToolResult::Error("Missing pattern".to_string()),
         };
         let path_str = match args.get("path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return "Error: Missing path".to_string(),
+            None => return ToolResult::Error("Missing path".to_string()),
         };
         let include_pattern = args.get("include").and_then(|v| v.as_str());
         let recursive = args
@@ -327,7 +369,7 @@ impl ToolEngine {
             .unwrap_or(true);
         let cwd = match std::env::current_dir() {
             Ok(c) => c,
-            Err(e) => return format!("Error getting current directory: {}", e),
+            Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
         };
         let full_path = if path_str.starts_with('/') {
             std::path::PathBuf::from(path_str)
@@ -336,20 +378,20 @@ impl ToolEngine {
         };
         let regex = match Regex::new(pattern_str) {
             Ok(r) => r,
-            Err(e) => return format!("Error compiling regex: {}", e),
+            Err(e) => return ToolResult::Error(format!("Error compiling regex: {}", e)),
         };
         let mut results = Vec::new();
         if !full_path.exists() {
-            return format!("Error: path does not exist: {}", path_str);
+            return ToolResult::Error(format!("path does not exist: {}", path_str));
         }
         if full_path.is_file() {
             self.grep_file(&full_path, &regex, &mut results);
         } else if recursive {
             self.grep_directory(&full_path, &regex, include_pattern, &mut results);
         } else {
-            return "Error: path is a directory but recursive is false".to_string();
+            return ToolResult::Error("path is a directory but recursive is false".to_string());
         }
-        results.join("\n")
+        ToolResult::Text(results.join("\n"))
     }
 
     fn grep_file(&self, path: &std::path::Path, regex: &Regex, results: &mut Vec<String>) {

@@ -82,6 +82,11 @@ impl Commands {
                 Self::handle_models_mode(app, key, picker, harness, config).await
             }
             InputMode::Agents { picker } => Self::handle_agents_mode(app, key, picker, harness),
+            InputMode::Question {
+                title: _,
+                options: _,
+                selected: _,
+            } => InputMode::PromptInput,
             InputMode::Exit => InputMode::Exit,
         };
         Ok(())

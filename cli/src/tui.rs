@@ -24,7 +24,8 @@ use crate::{
 };
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+        MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -205,12 +206,14 @@ impl TuiApp {
 
         let result = harness
             .run_turn_with_events(prompt, |event| {
-                match event {
+                let answer = match event {
                     HarnessEvent::UserPrompt(prompt_msg) => {
                         self.push_message(TuiMessage::UserPrompt(prompt_msg));
+                        None
                     }
                     HarnessEvent::AgentMessage(chunk) => {
                         self.append_agent_message(chunk);
+                        None
                     }
                     HarnessEvent::ToolCall {
                         name,
@@ -223,9 +226,15 @@ impl TuiApp {
                             result,
                         });
                         Input::reset_history_scroll(self);
+                        None
                     }
-                }
+                    HarnessEvent::AskUser { title, options } => {
+                        Input::reset_history_scroll(self);
+                        Some(self.ask_question(title, options, guard))
+                    }
+                };
                 let _ = guard.terminal.draw(|frame| Render::draw(self, frame));
+                answer
             })
             .await;
 
@@ -242,6 +251,81 @@ impl TuiApp {
         };
 
         Ok(())
+    }
+
+    fn ask_question(
+        &mut self,
+        title: String,
+        options: Vec<String>,
+        guard: &mut TerminalGuard,
+    ) -> String {
+        Input::clear_input(self);
+        let options = {
+            let mut opts = options.clone();
+            opts.push("Other:".to_string());
+            opts
+        };
+        let mut selected = 0;
+
+        self.mode = InputMode::Question {
+            title: title.clone(),
+            options: options.clone(),
+            selected,
+        };
+
+        loop {
+            let _ = guard.terminal.draw(|frame| Render::draw(self, frame));
+
+            let key = match event::read() {
+                Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => key,
+                Ok(_) => continue,
+                Err(_) => break String::new(),
+            };
+
+            match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.mode = InputMode::Exit;
+                    break String::new();
+                }
+                KeyCode::Esc | KeyCode::Tab => {
+                    Input::clear_input(self);
+                    self.mode = InputMode::PromptInput;
+                    break String::new();
+                }
+                KeyCode::Enter => {
+                    let answer = options
+                        .get(selected)
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    let details = self.input.trim().to_string();
+                    Input::clear_input(self);
+                    self.mode = InputMode::PromptInput;
+                    break [answer, details]
+                        .iter()
+                        .filter(|i| !i.is_empty())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                }
+                KeyCode::Up => {
+                    selected = selected.saturating_sub(1);
+                }
+                KeyCode::Down => {
+                    if selected + 1 < options.len() {
+                        selected += 1;
+                    }
+                }
+                _ => {
+                    Input::handle_input_cursor(self, key);
+                }
+            }
+
+            self.mode = InputMode::Question {
+                title: title.clone(),
+                options: options.clone(),
+                selected,
+            };
+        }
     }
 
     pub fn append_agent_message(&mut self, chunk: String) {
@@ -282,6 +366,10 @@ impl TuiApp {
                     result,
                 });
             }
+            HarnessEvent::AskUser {
+                title: _,
+                options: _,
+            } => {}
         });
     }
 

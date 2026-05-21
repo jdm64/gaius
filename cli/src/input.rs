@@ -102,11 +102,26 @@ impl<T> PickList<T> {
 pub enum InputMode {
     Exit,
     PromptInput,
-    Command { picker: PickList<Command> },
-    Session { picker: PickList<Session> },
-    SessionRename { picker: PickList<Session> },
-    Models { picker: PickList<ModelPickerRow> },
-    Agents { picker: PickList<AgentDefinition> },
+    Command {
+        picker: PickList<Command>,
+    },
+    Session {
+        picker: PickList<Session>,
+    },
+    SessionRename {
+        picker: PickList<Session>,
+    },
+    Models {
+        picker: PickList<ModelPickerRow>,
+    },
+    Agents {
+        picker: PickList<AgentDefinition>,
+    },
+    Question {
+        title: String,
+        options: Vec<String>,
+        selected: usize,
+    },
 }
 
 pub struct Input {}

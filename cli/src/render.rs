@@ -68,6 +68,13 @@ impl Render {
                 Self::draw_agents(frame, chunks[1], picker);
             }
             InputMode::PromptInput | InputMode::Exit => {}
+            InputMode::Question {
+                title,
+                options,
+                selected,
+            } => {
+                Self::draw_question(frame, chunks[1], title, options, *selected);
+            }
         }
     }
 
@@ -318,7 +325,84 @@ impl Render {
             .block(Block::default().borders(Borders::NONE))
             .style(Style::default().fg(Color::Yellow));
 
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(visible_rows + 2),
+                Constraint::Length(help_height),
+            ])
+            .split(rect);
+
         frame.render_widget(Clear, rect);
+        frame.render_widget(list, chunks[0]);
+        frame.render_widget(help_para, chunks[1]);
+    }
+
+    fn draw_question(
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        title: &str,
+        options: &[String],
+        selected: usize,
+    ) {
+        let wrap_width: usize = 70usize.saturating_sub(4).max(1);
+        let visible_limit = 10u16;
+
+        let mut items = Vec::new();
+        // Simple word-wrap helper
+        let mut line_buf = String::new();
+        for word in title.split_whitespace() {
+            if line_buf.is_empty() {
+                line_buf.push_str(word);
+            } else if line_buf.len() + 1 + word.len() <= wrap_width {
+                line_buf.push(' ');
+                line_buf.push_str(word);
+            } else {
+                items.push(ListItem::new(std::mem::take(&mut line_buf)));
+                line_buf = word.to_string();
+            }
+        }
+        if !line_buf.is_empty() {
+            items.push(ListItem::new(line_buf));
+        }
+
+        items.push(ListItem::new(""));
+
+        if !options.is_empty() {
+            for (i, opt) in options.iter().enumerate() {
+                let item = ListItem::new(format!("{}) {}", i + 1, opt));
+                if selected == i {
+                    items.push(item.style(Style::default().bg(Color::DarkGray)));
+                } else {
+                    items.push(item);
+                }
+            }
+        }
+
+        let visible_rows = (items.len().max(1) as u16).min(visible_limit);
+        let help_height = 1u16;
+        let height = visible_rows + 2 + help_height;
+
+        let max_width: u16 = 70;
+        let width = max_width.min(input_area.width.saturating_sub(4).max(1));
+        let x = input_area.x + 2;
+        let y = input_area.y.saturating_sub(height);
+        let rect = Rect::new(x, y, width, height);
+
+        let content_list = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Question")
+                    .padding(Padding::horizontal(1))
+                    .style(Style::default().bg(Color::Rgb(90, 0, 0))),
+            )
+            .style(Style::default().fg(Color::White));
+
+        let help_para =
+            Paragraph::new("  Type: add response | Enter: send | Up/Down: select | Tab: cancel")
+                .block(Block::default().borders(Borders::NONE))
+                .style(Style::default().fg(Color::Yellow));
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -328,7 +412,8 @@ impl Render {
             ])
             .split(rect);
 
-        frame.render_widget(list, chunks[0]);
+        frame.render_widget(Clear, rect);
+        frame.render_widget(content_list, chunks[0]);
         frame.render_widget(help_para, chunks[1]);
     }
 
@@ -532,7 +617,7 @@ impl Render {
             TuiMessage::ToolCall {
                 name,
                 arguments,
-                result: _result,
+                result,
             } => {
                 let style = Style::default().fg(Color::Cyan);
                 let display = match name.as_str() {
@@ -544,19 +629,30 @@ impl Render {
                     "grep" => {
                         Self::arguments_json_fields(arguments, &["path", "include", "pattern"])
                     }
-                    _ => name.clone(),
+                    "question" => Self::arguments_json_fields(arguments, &["title"]),
+                    _ => "".to_string(),
                 };
 
-                if display != name.as_str() {
-                    let spans = vec![
-                        Span::styled(name.clone(), style.add_modifier(Modifier::BOLD)),
-                        Span::raw(" "),
-                        Span::styled(display, style.add_modifier(Modifier::ITALIC)),
-                    ];
-                    vec![Line::from(spans)]
-                } else {
-                    vec![Line::from(display).style(style)]
+                let spans = vec![
+                    Span::styled(name.clone(), style.add_modifier(Modifier::BOLD)),
+                    Span::raw(" "),
+                    Span::styled(display, style.add_modifier(Modifier::ITALIC)),
+                ];
+                let mut ret = vec![Line::from(spans)];
+                if let Some(show_result) = match name.as_str() {
+                    "question" => Some(
+                        result
+                            .split("\n")
+                            .map(|l| " - ".to_string() + l)
+                            .collect::<Vec<_>>(),
+                    ),
+                    _ => None,
+                } {
+                    for r in show_result {
+                        ret.push(Line::from(Span::styled::<String, Style>(r, style)));
+                    }
                 }
+                ret
             }
             TuiMessage::SystemMessage(text) => {
                 let style = Style::default()
