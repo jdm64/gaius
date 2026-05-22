@@ -25,7 +25,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
 };
-use serde_json;
+use serde_json::{self, Value, from_str};
 use tui_markdown::{Options, from_str_with_options};
 
 pub const INPUT_HEIGHT: u16 = 3;
@@ -620,16 +620,18 @@ impl Render {
                 result,
             } => {
                 let style = Style::default().fg(Color::Cyan);
+                let json_args = from_str::<Value>(arguments).unwrap_or_default();
                 let display = match name.as_str() {
-                    "read_file" => Self::arguments_json_fields(arguments, &["file_path"]),
-                    "write_file" => Self::arguments_json_fields(arguments, &["file_path"]),
-                    "edit_file" => Self::arguments_json_fields(arguments, &["file_path"]),
-                    "bash" => Self::arguments_json_fields(arguments, &["command"]),
-                    "glob" => Self::arguments_json_fields(arguments, &["path", "pattern"]),
+                    "read_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
+                    "write_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
+                    "edit_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
+                    "bash" => Self::arguments_json_fields(&json_args, &["command"]),
+                    "glob" => Self::arguments_json_fields(&json_args, &["path", "pattern"]),
                     "grep" => {
-                        Self::arguments_json_fields(arguments, &["path", "include", "pattern"])
+                        Self::arguments_json_fields(&json_args, &["path", "include", "pattern"])
                     }
-                    "question" => Self::arguments_json_fields(arguments, &["title"]),
+                    "question" => Self::arguments_json_fields(&json_args, &["title"]),
+                    "plan" => "".to_string(),
                     _ => "".to_string(),
                 };
 
@@ -639,19 +641,7 @@ impl Render {
                     Span::styled(display, style.add_modifier(Modifier::ITALIC)),
                 ];
                 let mut ret = vec![Line::from(spans)];
-                if let Some(show_result) = match name.as_str() {
-                    "question" => Some(
-                        result
-                            .split("\n")
-                            .map(|l| " - ".to_string() + l)
-                            .collect::<Vec<_>>(),
-                    ),
-                    _ => None,
-                } {
-                    for r in show_result {
-                        ret.push(Line::from(Span::styled::<String, Style>(r, style)));
-                    }
-                }
+                Self::render_tool_results(name, &json_args, result, &mut ret, style);
                 ret
             }
             TuiMessage::SystemMessage(text) => {
@@ -660,6 +650,58 @@ impl Render {
                     .add_modifier(Modifier::BOLD);
                 vec![Line::from(text.clone()).style(style)]
             }
+        }
+    }
+
+    fn render_tool_results(
+        name: &str,
+        args: &Value,
+        result: &str,
+        lines: &mut Vec<Line>,
+        style: Style,
+    ) {
+        match name {
+            "question" => {
+                let answers = result
+                    .split("\n")
+                    .map(|l| " - ".to_string() + l)
+                    .collect::<Vec<_>>();
+                for l in answers {
+                    lines.push(Line::from(Span::styled::<String, Style>(l, style)));
+                }
+            }
+            "plan" => {
+                let mut md = String::new();
+                if let Some(goal) = args.get("goal").and_then(|g| g.as_str()) {
+                    md.push_str("# Goal\n\n");
+                    md.push_str(goal);
+                    md.push_str("\n\n");
+                }
+                if let Some(context) = args.get("context").and_then(|c| c.as_str()) {
+                    md.push_str("# Context\n\n");
+                    md.push_str(context);
+                    md.push_str("\n\n");
+                }
+                if let Some(steps) = args.get("steps").and_then(|s| s.as_array()) {
+                    for (index, step) in steps.iter().enumerate() {
+                        if let Some(step_text) = step.as_str() {
+                            md.push_str(&format!("# Step {}\n\n{}\n\n", index + 1, step_text));
+                        }
+                    }
+                }
+
+                let options = Options::default();
+                let rendered_lines: Vec<Line> = from_str_with_options(&md, &options)
+                    .lines
+                    .into_iter()
+                    .map(Self::owned_line)
+                    .collect();
+
+                lines.push(Line::raw(" "));
+                lines.extend(rendered_lines);
+                lines.push(Line::raw(" "));
+            }
+            _ => {}
         }
     }
 
@@ -692,15 +734,12 @@ impl Render {
         Style::default().bg(Color::Rgb(64, 64, 64))
     }
 
-    fn arguments_json_fields(arguments: &str, fields: &[&str]) -> String {
-        match serde_json::from_str::<serde_json::Value>(arguments) {
-            Ok(val) => fields
-                .iter()
-                .filter_map(|&f| val.get(f).and_then(|v| v.as_str()))
-                .collect::<Vec<_>>()
-                .join(" "),
-            Err(_) => String::new(),
-        }
+    fn arguments_json_fields(arguments: &Value, fields: &[&str]) -> String {
+        fields
+            .iter()
+            .filter_map(|&f| arguments.get(f).and_then(|v| v.as_str()))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     fn draw_input(app: &TuiApp, frame: &mut Frame<'_>, area: Rect) {

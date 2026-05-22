@@ -160,6 +160,27 @@ impl ToolEngine {
                     },
                     "required": ["title"]
                 })),
+            Tool::new("plan")
+                .with_description("Create a plan with goal, context, and steps rendered as markdown")
+                .with_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "goal": {
+                            "type": "string",
+                            "description": "The goal or objective"
+                        },
+                        "context": {
+                            "type": "string",
+                            "description": "The context or background information"
+                        },
+                        "steps": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Array of step strings"
+                        }
+                    },
+                    "required": ["goal"]
+                })),
         ]
     }
 
@@ -172,6 +193,7 @@ impl ToolEngine {
             "glob" => self.glob_tool(args),
             "grep" => self.grep_tool(args),
             "question" => self.question_tool(args),
+            "plan" => self.plan_tool(args),
             _ => ToolResult::Error(format!("Unknown tool call: {} ({})", name, args)),
         }
     }
@@ -184,16 +206,22 @@ impl ToolEngine {
         let start_line = match args.get("start_line") {
             Some(value) => match value.as_u64() {
                 Some(line) if line >= 1 => line as usize,
-                _ => return ToolResult::Error(
-                    "start_line must be an integer greater than or equal to 1".to_string()
-                ),
+                _ => {
+                    return ToolResult::Error(
+                        "start_line must be an integer greater than or equal to 1".to_string(),
+                    );
+                }
             },
             None => 1,
         };
         let max_lines = match args.get("max_lines") {
             Some(value) => match value.as_u64() {
                 Some(lines) => Some(lines as usize),
-                _ => return ToolResult::Error("max_lines must be a non-negative integer".to_string()),
+                _ => {
+                    return ToolResult::Error(
+                        "max_lines must be a non-negative integer".to_string(),
+                    );
+                }
             },
             None => None,
         };
@@ -351,6 +379,24 @@ impl ToolEngine {
             })
             .unwrap_or_default();
         ToolResult::Question(title.to_string(), options)
+    }
+
+    fn plan_tool(&self, args: &Value) -> ToolResult {
+        if args.get("goal").is_none() {
+            return ToolResult::Error("Error: Missing goal".to_string());
+        }
+
+        let has_context = args.get("context").is_some();
+        let steps = args
+            .get("steps")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.len())
+            .unwrap_or_default();
+
+        ToolResult::Text(format!(
+            "Created plan with context={} and steps={}",
+            has_context, steps,
+        ))
     }
 
     fn grep_tool(&self, args: &Value) -> ToolResult {
