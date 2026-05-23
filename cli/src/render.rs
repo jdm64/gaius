@@ -645,9 +645,7 @@ impl Render {
                 ret
             }
             TuiMessage::SystemMessage(text) => {
-                let style = Style::default()
-                    .fg(Color::Rgb(64, 0, 0))
-                    .add_modifier(Modifier::BOLD);
+                let style = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
                 vec![Line::from(text.clone()).style(style)]
             }
         }
