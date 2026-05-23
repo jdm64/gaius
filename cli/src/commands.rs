@@ -16,11 +16,11 @@
 use crate::{
     agents::AgentDefinition,
     config::Config,
-    harness::Harness,
+    harness_actor::HarnessActorHandle,
     input::{Input, InputMode, PickList},
     models::{ModelPickerRow, Models, model_picker_rows},
     session::Session,
-    tui::{TerminalGuard, TuiApp, TuiMessage},
+    tui::{TuiApp, TuiMessage},
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use std::{error::Error, mem};
@@ -62,26 +62,25 @@ impl Commands {
     pub async fn handle_mode(
         app: &mut TuiApp,
         key: event::KeyEvent,
-        guard: &mut TerminalGuard,
-        harness: &mut Harness,
+        actor: &HarnessActorHandle,
         config: &Config,
     ) -> Result<(), Box<dyn Error>> {
         let mode = mem::replace(&mut app.mode, InputMode::PromptInput);
         app.mode = match mode {
-            InputMode::PromptInput => {
-                Input::handle_prompt_input(app, key, guard, harness, config).await?
-            }
+            InputMode::PromptInput => Input::handle_prompt_input(app, key, actor, config).await?,
             InputMode::Command { picker } => {
-                Self::handle_command_mode(app, key, picker, harness, config).await
+                Self::handle_command_mode(app, key, picker, actor, config).await
             }
-            InputMode::Session { picker } => Self::handle_session_mode(app, key, picker, harness),
+            InputMode::Session { picker } => {
+                Self::handle_session_mode(app, key, picker, actor).await
+            }
             InputMode::SessionRename { picker } => {
                 Self::handle_session_rename_mode(app, key, picker)
             }
             InputMode::Models { picker } => {
-                Self::handle_models_mode(app, key, picker, harness, config).await
+                Self::handle_models_mode(app, key, picker, actor, config).await
             }
-            InputMode::Agents { picker } => Self::handle_agents_mode(app, key, picker, harness),
+            InputMode::Agents { picker } => Self::handle_agents_mode(app, key, picker, actor).await,
             InputMode::Question {
                 title: _,
                 options: _,
@@ -94,21 +93,27 @@ impl Commands {
 
     pub async fn execute_command(
         app: &mut TuiApp,
-        harness: &mut Harness,
+        actor: &HarnessActorHandle,
         config: &Config,
         command: &str,
     ) -> InputMode {
         match command {
             "new" => {
-                match harness.new_session() {
-                    Ok(_) => {
-                        app.clear_messages();
-                        Input::reset_history_scroll(app);
-                        app.status = "New session created".to_string();
-                        app.context_tokens = None;
-                    }
-                    Err(e) => {
-                        app.status = e.to_string();
+                if !app.harness_idle() {
+                    app.status =
+                        "Agent is busy; finish current turn before creating a session".to_string();
+                } else {
+                    match actor.new_session().await {
+                        Ok(snapshot) => {
+                            app.apply_snapshot(&snapshot);
+                            app.clear_messages();
+                            Input::reset_history_scroll(app);
+                            app.status = "New session created".to_string();
+                            app.context_tokens = None;
+                        }
+                        Err(e) => {
+                            app.status = e;
+                        }
                     }
                 };
                 Input::clear_input(app);
@@ -149,8 +154,18 @@ impl Commands {
                 }
             }
             "streaming" => {
-                harness.set_streaming(!harness.streaming());
-                app.status = format!("Streaming = {}", harness.streaming());
+                if !app.harness_idle() {
+                    app.status =
+                        "Agent is busy; finish current turn before changing streaming".to_string();
+                } else {
+                    match actor.toggle_streaming().await {
+                        Ok(snapshot) => {
+                            app.apply_snapshot(&snapshot);
+                            app.status = format!("Streaming = {}", snapshot.streaming);
+                        }
+                        Err(err) => app.status = err,
+                    }
+                }
                 Input::clear_input(app);
                 InputMode::PromptInput
             }
@@ -170,7 +185,7 @@ impl Commands {
         app: &mut TuiApp,
         key: event::KeyEvent,
         mut picker: PickList<Command>,
-        harness: &mut Harness,
+        actor: &HarnessActorHandle,
         config: &Config,
     ) -> InputMode {
         Input::handle_input_cursor(app, key);
@@ -188,7 +203,7 @@ impl Commands {
             KeyCode::Enter if !picker.is_empty() => {
                 let command = picker.selected_row().map(|row| row.name);
                 if let Some(command) = command {
-                    return Self::execute_command(app, harness, config, command).await;
+                    return Self::execute_command(app, actor, config, command).await;
                 }
             }
             KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_) => {
@@ -203,11 +218,11 @@ impl Commands {
         InputMode::Command { picker }
     }
 
-    pub fn handle_session_mode(
+    pub async fn handle_session_mode(
         app: &mut TuiApp,
         key: event::KeyEvent,
         mut picker: PickList<Session>,
-        harness: &mut Harness,
+        actor: &HarnessActorHandle,
     ) -> InputMode {
         match key.code {
             KeyCode::Esc => return InputMode::PromptInput,
@@ -225,17 +240,26 @@ impl Commands {
                     return InputMode::Session { picker };
                 };
                 if let Some(session_id) = &session.id {
-                    match harness.load_session_by_id(session_id) {
-                        Ok(()) => {
-                            app.clear_messages();
-                            Input::reset_history_scroll(app);
-                            app.status = format!("Loaded session: {}", session.display_name());
-                            app.context_tokens = None;
-                            app.load_history(harness);
-                            return InputMode::PromptInput;
-                        }
-                        Err(e) => {
-                            app.status = format!("Error loading session: {}", e);
+                    if !app.harness_idle() {
+                        app.status = "Agent is busy; finish current turn before loading a session"
+                            .to_string();
+                    } else {
+                        match actor.load_session(session_id.clone()).await {
+                            Ok(snapshot) => {
+                                app.apply_snapshot(&snapshot);
+                                app.clear_messages();
+                                Input::reset_history_scroll(app);
+                                app.status = format!("Loaded session: {}", session.display_name());
+                                app.context_tokens = None;
+                                match actor.replay_history().await {
+                                    Ok(snapshot) => app.apply_snapshot(&snapshot),
+                                    Err(err) => app.status = err,
+                                }
+                                return InputMode::PromptInput;
+                            }
+                            Err(e) => {
+                                app.status = format!("Error loading session: {}", e);
+                            }
                         }
                     }
                 } else {
@@ -351,7 +375,7 @@ impl Commands {
         app: &mut TuiApp,
         key: event::KeyEvent,
         mut picker: PickList<ModelPickerRow>,
-        harness: &mut Harness,
+        actor: &HarnessActorHandle,
         config: &Config,
     ) -> InputMode {
         Input::handle_input_cursor(app, key);
@@ -373,13 +397,24 @@ impl Commands {
                 };
                 match selected_model.create_client(config) {
                     Ok(client) => {
+                        if !app.harness_idle() {
+                            app.status =
+                                "Agent is busy; finish current turn before changing models"
+                                    .to_string();
+                            return InputMode::Models { picker };
+                        }
                         let model_id = selected_model.id.clone();
-                        harness.set_model(client, model_id.clone());
-                        app.model = model_id.clone();
-                        let _ = Models::remember_recent_model(selected_model);
-                        Input::clear_input(app);
-                        app.status = format!("Selected model: {}", model_id);
-                        return InputMode::PromptInput;
+                        match actor.set_model(client, model_id.clone()).await {
+                            Ok(snapshot) => {
+                                app.apply_snapshot(&snapshot);
+                                app.model = model_id.clone();
+                                let _ = Models::remember_recent_model(selected_model);
+                                Input::clear_input(app);
+                                app.status = format!("Selected model: {}", model_id);
+                                return InputMode::PromptInput;
+                            }
+                            Err(err) => app.status = err,
+                        }
                     }
                     Err(err) => {
                         app.status = format!("Error selecting model: {}", err);
@@ -415,11 +450,11 @@ impl Commands {
         Input::filter_model_rows(input, rows)
     }
 
-    pub fn handle_agents_mode(
+    pub async fn handle_agents_mode(
         app: &mut TuiApp,
         key: event::KeyEvent,
         mut picker: PickList<AgentDefinition>,
-        harness: &mut Harness,
+        actor: &HarnessActorHandle,
     ) -> InputMode {
         Input::handle_input_cursor(app, key);
         match key.code {
@@ -440,11 +475,21 @@ impl Commands {
                     app.status = "No matching agents".to_string();
                     return InputMode::Agents { picker };
                 };
-                harness.set_agent(selected_agent.clone());
-                app.agent_name = selected_agent.name.clone();
-                Input::clear_input(app);
-                app.status = format!("Selected agent: {}", selected_agent.name);
-                return InputMode::PromptInput;
+                if !app.harness_idle() {
+                    app.status =
+                        "Agent is busy; finish current turn before changing agents".to_string();
+                    return InputMode::Agents { picker };
+                }
+                match actor.set_agent(selected_agent.clone()).await {
+                    Ok(snapshot) => {
+                        app.apply_snapshot(&snapshot);
+                        app.agent_name = selected_agent.name.clone();
+                        Input::clear_input(app);
+                        app.status = format!("Selected agent: {}", selected_agent.name);
+                        return InputMode::PromptInput;
+                    }
+                    Err(err) => app.status = err,
+                }
             }
             _ if input_changed_key(key) => {
                 picker.replace_filter(Input::filter_agents(&app.input, &picker.rows));

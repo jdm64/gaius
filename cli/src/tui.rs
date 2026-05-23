@@ -17,19 +17,21 @@ use crate::{
     agents::Agents,
     commands::Commands,
     config::Config,
-    harness::{Harness, HarnessEvent},
+    harness::{Harness, HarnessEvent, HarnessSnapshot},
+    harness_actor::{HarnessActorEvent, HarnessActorHandle},
     input::{Input, InputMode},
     render::Render,
     util::cache_dir,
 };
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-        MouseEventKind,
+        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent,
+        KeyEventKind, KeyModifiers, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use futures::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend, text::Line};
 use std::{
     error::Error,
@@ -37,6 +39,7 @@ use std::{
     io::{self, Stdout},
     path::PathBuf,
 };
+use tokio::sync::oneshot;
 
 #[derive(Clone)]
 pub enum TuiMessage {
@@ -92,6 +95,9 @@ pub struct TuiApp {
     pub history_lines: Vec<Line<'static>>,
     pub history_generation: u64,
     pub rendered_history_generation: u64,
+    pub actor_busy: bool,
+    pub queued_prompts: usize,
+    pub question_answer_tx: Option<oneshot::Sender<String>>,
 }
 
 impl Default for TuiApp {
@@ -119,212 +125,288 @@ impl TuiApp {
             history_lines: Vec::new(),
             history_generation: 0,
             rendered_history_generation: u64::MAX,
-        }
-    }
-
-    pub fn set_agent(&mut self, harness: &mut Harness, name: &str) {
-        if let Some(agent) = self.agents.find(name) {
-            harness.set_agent(agent.clone());
-            self.agent_name = name.to_string();
+            actor_busy: false,
+            queued_prompts: 0,
+            question_answer_tx: None,
         }
     }
 
     pub async fn run(
         &mut self,
-        harness: &mut Harness,
+        harness: Harness,
         config: &Config,
-    ) -> Result<(), Box<dyn Error>> {
-        self.model = harness.model().clone();
-        self.agent_name = harness.agent_name().to_string();
+    ) -> Result<HarnessSnapshot, Box<dyn Error>> {
         self.agents = config.agents().clone();
-        self.load_history(harness);
+        self.load_history(&harness);
         if let Err(e) = self.load_prompt_history() {
             eprintln!("Failed to load prompt history: {}", e);
         }
+        let mut latest_snapshot = harness.snapshot();
+        let mut actor = HarnessActorHandle::new(harness);
+        self.apply_snapshot(&latest_snapshot);
 
         let mut guard = TerminalGuard::enter()?;
+        let mut terminal_events = EventStream::new();
         guard.terminal.draw(|frame| Render::draw(self, frame))?;
 
         loop {
-            let key = match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => key,
-                Event::Mouse(mouse) => {
-                    match mouse.kind {
-                        MouseEventKind::ScrollUp => Input::scroll_history_up(self, 3),
-                        MouseEventKind::ScrollDown => Input::scroll_history_down(self, 3),
-                        _ => continue,
+            tokio::select! {
+                event = terminal_events.next() => {
+                    let Some(event) = event else {
+                        break;
+                    };
+                    self.handle_terminal_event(event?, &actor, config).await?;
+                }
+                actor_event = actor.rx.recv() => {
+                    let Some(actor_event) = actor_event else {
+                        break;
+                    };
+                    if let Some(snapshot) = self.handle_actor_event(actor_event) {
+                        latest_snapshot = snapshot;
                     }
-                    guard.terminal.draw(|frame| Render::draw(self, frame))?;
-                    continue;
                 }
-                Event::Resize(_, _) => {
-                    guard.terminal.draw(|frame| Render::draw(self, frame))?;
-                    continue;
-                }
-                _ => continue,
-            };
-
-            match key.code {
-                KeyCode::PageUp => {
-                    Input::scroll_history_up(self, Input::history_page_scroll_amount(self));
-                    guard.terminal.draw(|frame| Render::draw(self, frame))?;
-                    continue;
-                }
-                KeyCode::PageDown => {
-                    Input::scroll_history_down(self, Input::history_page_scroll_amount(self));
-                    guard.terminal.draw(|frame| Render::draw(self, frame))?;
-                    continue;
-                }
-                _ => {}
             }
 
-            if Commands::handle_mode(self, key, &mut guard, harness, config)
-                .await
-                .is_err()
-            {
-                return Ok(());
-            } else if let InputMode::Exit = self.mode {
-                return Ok(());
+            if let InputMode::Exit = self.mode {
+                break;
             }
 
             guard.terminal.draw(|frame| Render::draw(self, frame))?;
         }
+
+        if self.actor_busy {
+            Ok(latest_snapshot)
+        } else {
+            match actor.shutdown().await {
+                Ok(snapshot) => Ok(snapshot),
+                Err(_) => Ok(latest_snapshot),
+            }
+        }
     }
 
-    pub async fn send_prompt(
+    async fn handle_terminal_event(
         &mut self,
-        prompt: String,
-        harness: &mut Harness,
-        guard: &mut TerminalGuard,
+        event: Event,
+        actor: &HarnessActorHandle,
+        config: &Config,
     ) -> Result<(), Box<dyn Error>> {
-        self.agents.mark_recent(harness.agent_name());
-        Input::update_prompt_history(self, prompt.clone());
-        Input::clear_input(self);
-        Input::reset_history_scroll(self);
-        self.status = "Waiting for agent...".to_string();
-        guard.terminal.draw(|frame| Render::draw(self, frame))?;
-
-        let result = harness
-            .run_turn_with_events(prompt, |event| {
-                let answer = match event {
-                    HarnessEvent::UserPrompt(prompt_msg) => {
-                        self.push_message(TuiMessage::UserPrompt(prompt_msg));
-                        None
-                    }
-                    HarnessEvent::AgentMessage(chunk) => {
-                        self.append_agent_message(chunk);
-                        None
-                    }
-                    HarnessEvent::ToolCall {
-                        name,
-                        arguments,
-                        result,
-                    } => {
-                        self.push_message(TuiMessage::ToolCall {
-                            name,
-                            arguments,
-                            result,
-                        });
-                        Input::reset_history_scroll(self);
-                        None
-                    }
-                    HarnessEvent::AskUser { title, options } => {
-                        Input::reset_history_scroll(self);
-                        Some(self.ask_question(title, options, guard))
-                    }
-                };
-                let _ = guard.terminal.draw(|frame| Render::draw(self, frame));
-                answer
-            })
-            .await;
-
-        match result {
-            Ok(()) => {
-                self.status = "Ctrl-C to quit".to_string();
-                self.context_tokens = harness.context_tokens();
+        let key = match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => key,
+            Event::Mouse(mouse) => {
+                match mouse.kind {
+                    MouseEventKind::ScrollUp => Input::scroll_history_up(self, 3),
+                    MouseEventKind::ScrollDown => Input::scroll_history_down(self, 3),
+                    _ => {}
+                }
+                return Ok(());
             }
-            Err(err) => {
-                self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
-                Input::reset_history_scroll(self);
-                self.status = "Agent request failed".to_string();
-            }
+            Event::Resize(_, _) => return Ok(()),
+            _ => return Ok(()),
         };
+
+        match key.code {
+            KeyCode::PageUp => {
+                Input::scroll_history_up(self, Input::history_page_scroll_amount(self));
+                return Ok(());
+            }
+            KeyCode::PageDown => {
+                Input::scroll_history_down(self, Input::history_page_scroll_amount(self));
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        if matches!(self.mode, InputMode::Question { .. }) {
+            self.handle_question_key(key);
+        } else {
+            Commands::handle_mode(self, key, actor, config).await?;
+        }
 
         Ok(())
     }
 
-    fn ask_question(
+    pub async fn queue_prompt(
         &mut self,
-        title: String,
-        options: Vec<String>,
-        guard: &mut TerminalGuard,
-    ) -> String {
+        prompt: String,
+        actor: &HarnessActorHandle,
+    ) -> Result<(), Box<dyn Error>> {
+        self.agents.mark_recent(&self.agent_name);
+        Input::update_prompt_history(self, prompt.clone());
         Input::clear_input(self);
-        let options = {
-            let mut opts = options.clone();
-            opts.push("Other:".to_string());
-            opts
-        };
-        let mut selected = 0;
-
-        self.mode = InputMode::Question {
-            title: title.clone(),
-            options: options.clone(),
-            selected,
+        Input::reset_history_scroll(self);
+        self.queued_prompts += 1;
+        self.status = if self.actor_busy {
+            format!("Queued prompt ({} pending)", self.queued_prompts)
+        } else {
+            "Waiting for agent...".to_string()
         };
 
-        loop {
-            let _ = guard.terminal.draw(|frame| Render::draw(self, frame));
+        if let Err(err) = actor.run_prompt(prompt).await {
+            self.queued_prompts = self.queued_prompts.saturating_sub(1);
+            self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
+            self.status = "Agent request failed".to_string();
+        }
 
-            let key = match event::read() {
-                Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => key,
-                Ok(_) => continue,
-                Err(_) => break String::new(),
-            };
+        Ok(())
+    }
 
-            match key.code {
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.mode = InputMode::Exit;
-                    break String::new();
-                }
-                KeyCode::Esc | KeyCode::Tab => {
-                    Input::clear_input(self);
-                    self.mode = InputMode::PromptInput;
-                    break String::new();
-                }
-                KeyCode::Enter => {
-                    let answer = options
-                        .get(selected)
-                        .map(|s| s.to_string())
-                        .unwrap_or_default();
-                    let details = self.input.trim().to_string();
-                    Input::clear_input(self);
-                    self.mode = InputMode::PromptInput;
-                    break [answer, details]
-                        .iter()
-                        .filter(|i| !i.is_empty())
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                }
-                KeyCode::Up => {
-                    selected = selected.saturating_sub(1);
-                }
-                KeyCode::Down => {
-                    if selected + 1 < options.len() {
-                        selected += 1;
-                    }
-                }
-                _ => {
-                    Input::handle_input_cursor(self, key);
-                }
+    fn handle_actor_event(&mut self, event: HarnessActorEvent) -> Option<HarnessSnapshot> {
+        match event {
+            HarnessActorEvent::Harness(event) => {
+                self.apply_harness_event(event);
+                None
             }
+            HarnessActorEvent::AskUser {
+                title,
+                mut options,
+                answer_tx,
+            } => {
+                Input::clear_input(self);
+                Input::reset_history_scroll(self);
+                options.push("Other:".to_string());
+                self.question_answer_tx = Some(answer_tx);
+                self.mode = InputMode::Question {
+                    title,
+                    options,
+                    selected: 0,
+                };
+                None
+            }
+            HarnessActorEvent::TurnStarted => {
+                self.actor_busy = true;
+                self.queued_prompts = self.queued_prompts.saturating_sub(1);
+                self.status = "Waiting for agent...".to_string();
+                None
+            }
+            HarnessActorEvent::TurnFinished(snapshot) => {
+                self.actor_busy = false;
+                self.apply_snapshot(&snapshot);
+                self.status = if self.queued_prompts > 0 {
+                    format!("Queued prompt ({} pending)", self.queued_prompts)
+                } else {
+                    "Ctrl-C to quit".to_string()
+                };
+                Some(snapshot)
+            }
+            HarnessActorEvent::RequestFailed(err, snapshot) => {
+                self.actor_busy = false;
+                self.apply_snapshot(&snapshot);
+                self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
+                Input::reset_history_scroll(self);
+                self.status = "Agent request failed".to_string();
+                Some(snapshot)
+            }
+            HarnessActorEvent::HistoryReplayed(events) => {
+                self.clear_messages();
+                for event in events {
+                    self.apply_harness_event(event);
+                }
+                None
+            }
+        }
+    }
 
-            self.mode = InputMode::Question {
-                title: title.clone(),
-                options: options.clone(),
-                selected,
-            };
+    fn handle_question_key(&mut self, key: KeyEvent) {
+        let mode = std::mem::replace(&mut self.mode, InputMode::PromptInput);
+        let InputMode::Question {
+            title,
+            options,
+            mut selected,
+        } = mode
+        else {
+            self.mode = mode;
+            return;
+        };
+
+        match key.code {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.answer_question(String::new());
+                self.mode = InputMode::Exit;
+            }
+            KeyCode::Esc | KeyCode::Tab => {
+                self.answer_question(String::new());
+                Input::clear_input(self);
+                self.mode = InputMode::PromptInput;
+            }
+            KeyCode::Enter => {
+                let answer = options.get(selected).cloned().unwrap_or_default();
+                let details = self.input.trim().to_string();
+                let response = [answer, details]
+                    .iter()
+                    .filter(|part| !part.is_empty())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                self.answer_question(response);
+                Input::clear_input(self);
+                self.mode = InputMode::PromptInput;
+            }
+            KeyCode::Up => {
+                selected = selected.saturating_sub(1);
+                self.mode = InputMode::Question {
+                    title,
+                    options,
+                    selected,
+                };
+            }
+            KeyCode::Down => {
+                if selected + 1 < options.len() {
+                    selected += 1;
+                }
+                self.mode = InputMode::Question {
+                    title,
+                    options,
+                    selected,
+                };
+            }
+            _ => {
+                Input::handle_input_cursor(self, key);
+                self.mode = InputMode::Question {
+                    title,
+                    options,
+                    selected,
+                };
+            }
+        }
+    }
+
+    fn answer_question(&mut self, answer: String) {
+        if let Some(answer_tx) = self.question_answer_tx.take() {
+            let _ = answer_tx.send(answer);
+        }
+    }
+
+    pub fn apply_snapshot(&mut self, snapshot: &HarnessSnapshot) {
+        self.model = snapshot.model.clone();
+        self.agent_name = snapshot.agent_name.clone();
+        self.context_tokens = snapshot.context_tokens;
+    }
+
+    pub fn harness_idle(&self) -> bool {
+        !self.actor_busy && self.queued_prompts == 0
+    }
+
+    fn apply_harness_event(&mut self, event: HarnessEvent) {
+        match event {
+            HarnessEvent::UserPrompt(prompt_msg) => {
+                self.push_message(TuiMessage::UserPrompt(prompt_msg));
+            }
+            HarnessEvent::AgentMessage(chunk) => {
+                self.append_agent_message(chunk);
+            }
+            HarnessEvent::ToolCall {
+                name,
+                arguments,
+                result,
+            } => {
+                self.push_message(TuiMessage::ToolCall {
+                    name,
+                    arguments,
+                    result,
+                });
+                Input::reset_history_scroll(self);
+            }
+            HarnessEvent::AskUser { .. } => {}
         }
     }
 

@@ -17,12 +17,12 @@ use crate::{
     agents::AgentDefinition,
     commands::{Command, Commands},
     config::Config,
-    harness::Harness,
+    harness_actor::HarnessActorHandle,
     models::ModelPickerRow,
     session::Session,
-    tui::{TerminalGuard, TuiApp},
+    tui::TuiApp,
 };
-use crossterm::event::{self, KeyCode, KeyModifiers};
+use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers};
 use std::error::Error;
 
 const MAX_HISTORY: usize = 16;
@@ -168,9 +168,8 @@ impl Input {
 
     pub async fn handle_prompt_input(
         app: &mut TuiApp,
-        key: event::KeyEvent,
-        guard: &mut TerminalGuard,
-        harness: &mut Harness,
+        key: KeyEvent,
+        actor: &HarnessActorHandle,
         config: &Config,
     ) -> Result<InputMode, Box<dyn Error>> {
         Self::handle_input_cursor(app, key);
@@ -216,9 +215,21 @@ impl Input {
             }
             KeyCode::Tab => {
                 let agent = app.agents.next_agent(app.agent_name.as_str());
-                let next_name = agent.map(|a| a.name.clone());
-                if let Some(name) = next_name {
-                    app.set_agent(harness, &name);
+                let next_agent = agent.cloned();
+                if let Some(agent) = next_agent {
+                    if !app.harness_idle() {
+                        app.status =
+                            "Agent is busy; finish current turn before changing agents".to_string();
+                    } else {
+                        let name = agent.name.clone();
+                        match actor.set_agent(agent).await {
+                            Ok(snapshot) => {
+                                app.apply_snapshot(&snapshot);
+                                app.agent_name = name;
+                            }
+                            Err(err) => app.status = err,
+                        }
+                    }
                 }
             }
             KeyCode::Enter => {
@@ -228,10 +239,10 @@ impl Input {
                 }
 
                 if let Some(command) = prompt.trim().strip_prefix('/') {
-                    return Ok(Commands::execute_command(app, harness, config, command).await);
+                    return Ok(Commands::execute_command(app, actor, config, command).await);
                 }
 
-                app.send_prompt(prompt, harness, guard).await?;
+                app.queue_prompt(prompt, actor).await?;
             }
             KeyCode::Char(_) => {
                 return Ok(Self::mode_for_input(app));

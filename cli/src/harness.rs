@@ -54,18 +54,7 @@ pub async fn validate_model(
     Ok(())
 }
 
-pub struct Harness {
-    history: ChatRequest,
-    client: Client,
-    tool_engine: ToolEngine,
-    model: String,
-    agent: AgentDefinition,
-    oneshot_prompt: Option<String>,
-    session: Session,
-    context_tokens: Option<i32>,
-    streaming: bool,
-}
-
+#[derive(Clone, Debug)]
 pub enum HarnessEvent {
     UserPrompt(String),
     AgentMessage(String),
@@ -78,6 +67,28 @@ pub enum HarnessEvent {
         title: String,
         options: Vec<String>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub struct HarnessSnapshot {
+    pub session_id: Option<String>,
+    pub has_history: bool,
+    pub model: String,
+    pub agent_name: String,
+    pub context_tokens: Option<i32>,
+    pub streaming: bool,
+}
+
+pub struct Harness {
+    history: ChatRequest,
+    client: Client,
+    tool_engine: ToolEngine,
+    model: String,
+    agent: AgentDefinition,
+    oneshot_prompt: Option<String>,
+    session: Session,
+    context_tokens: Option<i32>,
+    streaming: bool,
 }
 
 impl Harness {
@@ -169,6 +180,17 @@ impl Harness {
 
     pub fn history(&self) -> &ChatRequest {
         &self.history
+    }
+
+    pub fn snapshot(&self) -> HarnessSnapshot {
+        HarnessSnapshot {
+            session_id: self.session_id(),
+            has_history: !self.history().messages.is_empty(),
+            model: self.model().clone(),
+            agent_name: self.agent_name().to_string(),
+            context_tokens: self.context_tokens(),
+            streaming: self.streaming(),
+        }
     }
 
     /// Replay the entire chat history as `HarnessEvent` callbacks, pairing

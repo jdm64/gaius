@@ -106,14 +106,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if harness.is_oneshot() {
         harness.run().await?;
+        if !harness.history().messages.is_empty()
+            && let Some(session_id) = harness.session_id()
+        {
+            println!("To continue pass --session {}", session_id);
+        }
     } else {
-        TuiApp::new().run(&mut harness, &config).await?;
-    }
-
-    if !harness.history().messages.is_empty()
-        && let Some(session_id) = harness.session_id()
-    {
-        println!("To continue pass --session {}", session_id);
+        let snapshot = TuiApp::new().run(harness, &config).await?;
+        if snapshot.has_history
+            && let Some(session_id) = snapshot.session_id
+        {
+            println!("To continue pass --session {}", session_id);
+        }
     }
 
     Ok(())

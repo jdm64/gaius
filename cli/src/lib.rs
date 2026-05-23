@@ -17,6 +17,7 @@ pub mod agents;
 pub mod commands;
 pub mod config;
 pub mod harness;
+pub mod harness_actor;
 pub mod input;
 pub mod models;
 pub mod render;
