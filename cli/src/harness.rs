@@ -372,16 +372,16 @@ impl Harness {
         let mut emitted_text = false;
         while let Some(event) = response.stream.next().await {
             match event? {
-                ChatStreamEvent::Chunk(chunk) if !chunk.content.is_empty() => {
-                    emitted_text = true;
-                    on_event(HarnessEvent::AgentMessage(chunk.content));
+                ChatStreamEvent::Chunk(chunk) | ChatStreamEvent::ReasoningChunk(chunk) => {
+                    if !chunk.content.is_empty() {
+                        emitted_text = true;
+                        on_event(HarnessEvent::AgentMessage(chunk.content));
+                    }
                 }
                 ChatStreamEvent::End(end) => {
                     stream_end = Some(end);
                 }
                 ChatStreamEvent::Start
-                | ChatStreamEvent::Chunk(_)
-                | ChatStreamEvent::ReasoningChunk(_)
                 | ChatStreamEvent::ThoughtSignatureChunk(_)
                 | ChatStreamEvent::ToolCallChunk(_) => {}
             }
