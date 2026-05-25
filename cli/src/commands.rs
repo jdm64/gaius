@@ -81,6 +81,7 @@ impl Commands {
                 Self::handle_models_mode(app, key, picker, actor, config).await
             }
             InputMode::Agents { picker } => Self::handle_agents_mode(app, key, picker, actor).await,
+            InputMode::Files { picker } => Input::handle_files_mode(app, key, picker).await,
             InputMode::Question {
                 title: _,
                 options: _,
@@ -514,7 +515,7 @@ pub fn wrap(i: i32, n: usize) -> usize {
     }
 }
 
-fn input_changed_key(key: event::KeyEvent) -> bool {
+pub fn input_changed_key(key: event::KeyEvent) -> bool {
     matches!(
         key.code,
         KeyCode::Backspace | KeyCode::Delete | KeyCode::Char('u') | KeyCode::Char('k')

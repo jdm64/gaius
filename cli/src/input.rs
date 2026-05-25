@@ -15,7 +15,7 @@
 
 use crate::{
     agents::AgentDefinition,
-    commands::{Command, Commands},
+    commands::{Command, Commands, input_changed_key},
     config::Config,
     harness_actor::HarnessActorHandle,
     models::ModelPickerRow,
@@ -23,9 +23,17 @@ use crate::{
     tui::TuiApp,
 };
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers};
-use std::error::Error;
+use std::{error::Error, path::PathBuf};
 
 const MAX_HISTORY: usize = 16;
+
+fn char_pos_to_byte_index(input: &str, char_pos: usize) -> usize {
+    input
+        .char_indices()
+        .nth(char_pos)
+        .map(|(index, _)| index)
+        .unwrap_or(input.len())
+}
 
 pub struct PickList<T> {
     pub selected: usize,
@@ -116,6 +124,9 @@ pub enum InputMode {
     },
     Agents {
         picker: PickList<AgentDefinition>,
+    },
+    Files {
+        picker: PickList<FileEntry>,
     },
     Question {
         title: String,
@@ -281,22 +292,29 @@ impl Input {
     }
 
     fn command_mode_for_input(app: &TuiApp) -> Option<InputMode> {
-        let input = app.input.as_str();
-        let query = input.strip_prefix('/')?.to_lowercase();
-        let rows = Commands::commands();
-        let filtered: Vec<usize> = rows
-            .iter()
-            .enumerate()
-            .filter_map(|(index, cmd)| cmd.name.to_lowercase().contains(&query).then_some(index))
-            .collect();
+        let input = app.input.trim();
 
-        if filtered.is_empty() {
-            None
-        } else {
-            Some(InputMode::Command {
-                picker: PickList::new(rows, filtered),
-            })
+        if let Some(query) = Input::get_file_query(&app.input, app.input_cursor) {
+            let files = list_files();
+            let filtered = Input::filter_files(&query, &files);
+
+            return Some(InputMode::Files {
+                picker: PickList::new(files, filtered),
+            });
         }
+
+        if input.starts_with('/') {
+            let commands = Commands::commands();
+            let filtered = Self::filter_commands(input, &commands);
+
+            if !filtered.is_empty() {
+                return Some(InputMode::Command {
+                    picker: PickList::new(commands, filtered),
+                });
+            }
+        }
+
+        None
     }
 
     pub fn filter_commands(input: &str, commands: &[Command]) -> Vec<usize> {
@@ -338,6 +356,98 @@ impl Input {
                 (query.is_empty() || agent.name.to_lowercase().contains(&query)).then_some(index)
             })
             .collect()
+    }
+
+    pub async fn handle_files_mode(
+        app: &mut TuiApp,
+        key: event::KeyEvent,
+        mut picker: PickList<FileEntry>,
+    ) -> InputMode {
+        Input::handle_input_cursor(app, key);
+        match key.code {
+            KeyCode::Esc => return InputMode::PromptInput,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return InputMode::Exit;
+            }
+            KeyCode::Up => {
+                picker.move_up();
+            }
+            KeyCode::Down => {
+                picker.move_down();
+            }
+            KeyCode::Enter => {
+                if let Some(file) = picker.selected_row() {
+                    app.input = Input::replace_file_query(&file.name, &app.input, app.input_cursor);
+                    app.input_cursor = app.input.chars().count();
+                }
+                return InputMode::PromptInput;
+            }
+            _ if input_changed_key(key) => {
+                if let Some(query) = Input::get_file_query(&app.input, app.input_cursor) {
+                    let filtered = Input::filter_files(&query, &picker.rows);
+                    picker.replace_filter(filtered);
+                } else {
+                    return InputMode::PromptInput;
+                }
+            }
+            _ => {}
+        }
+
+        InputMode::Files { picker }
+    }
+
+    pub fn filter_files(input: &str, files: &[FileEntry]) -> Vec<usize> {
+        let query = input
+            .strip_prefix('@')
+            .unwrap_or(input)
+            .trim()
+            .to_lowercase();
+        files
+            .iter()
+            .enumerate()
+            .filter_map(|(index, file)| {
+                (query.is_empty() || file.name.to_lowercase().contains(&query)).then_some(index)
+            })
+            .collect()
+    }
+
+    pub fn get_file_query(input: &str, cursor_pos: usize) -> Option<String> {
+        let cursor_byte = char_pos_to_byte_index(input, cursor_pos);
+        let input_before_cursor = &input[..cursor_byte];
+        let query_start = input_before_cursor
+            .char_indices()
+            .rev()
+            .find_map(|(index, ch)| ch.is_whitespace().then_some(index + ch.len_utf8()))
+            .unwrap_or(0);
+
+        input_before_cursor[query_start..]
+            .strip_prefix('@')
+            .map(ToString::to_string)
+    }
+
+    pub fn replace_file_query(filename: &str, input: &str, cursor_pos: usize) -> String {
+        let cursor_byte = char_pos_to_byte_index(input, cursor_pos);
+        let token_start = input[..cursor_byte]
+            .char_indices()
+            .rev()
+            .find_map(|(index, ch)| ch.is_whitespace().then_some(index + ch.len_utf8()))
+            .unwrap_or(0);
+
+        if !input[token_start..].starts_with('@') {
+            return input.to_string();
+        }
+
+        let token_end = input[cursor_byte..]
+            .char_indices()
+            .find_map(|(index, ch)| ch.is_whitespace().then_some(cursor_byte + index))
+            .unwrap_or(input.len());
+
+        format!(
+            "{}{}{}",
+            &input[..token_start],
+            filename,
+            &input[token_end..]
+        )
     }
 
     pub fn mode_for_input(app: &TuiApp) -> InputMode {
@@ -441,4 +551,53 @@ fn wrap_selection(i: i32, n: usize) -> usize {
     } else {
         0
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: PathBuf,
+}
+
+pub fn list_files() -> Vec<FileEntry> {
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut entries: Vec<FileEntry> = Vec::new();
+
+    fn walk_dir(path: &PathBuf, relative_path: &str, entries: &mut Vec<FileEntry>) {
+        if let Ok(read_dir) = std::fs::read_dir(path) {
+            for entry in read_dir.filter_map(|e| e.ok()) {
+                let entry_path = entry.path();
+                let name = entry_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                // Skip ignored directories
+                if [".git", "target", "node_modules", "build", "dist", "bin"]
+                    .iter()
+                    .any(|&ignored| name == ignored)
+                {
+                    continue;
+                }
+
+                let rel_name = if relative_path.is_empty() {
+                    name
+                } else {
+                    format!("{}/{}", relative_path, name)
+                };
+                entries.push(FileEntry {
+                    name: rel_name.clone(),
+                    path: entry_path.clone(),
+                });
+                if entry_path.is_dir() {
+                    walk_dir(&entry_path, &rel_name, entries);
+                }
+            }
+        }
+    }
+
+    walk_dir(&current_dir, "", &mut entries);
+
+    entries
 }

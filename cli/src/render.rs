@@ -14,7 +14,7 @@
  */
 
 use crate::{
-    input::{InputMode, PickList},
+    input::{FileEntry, InputMode, PickList},
     models::ModelPickerRow,
     tui::{TuiApp, TuiMessage, wrapped_line_count},
 };
@@ -66,6 +66,9 @@ impl Render {
             }
             InputMode::Agents { picker } => {
                 Self::draw_agents(frame, chunks[1], picker);
+            }
+            InputMode::Files { picker } => {
+                Self::draw_files(frame, chunks[1], picker);
             }
             InputMode::PromptInput | InputMode::Exit => {}
             InputMode::Question {
@@ -255,6 +258,28 @@ impl Render {
             },
             |agent, row_index, selected_row| {
                 let item = ListItem::new(agent.name.as_str());
+                if row_index == selected_row {
+                    item.style(Style::default().bg(Color::DarkGray))
+                } else {
+                    item
+                }
+            },
+        );
+    }
+
+    fn draw_files(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<FileEntry>) {
+        Self::draw_pick_list(
+            frame,
+            input_area,
+            picker,
+            PickListRenderSpec {
+                title: "Files",
+                max_width: 60,
+                empty_text: "No matching files",
+                help_text: "  Type: filter | Enter: select | Esc: close",
+            },
+            |file, row_index, selected_row| {
+                let item = ListItem::new(file.name.clone());
                 if row_index == selected_row {
                     item.style(Style::default().bg(Color::DarkGray))
                 } else {

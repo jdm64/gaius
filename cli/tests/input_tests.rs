@@ -155,3 +155,69 @@ fn pick_list_handles_empty_filters() {
     list.move_down();
     assert_eq!(list.selected, 0);
 }
+
+#[test]
+fn file_query_get_and_replace() {
+    let empty_query = "no file";
+    assert_eq!(Input::get_file_query(empty_query, empty_query.len()), None);
+
+    assert_eq!(
+        Input::replace_file_query("myfile.txt", empty_query, empty_query.len()),
+        empty_query
+    );
+
+    assert_eq!(Input::get_file_query("@", 1), Some("".to_string()));
+
+    assert_eq!(
+        Input::replace_file_query("myfile.txt", "@", 1),
+        "myfile.txt".to_string()
+    );
+
+    let input = "@one.txt foo @two.txt bar @three.txt";
+    assert_eq!(Input::get_file_query(input, 8), Some("one.txt".to_string()));
+
+    assert_eq!(
+        Input::replace_file_query("myfile.txt", input, 8),
+        "myfile.txt foo @two.txt bar @three.txt".to_string()
+    );
+
+    assert_eq!(
+        Input::get_file_query(input, 21),
+        Some("two.txt".to_string())
+    );
+
+    assert_eq!(
+        Input::replace_file_query("myfile.txt", input, 21),
+        "@one.txt foo myfile.txt bar @three.txt".to_string()
+    );
+
+    assert_eq!(
+        Input::get_file_query(input, input.len()),
+        Some("three.txt".to_string())
+    );
+
+    assert_eq!(
+        Input::replace_file_query("myfile.txt", input, input.len()),
+        "@one.txt foo @two.txt bar myfile.txt".to_string()
+    );
+
+    assert_eq!(
+        Input::get_file_query("text @foo text", 8),
+        Some("fo".to_string())
+    );
+
+    assert_eq!(
+        Input::replace_file_query("bar.foo", "text @foo text", 8),
+        "text bar.foo text".to_string()
+    );
+
+    assert_eq!(
+        Input::get_file_query("text @é文 text", 8),
+        Some("é文".to_string())
+    );
+
+    assert_eq!(
+        Input::replace_file_query("myfile.txt", "text @é文 text", 8),
+        "text myfile.txt text".to_string()
+    );
+}
