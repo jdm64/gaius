@@ -534,20 +534,66 @@ impl Render {
         let end = start.saturating_add(height);
 
         for line in lines {
-            let user_prompt = Self::is_user_prompt_line(line);
-            for wrapped in Self::wrap_line(line, width) {
-                let line = if user_prompt {
-                    Self::pad_user_prompt_line(wrapped, width)
-                } else {
-                    wrapped
-                };
-                if Self::push_visible_line(&mut visible, line, &mut wrapped_index, start, end) {
-                    return visible;
+            if Self::is_user_prompt_line(line) {
+                let content_line = Self::strip_user_prompt_prefix(line);
+                for wrapped in Self::wrap_line(&content_line, width - 3) {
+                    let line = Self::format_user_prompt_line(wrapped, width);
+                    if Self::push_visible_line(&mut visible, line, &mut wrapped_index, start, end) {
+                        return visible;
+                    }
+                }
+            } else {
+                for wrapped in Self::wrap_line(line, width) {
+                    if Self::push_visible_line(
+                        &mut visible,
+                        wrapped,
+                        &mut wrapped_index,
+                        start,
+                        end,
+                    ) {
+                        return visible;
+                    }
                 }
             }
         }
 
         visible
+    }
+
+    fn strip_user_prompt_prefix(line: &Line<'_>) -> Line<'static> {
+        let spans: Vec<_> = if line
+            .spans
+            .first()
+            .map_or(false, |s| s.content == "\u{2503} ")
+        {
+            line.spans[1..]
+                .iter()
+                .map(|s| Span::styled(s.content.to_string(), s.style))
+                .collect()
+        } else {
+            line.spans
+                .iter()
+                .map(|s| Span::styled(s.content.to_string(), s.style))
+                .collect()
+        };
+        let mut result = Line::from(spans);
+        result.style = line.style;
+        result.alignment = line.alignment;
+        result
+    }
+
+    fn format_user_prompt_line(mut line: Line<'static>, width: u16) -> Line<'static> {
+        let bar_style = Self::user_prompt_style().fg(Color::Magenta);
+        line.spans.insert(0, Span::styled("\u{2503} ", bar_style));
+        let width = width.max(1) as usize;
+        let used = line.width();
+        if used < width {
+            line.spans.push(Span::styled(
+                " ".repeat(width - used),
+                Self::user_prompt_style(),
+            ));
+        }
+        line
     }
 
     fn push_visible_line(
@@ -726,19 +772,6 @@ impl Render {
             }
             _ => {}
         }
-    }
-
-    fn pad_user_prompt_line(mut line: Line<'static>, width: u16) -> Line<'static> {
-        let width = width.max(1) as usize;
-        let used = line.width() % width;
-        let pad = if used == 0 { 0 } else { width - used };
-        if pad == 0 {
-            return line;
-        }
-
-        line.spans
-            .push(Span::styled(" ".repeat(pad), Self::user_prompt_style()));
-        line
     }
 
     fn user_prompt_bar_line() -> Line<'static> {
