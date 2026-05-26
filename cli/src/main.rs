@@ -15,6 +15,7 @@
 
 use gaius::config::Config;
 use gaius::harness::Harness;
+use gaius::models::Models;
 use gaius::tui::TuiApp;
 use pico_args::Arguments;
 use std::error::Error;
@@ -112,6 +113,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("To continue pass --session {}", session_id);
         }
     } else {
+        // restore the last used model instead of what' in config
+        if let Some(model) = Models::load_recent().unwrap_or_default().get(0)
+            && let Ok(client) = model.create_client(&config)
+        {
+            harness.set_model(client, model.id.clone());
+        }
+
         let snapshot = TuiApp::new().run(harness, &config).await?;
         if snapshot.has_history
             && let Some(session_id) = snapshot.session_id
