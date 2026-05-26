@@ -145,7 +145,7 @@ impl Config {
         }
     }
 
-    pub async fn select_model(&self) -> Result<SelectedModel, Box<dyn Error>> {
+    pub async fn select_first_model(&self) -> Result<SelectedModel, Box<dyn Error>> {
         for model in &self.model {
             let provider = match self
                 .provider

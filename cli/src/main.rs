@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut config = Config::new();
     config.load().await?;
 
-    let selected_model = match config.select_model().await {
+    let selected_model = match config.select_first_model().await {
         Ok(model) => model,
         Err(err) => {
             eprintln!("{}", err);
