@@ -693,7 +693,10 @@ impl Render {
                 let style = Style::default().fg(Color::Cyan);
                 let json_args = from_str::<Value>(arguments).unwrap_or_default();
                 let display = match name.as_str() {
-                    "read_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
+                    "read_file" => Self::arguments_json_fields(
+                        &json_args,
+                        &["file_path", "start_line", "max_lines"],
+                    ),
                     "write_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
                     "edit_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
                     "bash" => Self::arguments_json_fields(&json_args, &["command"]),
@@ -793,7 +796,15 @@ impl Render {
     fn arguments_json_fields(arguments: &Value, fields: &[&str]) -> String {
         fields
             .iter()
-            .filter_map(|&f| arguments.get(f).and_then(|v| v.as_str()))
+            .filter_map(|&f| {
+                arguments.get(f).and_then(|v| {
+                    if v.is_string() {
+                        v.as_str().map(|s| s.to_string())
+                    } else {
+                        Some(v.to_string())
+                    }
+                })
+            })
             .collect::<Vec<_>>()
             .join(" ")
     }
