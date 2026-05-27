@@ -1,6 +1,11 @@
 use gaius::render::Render;
-use gaius::tui::TuiMessage;
-use ratatui::text::{Line, Span};
+use gaius::tui::{TuiApp, TuiMessage};
+use ratatui::{
+    Terminal,
+    backend::TestBackend,
+    layout::Position,
+    text::{Line, Span},
+};
 
 #[test]
 fn markdown_heading_has_bold_style() {
@@ -111,6 +116,40 @@ fn visible_history_lines_pads_user_prompts_to_width() {
     assert_eq!(visible[0].spans[0].content.as_ref(), "\u{2503} ");
     assert_eq!(visible[1].spans[0].content.as_ref(), "\u{2503} ");
     assert_eq!(visible[2].spans[0].content.as_ref(), "\u{2503} ");
+}
+
+#[test]
+fn draw_input_expands_height_for_wrapped_prompt() {
+    let mut app = TuiApp::new();
+    app.input = "abcdefghijklmnopq".to_string();
+    app.input_cursor = app.input.chars().count();
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+
+    terminal
+        .draw(|frame| Render::draw(&mut app, frame))
+        .unwrap();
+
+    assert_eq!(
+        terminal.get_cursor_position().unwrap(),
+        Position { x: 5, y: 6 }
+    );
+}
+
+#[test]
+fn draw_input_places_cursor_on_next_wrapped_line_at_boundary() {
+    let mut app = TuiApp::new();
+    app.input = "abcdefghijklmno".to_string();
+    app.input_cursor = 14;
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+
+    terminal
+        .draw(|frame| Render::draw(&mut app, frame))
+        .unwrap();
+
+    assert_eq!(
+        terminal.get_cursor_position().unwrap(),
+        Position { x: 2, y: 6 }
+    );
 }
 
 fn line_texts(lines: &[Line<'_>]) -> Vec<String> {

@@ -29,6 +29,7 @@ use serde_json::{self, Value, from_str};
 use tui_markdown::{Options, from_str_with_options};
 
 pub const INPUT_HEIGHT: u16 = 3;
+const INPUT_PROMPT_PREFIX: &str = "> ";
 
 struct PickListRenderSpec {
     title: &'static str,
@@ -42,14 +43,20 @@ pub struct Render {}
 impl Render {
     pub fn draw(app: &mut TuiApp, frame: &mut Frame<'_>) {
         let area = frame.area();
+        let input_width = area.width - 4;
+        let input_prompt = Self::input_prompt_lines(app.input.clone(), input_width);
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(INPUT_HEIGHT)])
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(2 + input_prompt.len() as u16),
+            ])
             .split(area);
 
         frame.render_widget(Clear, area);
         Self::draw_history(app, frame, chunks[0]);
-        Self::draw_input(app, frame, chunks[1]);
+        Self::draw_input(app, frame, chunks[1], input_prompt, input_width as usize);
 
         match &app.mode {
             InputMode::Command { picker } => {
@@ -809,25 +816,38 @@ impl Render {
             .join(" ")
     }
 
-    fn draw_input(app: &TuiApp, frame: &mut Frame<'_>, area: Rect) {
-        let input = Paragraph::new(Line::from(vec![
-            Span::styled("> ", Style::default().fg(Color::Green)),
-            Span::raw(app.input.as_str()),
-        ]))
-        .block(
-            Block::default()
-                .title(format!(" {} ", app.status))
-                .borders(Borders::ALL)
-                .style(Style::default().bg(Color::Rgb(64, 0, 64)))
-                .padding(Padding::horizontal(1)),
-        )
-        .wrap(Wrap { trim: false });
+    fn draw_input(
+        app: &TuiApp,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        lines: Vec<Line<'static>>,
+        width: usize,
+    ) {
+        let input = Paragraph::new(Text::from(lines))
+            .block(
+                Block::default()
+                    .title(format!(" {} ", app.status))
+                    .borders(Borders::ALL)
+                    .style(Style::default().bg(Color::Rgb(64, 0, 64)))
+                    .padding(Padding::horizontal(1)),
+            )
+            .wrap(Wrap { trim: false });
         frame.render_widget(input, area);
 
-        let cursor_x = area.x + 4 + app.input_cursor as u16;
-        let cursor_y = area.y + 1;
-        if cursor_x < area.x + area.width {
-            frame.set_cursor_position((cursor_x, cursor_y));
-        }
+        let cursor = app.input_cursor + 2;
+        let (row, col) = (cursor / width, cursor % width);
+        let cursor_x = area.x.saturating_add(2).saturating_add(col as u16);
+        let cursor_y = area.y.saturating_add(1).saturating_add(row as u16);
+
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
+
+    fn input_prompt_lines(input: String, width: u16) -> Vec<Line<'static>> {
+        let line = Line::from(vec![
+            Span::styled(INPUT_PROMPT_PREFIX, Style::default().fg(Color::Green)),
+            Span::raw(input),
+            Span::raw(" "),
+        ]);
+        Self::wrap_line(&line, width)
     }
 }
