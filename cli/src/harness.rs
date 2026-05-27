@@ -22,7 +22,8 @@ use genai::{
     Client, ModelIden, ServiceTarget,
     adapter::AdapterKind,
     chat::{
-        ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, ToolCall, ToolResponse,
+        ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, ContentPart, ToolCall,
+        ToolResponse,
     },
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
 };
@@ -58,6 +59,7 @@ pub async fn validate_model(
 pub enum HarnessEvent {
     UserPrompt(String),
     AgentMessage(String),
+    Thinking(String),
     ToolCall {
         name: String,
         arguments: String,
@@ -217,6 +219,15 @@ impl Harness {
                 ChatRole::Assistant => {
                     let text = message.content.texts().join("");
 
+                    // Emit any stored thinking/reasoning content first
+                    for part in message.content.parts() {
+                        if let ContentPart::ThoughtSignature(text) = part {
+                            if !text.is_empty() {
+                                on_event(HarnessEvent::Thinking(text.clone()));
+                            }
+                        }
+                    }
+
                     // Collect pending tool calls from this assistant turn
                     for tc in message.content.tool_calls() {
                         pending_tool_calls.push((tc.fn_name.clone(), tc.fn_arguments.to_string()));
@@ -302,6 +313,15 @@ impl Harness {
         self.run_turn_with_events(prompt, |event| match event {
             HarnessEvent::UserPrompt(text) => {
                 println!("user> {}", text);
+                let _ = io::stdout().flush();
+                None
+            }
+            HarnessEvent::Thinking(text) => {
+                if !agent_started {
+                    print!("agent> ");
+                    agent_started = true;
+                }
+                print!("{}", text);
                 let _ = io::stdout().flush();
                 None
             }
@@ -394,23 +414,39 @@ impl Harness {
         let mut emitted_text = false;
         while let Some(event) = response.stream.next().await {
             match event? {
-                ChatStreamEvent::Chunk(chunk) | ChatStreamEvent::ReasoningChunk(chunk) => {
+                ChatStreamEvent::Chunk(chunk) => {
                     if !chunk.content.is_empty() {
                         emitted_text = true;
                         on_event(HarnessEvent::AgentMessage(chunk.content));
                     }
                 }
+                ChatStreamEvent::ReasoningChunk(chunk) => {
+                    if !chunk.content.is_empty() {
+                        on_event(HarnessEvent::Thinking(chunk.content));
+                    }
+                }
+                ChatStreamEvent::ThoughtSignatureChunk(chunk) => {
+                    if !chunk.content.is_empty() {
+                        on_event(HarnessEvent::Thinking(chunk.content));
+                    }
+                }
                 ChatStreamEvent::End(end) => {
                     stream_end = Some(end);
                 }
-                ChatStreamEvent::Start
-                | ChatStreamEvent::ThoughtSignatureChunk(_)
-                | ChatStreamEvent::ToolCallChunk(_) => {}
+                ChatStreamEvent::Start | ChatStreamEvent::ToolCallChunk(_) => {}
             }
         }
 
         let stream_end = stream_end.ok_or("Chat stream ended without an end event")?;
         let content = stream_end.captured_content.unwrap_or_default();
+
+        // Surface any final captured reasoning from the stream end event
+        if let Some(reasoning_text) = stream_end.captured_reasoning_content {
+            if !reasoning_text.is_empty() {
+                on_event(HarnessEvent::Thinking(reasoning_text));
+            }
+        }
+
         if !emitted_text {
             let text = content.texts().join("");
             if !text.is_empty() {

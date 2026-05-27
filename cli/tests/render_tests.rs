@@ -11,7 +11,7 @@ use ratatui::{
 fn markdown_heading_has_bold_style() {
     let md = "# Heading";
     let msg = TuiMessage::AgentMessage(md.to_string());
-    let lines = Render::render_message(&msg);
+    let lines = Render::render_message(&msg, false);
     assert!(!lines.is_empty());
     // The heading style should be applied to the Line's style, not the span.
     let line = &lines[0];
@@ -34,7 +34,7 @@ fn markdown_heading_has_bold_style() {
 fn markdown_list_has_style() {
     let md = "- item1\n- item2";
     let msg = TuiMessage::AgentMessage(md.to_string());
-    let lines = Render::render_message(&msg);
+    let lines = Render::render_message(&msg, false);
     assert!(!lines.is_empty());
     // List items should have a style (maybe a marker).
     // Check lines contain the items; style might be default but marker could have style?
@@ -105,7 +105,7 @@ fn visible_history_lines_handles_empty_history() {
 
 #[test]
 fn visible_history_lines_pads_user_prompts_to_width() {
-    let lines = Render::render_message(&TuiMessage::UserPrompt("hello".to_string()));
+    let lines = Render::render_message(&TuiMessage::UserPrompt("hello".to_string()), false);
 
     let visible = Render::visible_history_lines(&lines, 10, 0, 3);
 

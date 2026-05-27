@@ -524,7 +524,7 @@ impl Render {
                 }
             }
 
-            lines.extend(Self::render_message(message));
+            lines.extend(Self::render_message(message, app.show_thinking));
         }
 
         lines
@@ -671,8 +671,34 @@ impl Render {
         line
     }
 
-    pub fn render_message(msg: &TuiMessage) -> Vec<Line<'static>> {
+    pub fn render_message(msg: &TuiMessage, show_thinking: bool) -> Vec<Line<'static>> {
         match msg {
+            TuiMessage::Thinking(text) => {
+                if !show_thinking {
+                    return vec![
+                        Line::from(format!("Thinking... {}", text.len()))
+                            .style(Style::default().fg(Color::LightBlue)),
+                    ];
+                }
+                let style = Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::ITALIC)
+                    .add_modifier(Modifier::DIM);
+                let options = Options::default();
+                let lines: Vec<Line> = from_str_with_options(text, &options)
+                    .lines
+                    .into_iter()
+                    .map(|mut line| {
+                        line.spans = line
+                            .spans
+                            .into_iter()
+                            .map(|span| Span::styled(span.content, style.patch(span.style)))
+                            .collect();
+                        Self::owned_line(line)
+                    })
+                    .collect();
+                lines
+            }
             TuiMessage::AgentMessage(text) => {
                 let options = Options::default();
                 from_str_with_options(text, &options)

@@ -45,6 +45,7 @@ use tokio::sync::oneshot;
 pub enum TuiMessage {
     UserPrompt(String),
     AgentMessage(String),
+    Thinking(String),
     SystemMessage(String),
     ToolCall {
         name: String,
@@ -90,6 +91,7 @@ pub struct TuiApp {
     pub status: String,
     pub mode: InputMode,
     pub context_tokens: Option<i32>,
+    pub show_thinking: bool,
     pub prompt_history: Vec<String>,
     pub prompt_history_idx: Option<usize>,
     pub history_lines: Vec<Line<'static>>,
@@ -120,6 +122,7 @@ impl TuiApp {
             status: "Ctrl-C to quit".to_string(),
             mode: InputMode::PromptInput,
             context_tokens: None,
+            show_thinking: false,
             prompt_history: Vec::new(),
             prompt_history_idx: None,
             history_lines: Vec::new(),
@@ -392,7 +395,10 @@ impl TuiApp {
                 self.push_message(TuiMessage::UserPrompt(prompt_msg));
             }
             HarnessEvent::AgentMessage(chunk) => {
-                self.append_agent_message(chunk);
+                self.append_agent_message(chunk, false);
+            }
+            HarnessEvent::Thinking(chunk) => {
+                self.append_agent_message(chunk, true);
             }
             HarnessEvent::ToolCall {
                 name,
@@ -410,20 +416,27 @@ impl TuiApp {
         }
     }
 
-    pub fn append_agent_message(&mut self, chunk: String) {
+    pub fn append_agent_message(&mut self, chunk: String, thinking: bool) {
         if chunk.is_empty() {
             return;
         }
 
-        if let Some(message) = self.messages.last_mut()
-            && matches!(message, TuiMessage::AgentMessage(_))
-        {
-            if let TuiMessage::AgentMessage(text) = message {
-                text.push_str(&chunk);
+        match self.messages.last_mut() {
+            Some(TuiMessage::AgentMessage(text)) if !thinking => {
+                text.push_str(chunk.as_str());
             }
-        } else {
-            self.push_message(TuiMessage::AgentMessage(chunk));
+            Some(TuiMessage::Thinking(text)) if thinking => {
+                text.push_str(chunk.as_str());
+            }
+            _ => {
+                if thinking {
+                    self.push_message(TuiMessage::Thinking(chunk));
+                } else {
+                    self.push_message(TuiMessage::AgentMessage(chunk));
+                }
+            }
         }
+
         self.mark_history_dirty();
         Input::reset_history_scroll(self);
     }
@@ -435,7 +448,10 @@ impl TuiApp {
                 self.push_message(TuiMessage::UserPrompt(text));
             }
             HarnessEvent::AgentMessage(text) => {
-                self.append_agent_message(text);
+                self.append_agent_message(text, false);
+            }
+            HarnessEvent::Thinking(text) => {
+                self.append_agent_message(text, true);
             }
             HarnessEvent::ToolCall {
                 name,
@@ -457,6 +473,15 @@ impl TuiApp {
 
     pub fn clear_messages(&mut self) {
         self.messages.clear();
+        self.mark_history_dirty();
+    }
+
+    pub fn toggle_thinking(&mut self) {
+        self.show_thinking = !self.show_thinking;
+        self.status = format!(
+            "Thinking display: {}",
+            if self.show_thinking { "on" } else { "off" }
+        );
         self.mark_history_dirty();
     }
 

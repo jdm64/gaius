@@ -56,6 +56,10 @@ impl Commands {
                 name: "streaming",
                 description: "Toggle streaming mode on/off",
             },
+            Command {
+                name: "thinking",
+                description: "Toggle rendering of thinking messages on/off",
+            },
         ]
     }
 
@@ -167,6 +171,11 @@ impl Commands {
                         Err(err) => app.status = err,
                     }
                 }
+                Input::clear_input(app);
+                InputMode::PromptInput
+            }
+            "thinking" => {
+                app.toggle_thinking();
                 Input::clear_input(app);
                 InputMode::PromptInput
             }
