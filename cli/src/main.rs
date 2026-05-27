@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     } else {
         // restore the last used model instead of what' in config
-        if let Some(model) = Models::load_recent().unwrap_or_default().get(0)
+        if let Some(model) = Models::load_recent().unwrap_or_default().first()
             && let Ok(client) = model.create_client(&config)
         {
             harness.set_model(client, model.id.clone());

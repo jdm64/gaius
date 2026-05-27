@@ -568,11 +568,7 @@ impl Render {
     }
 
     fn strip_user_prompt_prefix(line: &Line<'_>) -> Line<'static> {
-        let spans: Vec<_> = if line
-            .spans
-            .first()
-            .map_or(false, |s| s.content == "\u{2503} ")
-        {
+        let spans: Vec<_> = if line.spans.first().is_some_and(|s| s.content == "\u{2503} ") {
             line.spans[1..]
                 .iter()
                 .map(|s| Span::styled(s.content.to_string(), s.style))

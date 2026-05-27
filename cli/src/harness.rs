@@ -221,10 +221,8 @@ impl Harness {
 
                     // Emit any stored thinking/reasoning content first
                     for part in message.content.parts() {
-                        if let ContentPart::ThoughtSignature(text) = part {
-                            if !text.is_empty() {
-                                on_event(HarnessEvent::Thinking(text.clone()));
-                            }
+                        if let ContentPart::ThoughtSignature(text) = part && !text.is_empty() {
+                            on_event(HarnessEvent::Thinking(text.clone()));
                         }
                     }
 
@@ -441,10 +439,8 @@ impl Harness {
         let content = stream_end.captured_content.unwrap_or_default();
 
         // Surface any final captured reasoning from the stream end event
-        if let Some(reasoning_text) = stream_end.captured_reasoning_content {
-            if !reasoning_text.is_empty() {
-                on_event(HarnessEvent::Thinking(reasoning_text));
-            }
+        if let Some(reasoning_text) = stream_end.captured_reasoning_content && !reasoning_text.is_empty() {
+            on_event(HarnessEvent::Thinking(reasoning_text));
         }
 
         if !emitted_text {
