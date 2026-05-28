@@ -64,6 +64,7 @@ pub enum HarnessEvent {
         name: String,
         arguments: String,
         result: String,
+        error: bool,
     },
     AskUser {
         title: String,
@@ -254,6 +255,7 @@ impl Harness {
                                     name: (*name).clone(),
                                     arguments: (*args).clone(),
                                     result: resp.content.clone(),
+                                    error: false,
                                 });
                                 pending_tool_calls.remove(0);
                             }
@@ -267,6 +269,7 @@ impl Harness {
                             name,
                             arguments: args,
                             result: String::new(),
+                            error: false,
                         });
                     }
                 }
@@ -336,13 +339,18 @@ impl Harness {
                 name,
                 arguments,
                 result,
+                error,
             } => {
                 if agent_started {
                     println!();
                     agent_started = false;
                 }
                 println!("tool-call> {} ({})", name, arguments);
-                println!("tool-result> {}", result);
+                if error {
+                    println!("tool-error> {}", result);
+                } else {
+                    println!("tool-result> {}", result);
+                }
                 None
             }
             HarnessEvent::AskUser { title, options } => {
@@ -503,19 +511,19 @@ impl Harness {
                 ToolResult::Question(title, options) => {
                     let answer =
                         on_event(HarnessEvent::AskUser { title, options }).unwrap_or_default();
-                    self.send_tool_call_event(tc, answer, on_event);
+                    self.send_tool_call_event(tc, answer, false, on_event);
                 }
                 ToolResult::Text(text) => {
-                    self.send_tool_call_event(tc, text, on_event);
+                    self.send_tool_call_event(tc, text, false, on_event);
                 }
                 ToolResult::Error(err) => {
-                    self.send_tool_call_event(tc, err, on_event);
+                    self.send_tool_call_event(tc, err, true, on_event);
                 }
             }
         }
     }
 
-    fn send_tool_call_event<F>(&mut self, tc: &ToolCall, result: String, on_event: &mut F)
+    fn send_tool_call_event<F>(&mut self, tc: &ToolCall, result: String, error: bool, on_event: &mut F)
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
@@ -526,6 +534,7 @@ impl Harness {
             name: tc.fn_name.to_string(),
             arguments: tc.fn_arguments.to_string(),
             result,
+            error,
         });
     }
 

@@ -51,6 +51,7 @@ pub enum TuiMessage {
         name: String,
         arguments: String,
         result: String,
+        error: bool,
     },
 }
 
@@ -404,11 +405,13 @@ impl TuiApp {
                 name,
                 arguments,
                 result,
+                error,
             } => {
                 self.push_message(TuiMessage::ToolCall {
                     name,
                     arguments,
                     result,
+                    error,
                 });
                 Input::reset_history_scroll(self);
             }
@@ -457,11 +460,13 @@ impl TuiApp {
                 name,
                 arguments,
                 result,
+                error,
             } => {
                 self.push_message(TuiMessage::ToolCall {
                     name,
                     arguments,
                     result,
+                    error,
                 });
             }
             HarnessEvent::AskUser {

@@ -718,6 +718,7 @@ impl Render {
                 name,
                 arguments,
                 result,
+                error,
             } => {
                 let style = Style::default().fg(Color::Cyan);
                 let json_args = from_str::<Value>(arguments).unwrap_or_default();
@@ -744,6 +745,13 @@ impl Render {
                     Span::styled(display, style.add_modifier(Modifier::ITALIC)),
                 ];
                 let mut ret = vec![Line::from(spans)];
+                if *error {
+                    let e_style = Style::default().fg(Color::Red);
+                    ret.push(Line::from(vec![
+                        Span::styled(" \u{21B3} ", e_style),
+                        Span::styled(result.clone(), e_style),
+                    ]));
+                }
                 Self::render_tool_results(name, &json_args, result, &mut ret, style);
                 ret
             }

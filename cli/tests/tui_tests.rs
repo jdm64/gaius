@@ -20,11 +20,13 @@ fn build_tui_app_messages_with_all_variants() {
         name: "weather".to_string(),
         arguments: serde_json::json!({"city":"Atlanta"}).to_string(),
         result: String::new(),
+        error: false,
     });
     app.push_message(TuiMessage::ToolCall {
         name: "123".to_string(),
         arguments: String::new(),
         result: "sunny".to_string(),
+        error: false,
     });
 
     assert_eq!(app.messages.len(), 5);
@@ -45,10 +47,12 @@ fn build_tui_app_messages_with_all_variants() {
             name,
             arguments,
             result,
+            error,
         } => {
             assert_eq!(name, "weather");
             assert_eq!(arguments, r#"{"city":"Atlanta"}"#);
             assert!(result.is_empty());
+            assert!(!error);
         }
         _ => panic!("expected ToolCall"),
     }
