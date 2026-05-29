@@ -1,3 +1,4 @@
+use gaius::config::Config;
 use gaius::render::Render;
 use gaius::tui::{TuiApp, TuiMessage};
 use ratatui::{
@@ -120,7 +121,7 @@ fn visible_history_lines_pads_user_prompts_to_width() {
 
 #[test]
 fn draw_input_expands_height_for_wrapped_prompt() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApp::new(Config::new());
     app.input = "abcdefghijklmnopq".to_string();
     app.input_cursor = app.input.chars().count();
     let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
@@ -137,7 +138,7 @@ fn draw_input_expands_height_for_wrapped_prompt() {
 
 #[test]
 fn draw_input_places_cursor_on_next_wrapped_line_at_boundary() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApp::new(Config::new());
     app.input = "abcdefghijklmno".to_string();
     app.input_cursor = 14;
     let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();

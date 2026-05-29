@@ -120,7 +120,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             harness.set_model(client, model.id.clone());
         }
 
-        let snapshot = TuiApp::new().run(harness, &config).await?;
+        let snapshot = TuiApp::new(config).run(harness).await?;
         if snapshot.has_history
             && let Some(session_id) = snapshot.session_id
         {

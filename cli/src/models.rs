@@ -107,6 +107,15 @@ impl Models {
         Ok(models)
     }
 
+    pub async fn list_models(
+        provider: &ProviderConfig,
+    ) -> Result<Vec<AvailableModel>, Box<dyn Error>> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(20))
+            .build()?;
+        Self::fetch_provider_models(&client, provider).await
+    }
+
     fn load_cache() -> Result<Option<Vec<AvailableModel>>, Box<dyn Error>> {
         let path = Self::cache_path()?;
         if !path.is_file() {
@@ -167,10 +176,7 @@ impl Models {
         model: &AvailableModel,
     ) -> Result<Vec<AvailableModel>, Box<dyn Error>> {
         let recent = Self::load_recent()?;
-        let recent: Vec<AvailableModel> = recent
-            .into_iter()
-            .filter(|m| m != model)
-            .collect();
+        let recent: Vec<AvailableModel> = recent.into_iter().filter(|m| m != model).collect();
         Self::save_recent(&recent)?;
         Ok(recent)
     }

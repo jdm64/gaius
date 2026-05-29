@@ -1,9 +1,10 @@
+use gaius::config::Config;
 use gaius::input::{Input, PickList};
 use gaius::tui::TuiApp;
 
 #[test]
 fn edits_input_at_cursor() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApp::new(Config::new());
     Input::insert_input_char(&mut app, 'a');
     Input::insert_input_char(&mut app, 'c');
 
@@ -26,7 +27,7 @@ fn edits_input_at_cursor() {
 
 #[test]
 fn moves_input_cursor_home_and_end() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApp::new(Config::new());
     for ch in "prompt".chars() {
         Input::insert_input_char(&mut app, ch);
     }
@@ -40,7 +41,7 @@ fn moves_input_cursor_home_and_end() {
 
 #[test]
 fn edits_multibyte_input_at_cursor() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApp::new(Config::new());
     for ch in "aéc".chars() {
         Input::insert_input_char(&mut app, ch);
     }
@@ -56,7 +57,7 @@ fn edits_multibyte_input_at_cursor() {
 
 #[test]
 fn deletes_input_to_start_and_end() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApp::new(Config::new());
     for ch in "abcdef".chars() {
         Input::insert_input_char(&mut app, ch);
     }
@@ -78,7 +79,7 @@ fn deletes_input_to_start_and_end() {
 
 #[test]
 fn deletes_multibyte_input_to_start_and_end() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApp::new(Config::new());
     for ch in "aé文z".chars() {
         Input::insert_input_char(&mut app, ch);
     }
@@ -99,7 +100,7 @@ fn deletes_multibyte_input_to_start_and_end() {
 
 #[test]
 fn scrolls_history_with_saturating_offsets() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApp::new(Config::new());
 
     assert_eq!(app.history_scroll, 0);
 

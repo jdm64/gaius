@@ -14,8 +14,11 @@
  */
 
 use crate::{
-    input::{FileEntry, InputMode, PickList},
+    agents::AgentDefinition,
+    commands::Command,
+    input::{FileEntry, InputMode, PickList, ProviderInfoRow},
     models::ModelPickerRow,
+    session::Session,
     tui::{TuiApp, TuiMessage, wrapped_line_count},
 };
 use ratatui::{
@@ -71,6 +74,9 @@ impl Render {
             InputMode::Models { picker } => {
                 Self::draw_models(frame, chunks[1], picker);
             }
+            InputMode::AddProvider { picker } => {
+                Self::draw_add_provider(frame, chunks[1], picker, app.input.as_str());
+            }
             InputMode::Agents { picker } => {
                 Self::draw_agents(frame, chunks[1], picker);
             }
@@ -88,11 +94,7 @@ impl Render {
         }
     }
 
-    fn draw_commands(
-        frame: &mut Frame<'_>,
-        input_area: Rect,
-        picker: &PickList<crate::commands::Command>,
-    ) {
+    fn draw_commands(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<Command>) {
         Self::draw_pick_list(
             frame,
             input_area,
@@ -117,7 +119,7 @@ impl Render {
     fn draw_sessions(
         frame: &mut Frame<'_>,
         input_area: Rect,
-        picker: &PickList<crate::session::Session>,
+        picker: &PickList<Session>,
         renaming: bool,
     ) {
         let help_text = if renaming {
@@ -157,7 +159,7 @@ impl Render {
                 title: "Models",
                 max_width: 80,
                 empty_text: "No matching models",
-                help_text: "  Type: filter | Enter: select | Ctrl+R: reload | Ctrl+D delete | Esc: close",
+                help_text: "  Type: filter | Enter: select | Ctrl+N: add provider | Ctrl+R: reload | Ctrl+D delete | Esc: close",
             },
             |row, row_index, selected_row| match row {
                 ModelPickerRow::Header(label) => {
@@ -176,6 +178,62 @@ impl Render {
         );
     }
 
+    fn draw_add_provider(
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        picker: &PickList<ProviderInfoRow>,
+        active_input: &str,
+    ) {
+        let selected = picker.selected;
+        let items: Vec<ListItem> = picker
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let display_value = if index == selected {
+                    active_input.to_string()
+                } else {
+                    row.masked_value()
+                };
+                let item = ListItem::new(format!("{}: {}", row.label(), display_value));
+                if index == selected {
+                    item.style(Style::default().bg(Color::DarkGray))
+                } else {
+                    item
+                }
+            })
+            .collect();
+
+        let count = picker.rows.len() as u16;
+        let help_height = 1u16;
+        let height = count + 2 + help_height;
+        let width = 80.min(input_area.width.saturating_sub(4).max(1));
+        let x = input_area.x + 2;
+        let y = input_area.y.saturating_sub(height);
+        let rect = Rect::new(x, y, width, height);
+
+        let list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Add Provider")
+                .padding(Padding::horizontal(1)),
+        );
+        let help_para = Paragraph::new(
+            "  Type: edit | Up/Down: field | Enter: validate and save | Esc: cancel",
+        )
+        .block(Block::default().borders(Borders::NONE))
+        .style(Style::default().fg(Color::Yellow));
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(count + 2), Constraint::Length(help_height)])
+            .split(rect);
+
+        frame.render_widget(Clear, rect);
+        frame.render_widget(list, chunks[0]);
+        frame.render_widget(help_para, chunks[1]);
+    }
+
     fn model_display_rows(picker: &PickList<ModelPickerRow>) -> Vec<usize> {
         if picker.filtered.is_empty() {
             return Vec::new();
@@ -187,7 +245,10 @@ impl Render {
         for (index, row) in picker.rows.iter().enumerate() {
             match row {
                 ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
-                    if selected.contains(&index) => display_rows.push(index),
+                    if selected.contains(&index) =>
+                {
+                    display_rows.push(index)
+                }
                 ModelPickerRow::Header(_)
                     if Self::section_has_selected_model(index, picker, &selected) =>
                 {
@@ -220,8 +281,10 @@ impl Render {
                 !matches!(row, ModelPickerRow::Header(_) | ModelPickerRow::Separator)
             })
             .any(|(offset, row)| {
-                matches!(row, ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_))
-                    && selected.contains(&(header_index + 1 + offset))
+                matches!(
+                    row,
+                    ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
+                ) && selected.contains(&(header_index + 1 + offset))
             })
     }
 
@@ -255,11 +318,7 @@ impl Render {
         has_before && has_after
     }
 
-    fn draw_agents(
-        frame: &mut Frame<'_>,
-        input_area: Rect,
-        picker: &PickList<crate::agents::AgentDefinition>,
-    ) {
+    fn draw_agents(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<AgentDefinition>) {
         Self::draw_pick_list(
             frame,
             input_area,

@@ -193,6 +193,41 @@ impl Config {
         &self.provider
     }
 
+    pub fn add_provider(&mut self, provider: ProviderConfig) -> Result<(), Box<dyn Error>> {
+        self.validate_provider_config(&provider)?;
+        self.provider.push(provider);
+        self.save()
+    }
+
+    fn save(&self) -> Result<(), Box<dyn Error>> {
+        let path = config_file()?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, toml::to_string_pretty(self)?)?;
+        Ok(())
+    }
+
+    pub fn validate_provider_config(
+        &self,
+        provider: &ProviderConfig,
+    ) -> Result<(), Box<dyn Error>> {
+        if provider.name.trim().is_empty() {
+            return Err("Provider name cannot be empty".into());
+        }
+        if self.provider.iter().any(|p| p.name == provider.name) {
+            return Err(format!("Provider '{}' already exists", provider.name).into());
+        }
+        if AdapterKind::from_lower_str(&provider.kind.to_lowercase()).is_none() {
+            return Err(format!("Invalid provider kind: {}", provider.kind).into());
+        }
+        Url::parse(&provider.url)?;
+        if provider.key.trim().is_empty() {
+            return Err("Provider key cannot be empty".into());
+        }
+        Ok(())
+    }
+
     pub fn agents(&self) -> &Agents {
         &self.agents
     }

@@ -1,3 +1,4 @@
+use gaius::config::Config;
 use gaius::tui::{TuiApp, TuiMessage, wrapped_line_count};
 
 #[test]
@@ -12,7 +13,7 @@ fn counts_wrapped_history_lines() {
 
 #[test]
 fn build_tui_app_messages_with_all_variants() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApp::new(Config::new());
     app.push_message(TuiMessage::SystemMessage("system: be useful".to_string()));
     app.push_message(TuiMessage::UserPrompt("hello".to_string()));
     app.push_message(TuiMessage::AgentMessage("hi".to_string()));

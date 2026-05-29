@@ -15,9 +15,9 @@
 
 use crate::{
     agents::AgentDefinition,
-    config::Config,
+    config::ProviderConfig,
     harness_actor::HarnessActorHandle,
-    input::{Input, InputMode, PickList},
+    input::{Input, InputMode, PickList, ProviderInfoRow},
     models::{ModelPickerRow, Models, model_picker_rows},
     session::Session,
     tui::{TuiApp, TuiMessage},
@@ -67,13 +67,12 @@ impl Commands {
         app: &mut TuiApp,
         key: event::KeyEvent,
         actor: &HarnessActorHandle,
-        config: &Config,
     ) -> Result<(), Box<dyn Error>> {
         let mode = mem::replace(&mut app.mode, InputMode::PromptInput);
         app.mode = match mode {
-            InputMode::PromptInput => Input::handle_prompt_input(app, key, actor, config).await?,
+            InputMode::PromptInput => Input::handle_prompt_input(app, key, actor).await?,
             InputMode::Command { picker } => {
-                Self::handle_command_mode(app, key, picker, actor, config).await
+                Self::handle_command_mode(app, key, picker, actor).await
             }
             InputMode::Session { picker } => {
                 Self::handle_session_mode(app, key, picker, actor).await
@@ -81,8 +80,9 @@ impl Commands {
             InputMode::SessionRename { picker } => {
                 Self::handle_session_rename_mode(app, key, picker)
             }
-            InputMode::Models { picker } => {
-                Self::handle_models_mode(app, key, picker, actor, config).await
+            InputMode::Models { picker } => Self::handle_models_mode(app, key, picker, actor).await,
+            InputMode::AddProvider { picker } => {
+                Self::handle_add_provider_mode(app, key, picker).await
             }
             InputMode::Agents { picker } => Self::handle_agents_mode(app, key, picker, actor).await,
             InputMode::Files { picker } => Input::handle_files_mode(app, key, picker).await,
@@ -99,7 +99,6 @@ impl Commands {
     pub async fn execute_command(
         app: &mut TuiApp,
         actor: &HarnessActorHandle,
-        config: &Config,
         command: &str,
     ) -> InputMode {
         match command {
@@ -134,24 +133,10 @@ impl Commands {
             "models" => {
                 Input::clear_input(app);
                 app.status = "Loading models...".to_string();
-                match Models::list(config).await {
-                    Ok(models) => {
-                        let recent_models = Models::load_recent().unwrap_or_default();
-                        let rows = model_picker_rows("", &models, &recent_models);
-                        let filtered = Input::filter_model_rows("", &rows);
-                        app.status = format!("Loaded {} models", models.len());
-                        InputMode::Models {
-                            picker: PickList::new(rows, filtered),
-                        }
-                    }
-                    Err(err) => {
-                        app.status = format!("Error loading models: {}", err);
-                        InputMode::PromptInput
-                    }
-                }
+                Self::build_models_picklist(app).await
             }
             "agents" => {
-                let agents = config.agents().all().to_vec();
+                let agents = app.config.agents().all().to_vec();
                 Input::clear_input(app);
                 app.status = format!("Loaded {} agents", agents.len());
                 InputMode::Agents {
@@ -196,7 +181,6 @@ impl Commands {
         key: event::KeyEvent,
         mut picker: PickList<Command>,
         actor: &HarnessActorHandle,
-        config: &Config,
     ) -> InputMode {
         Input::handle_input_cursor(app, key);
         match key.code {
@@ -213,7 +197,7 @@ impl Commands {
             KeyCode::Enter if !picker.is_empty() => {
                 let command = picker.selected_row().map(|row| row.name);
                 if let Some(command) = command {
-                    return Self::execute_command(app, actor, config, command).await;
+                    return Self::execute_command(app, actor, command).await;
                 }
             }
             KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_) => {
@@ -386,13 +370,24 @@ impl Commands {
         key: event::KeyEvent,
         mut picker: PickList<ModelPickerRow>,
         actor: &HarnessActorHandle,
-        config: &Config,
     ) -> InputMode {
         Input::handle_input_cursor(app, key);
         match key.code {
             KeyCode::Esc => return InputMode::PromptInput,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return InputMode::Exit;
+            }
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Input::clear_input(app);
+                app.status = "Add provider".to_string();
+                let rows = vec![
+                    ProviderInfoRow::Name(String::new()),
+                    ProviderInfoRow::Url(String::new()),
+                    ProviderInfoRow::Kind("openai".to_string()),
+                    ProviderInfoRow::Key(String::new()),
+                ];
+                let picker = PickList::all(rows);
+                return InputMode::AddProvider { picker };
             }
             KeyCode::Up => {
                 picker.move_up();
@@ -405,7 +400,7 @@ impl Commands {
                     app.status = "No matching models".to_string();
                     return InputMode::Models { picker };
                 };
-                match selected_model.create_client(config) {
+                match selected_model.create_client(&app.config) {
                     Ok(client) => {
                         if !app.harness_idle() {
                             app.status =
@@ -439,7 +434,7 @@ impl Commands {
                 };
                 match Models::forget_recent_model(&model) {
                     Ok(updated_recent) => {
-                        if let Ok(models) = Models::list(config).await {
+                        if let Ok(models) = Models::list(&app.config).await {
                             let rows = model_picker_rows(&app.input, &models, &updated_recent);
                             let filtered = Input::filter_model_rows(&app.input, &rows);
                             picker.replace_rows(rows, filtered);
@@ -453,7 +448,7 @@ impl Commands {
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.status = "Reloading models...".to_string();
-                match Models::reload(config).await {
+                match Models::reload(&app.config).await {
                     Ok(reloaded_models) => {
                         let recent_models = Models::load_recent().unwrap_or_default();
                         let rows = model_picker_rows(&app.input, &reloaded_models, &recent_models);
@@ -474,6 +469,118 @@ impl Commands {
         };
 
         InputMode::Models { picker }
+    }
+
+    pub async fn handle_add_provider_mode(
+        app: &mut TuiApp,
+        key: event::KeyEvent,
+        mut picker: PickList<ProviderInfoRow>,
+    ) -> InputMode {
+        match key.code {
+            KeyCode::Esc => {
+                Input::clear_input(app);
+                app.status = "Add provider cancelled".to_string();
+                return Self::build_models_picklist(app).await;
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return InputMode::Exit;
+            }
+            KeyCode::Up => {
+                picker.store_input(app);
+                picker.move_up();
+                picker.load_input(app);
+            }
+            KeyCode::Down => {
+                picker.store_input(app);
+                picker.move_down();
+                picker.load_input(app);
+            }
+            KeyCode::Enter => {
+                picker.store_input(app);
+
+                let mut name = String::new();
+                let mut url = String::new();
+                let mut kind = String::new();
+                let mut provider_key = String::new();
+
+                for row in &picker.rows {
+                    match row {
+                        ProviderInfoRow::Name(v) => name = v.clone(),
+                        ProviderInfoRow::Url(v) => url = v.clone(),
+                        ProviderInfoRow::Kind(v) => kind = v.clone(),
+                        ProviderInfoRow::Key(v) => provider_key = v.clone(),
+                    }
+                }
+
+                let provider = ProviderConfig {
+                    name: name.trim().to_string(),
+                    url: url.trim().to_string(),
+                    kind: kind.trim().to_string(),
+                    key: provider_key.trim().to_string(),
+                };
+
+                if let Err(err) = app.config.validate_provider_config(&provider) {
+                    app.status = format!("Invalid provider: {}", err);
+                    return InputMode::AddProvider { picker };
+                }
+
+                app.status = "Validating provider...".to_string();
+                match Models::list_models(&provider).await {
+                    Ok(_) => match app.config.add_provider(provider) {
+                        Ok(()) => match Models::reload(&app.config).await {
+                            Ok(reloaded_models) => {
+                                let recent_models = Models::load_recent().unwrap_or_default();
+                                let rows = model_picker_rows("", &reloaded_models, &recent_models);
+                                let filtered = Input::filter_model_rows("", &rows);
+                                Input::clear_input(app);
+                                app.status = format!(
+                                    "Added provider; loaded {} models",
+                                    reloaded_models.len()
+                                );
+                                return InputMode::Models {
+                                    picker: PickList::new(rows, filtered),
+                                };
+                            }
+                            Err(err) => {
+                                app.status =
+                                    format!("Added provider, but failed to reload models: {}", err);
+                                Input::clear_input(app);
+                                return InputMode::PromptInput;
+                            }
+                        },
+                        Err(err) => {
+                            app.status = format!("Error adding provider: {}", err);
+                        }
+                    },
+                    Err(err) => {
+                        app.status = format!("Provider validation failed: {}", err);
+                    }
+                }
+            }
+            _ => {
+                Input::handle_input_cursor(app, key);
+            }
+        }
+
+        InputMode::AddProvider { picker }
+    }
+
+    async fn build_models_picklist(app: &mut TuiApp) -> InputMode {
+        match Models::list(&app.config).await {
+            Ok(models) => {
+                let recent_models = Models::load_recent().unwrap_or_default();
+                let rows = model_picker_rows("", &models, &recent_models);
+                let filtered = Input::filter_model_rows("", &rows);
+                app.status = format!("Loaded {} models", models.len());
+                InputMode::Models {
+                    picker: PickList::new(rows, filtered),
+                }
+            }
+            Err(err) => {
+                app.status = format!("Error loading models: {}", err);
+                InputMode::PromptInput
+            }
+        }
     }
 
     pub fn filtered_model_indices(input: &str, rows: &[ModelPickerRow]) -> Vec<usize> {

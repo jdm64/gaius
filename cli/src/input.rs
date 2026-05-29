@@ -16,7 +16,6 @@
 use crate::{
     agents::AgentDefinition,
     commands::{Command, Commands, input_changed_key},
-    config::Config,
     harness_actor::HarnessActorHandle,
     models::ModelPickerRow,
     session::Session,
@@ -122,6 +121,9 @@ pub enum InputMode {
     Models {
         picker: PickList<ModelPickerRow>,
     },
+    AddProvider {
+        picker: PickList<ProviderInfoRow>,
+    },
     Agents {
         picker: PickList<AgentDefinition>,
     },
@@ -181,7 +183,6 @@ impl Input {
         app: &mut TuiApp,
         key: KeyEvent,
         actor: &HarnessActorHandle,
-        config: &Config,
     ) -> Result<InputMode, Box<dyn Error>> {
         Self::handle_input_cursor(app, key);
         match key.code {
@@ -250,7 +251,7 @@ impl Input {
                 }
 
                 if let Some(command) = prompt.trim().strip_prefix('/') {
-                    return Ok(Commands::execute_command(app, actor, config, command).await);
+                    return Ok(Commands::execute_command(app, actor, command).await);
                 }
 
                 app.queue_prompt(prompt, actor).await?;
@@ -551,6 +552,62 @@ fn wrap_selection(i: i32, n: usize) -> usize {
         ((i % m + m) % m) as usize
     } else {
         0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderInfoRow {
+    Name(String),
+    Url(String),
+    Kind(String),
+    Key(String),
+}
+
+impl ProviderInfoRow {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Name(_) => "Name",
+            Self::Url(_) => "URL",
+            Self::Kind(_) => "Kind",
+            Self::Key(_) => "Key",
+        }
+    }
+
+    pub fn value(&self) -> &str {
+        match self {
+            Self::Name(v) | Self::Url(v) | Self::Kind(v) | Self::Key(v) => v,
+        }
+    }
+
+    pub fn set_value(&mut self, new_value: String) {
+        match self {
+            Self::Name(v) => *v = new_value,
+            Self::Url(v) => *v = new_value,
+            Self::Kind(v) => *v = new_value,
+            Self::Key(v) => *v = new_value,
+        }
+    }
+
+    pub fn masked_value(&self) -> String {
+        match self {
+            Self::Key(v) if !v.is_empty() => "*".repeat(v.len()),
+            _ => self.value().to_string(),
+        }
+    }
+}
+
+impl PickList<ProviderInfoRow> {
+    pub fn store_input(&mut self, app: &TuiApp) {
+        if let Some(row) = self.selected_row_mut() {
+            row.set_value(app.input.clone());
+        }
+    }
+
+    pub fn load_input(&mut self, app: &mut TuiApp) {
+        if let Some(row) = self.selected_row() {
+            app.input = row.value().to_string();
+            app.input_cursor = app.input.len();
+        }
     }
 }
 

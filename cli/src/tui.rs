@@ -81,6 +81,7 @@ impl Drop for TerminalGuard {
 }
 
 pub struct TuiApp {
+    pub config: Config,
     pub model: String,
     pub agent_name: String,
     pub agents: Agents,
@@ -105,16 +106,18 @@ pub struct TuiApp {
 
 impl Default for TuiApp {
     fn default() -> Self {
-        Self::new()
+        Self::new(Config::default())
     }
 }
 
 impl TuiApp {
-    pub fn new() -> Self {
+    pub fn new(config: Config) -> Self {
+        let agents = config.agents().clone();
         Self {
+            config,
             model: String::new(),
             agent_name: String::new(),
-            agents: Agents::default(),
+            agents,
             input: String::new(),
             input_cursor: 0,
             history_scroll: 0,
@@ -138,9 +141,8 @@ impl TuiApp {
     pub async fn run(
         &mut self,
         harness: Harness,
-        config: &Config,
     ) -> Result<HarnessSnapshot, Box<dyn Error>> {
-        self.agents = config.agents().clone();
+        self.agents = self.config.agents().clone();
         self.load_history(&harness);
         if let Err(e) = self.load_prompt_history() {
             eprintln!("Failed to load prompt history: {}", e);
@@ -159,7 +161,7 @@ impl TuiApp {
                     let Some(event) = event else {
                         break;
                     };
-                    self.handle_terminal_event(event?, &actor, config).await?;
+                    self.handle_terminal_event(event?, &actor).await?;
                 }
                 actor_event = actor.rx.recv() => {
                     let Some(actor_event) = actor_event else {
@@ -192,7 +194,6 @@ impl TuiApp {
         &mut self,
         event: Event,
         actor: &HarnessActorHandle,
-        config: &Config,
     ) -> Result<(), Box<dyn Error>> {
         let key = match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => key,
@@ -223,7 +224,7 @@ impl TuiApp {
         if matches!(self.mode, InputMode::Question { .. }) {
             self.handle_question_key(key);
         } else {
-            Commands::handle_mode(self, key, actor, config).await?;
+            Commands::handle_mode(self, key, actor).await?;
         }
 
         Ok(())
