@@ -320,10 +320,16 @@ impl ToolEngine {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                ToolResult::Text(format!(
-                    "Exit status: {}\nstdout:\n{}\nstderr:\n{}",
+                let result = format!(
+                    "{}\nstdout:\n{}\nstderr:\n{}",
                     output.status, stdout, stderr
-                ))
+                );
+
+                if output.status.success() {
+                    ToolResult::Text(result)
+                } else {
+                    ToolResult::Error(result)
+                }
             }
             Err(e) => ToolResult::Error(format!("Error executing command: {}", e)),
         }
