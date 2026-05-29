@@ -146,7 +146,7 @@ fn model_picker_rows_put_recent_models_first() {
         rows,
         vec![
             ModelPickerRow::Header("Recent".to_string()),
-            ModelPickerRow::Model(model("provider", "model-b")),
+            ModelPickerRow::RecentModel(model("provider", "model-b")),
             ModelPickerRow::Separator,
             ModelPickerRow::Model(model("provider", "model-a")),
             ModelPickerRow::Model(model("provider", "model-c")),
@@ -165,7 +165,7 @@ fn model_picker_rows_include_stale_recent_models() {
         rows,
         vec![
             ModelPickerRow::Header("Recent".to_string()),
-            ModelPickerRow::Model(model("provider", "stale-model")),
+            ModelPickerRow::RecentModel(model("provider", "stale-model")),
             ModelPickerRow::Separator,
             ModelPickerRow::Model(model("provider", "model-a")),
         ]

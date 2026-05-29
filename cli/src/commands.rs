@@ -431,6 +431,26 @@ impl Commands {
                     }
                 }
             }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let Some(ModelPickerRow::RecentModel(model)) = picker.selected_row().cloned()
+                else {
+                    app.status = "Can only delete recent models".to_string();
+                    return InputMode::Models { picker };
+                };
+                match Models::forget_recent_model(&model) {
+                    Ok(updated_recent) => {
+                        if let Ok(models) = Models::list(config).await {
+                            let rows = model_picker_rows(&app.input, &models, &updated_recent);
+                            let filtered = Input::filter_model_rows(&app.input, &rows);
+                            picker.replace_rows(rows, filtered);
+                        }
+                        app.status = format!("Removed from recent models: {}", model.id);
+                    }
+                    Err(err) => {
+                        app.status = format!("Error removing recent model: {}", err);
+                    }
+                }
+            }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.status = "Reloading models...".to_string();
                 match Models::reload(config).await {

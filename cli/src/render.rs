@@ -155,16 +155,16 @@ impl Render {
             &display_rows,
             PickListRenderSpec {
                 title: "Models",
-                max_width: 70,
+                max_width: 80,
                 empty_text: "No matching models",
-                help_text: "  Type: filter | Enter: select | Ctrl+R: reload | Esc: close",
+                help_text: "  Type: filter | Enter: select | Ctrl+R: reload | Ctrl+D delete | Esc: close",
             },
             |row, row_index, selected_row| match row {
                 ModelPickerRow::Header(label) => {
                     ListItem::new(label.as_str()).style(Style::default().fg(Color::Yellow))
                 }
                 ModelPickerRow::Separator => ListItem::new(""),
-                ModelPickerRow::Model(model) => {
+                ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model) => {
                     let item = ListItem::new(model.label());
                     if row_index == selected_row {
                         item.style(Style::default().bg(Color::DarkGray))
@@ -186,7 +186,8 @@ impl Render {
 
         for (index, row) in picker.rows.iter().enumerate() {
             match row {
-                ModelPickerRow::Model(_) if selected.contains(&index) => display_rows.push(index),
+                ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
+                    if selected.contains(&index) => display_rows.push(index),
                 ModelPickerRow::Header(_)
                     if Self::section_has_selected_model(index, picker, &selected) =>
                 {
@@ -199,7 +200,8 @@ impl Render {
                 }
                 ModelPickerRow::Header(_)
                 | ModelPickerRow::Separator
-                | ModelPickerRow::Model(_) => {}
+                | ModelPickerRow::Model(_)
+                | ModelPickerRow::RecentModel(_) => {}
             }
         }
 
@@ -218,7 +220,7 @@ impl Render {
                 !matches!(row, ModelPickerRow::Header(_) | ModelPickerRow::Separator)
             })
             .any(|(offset, row)| {
-                matches!(row, ModelPickerRow::Model(_))
+                matches!(row, ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_))
                     && selected.contains(&(header_index + 1 + offset))
             })
     }
@@ -234,15 +236,20 @@ impl Render {
             .rev()
             .take_while(|(_, row)| !matches!(row, ModelPickerRow::Separator))
             .any(|(index, row)| {
-                matches!(row, ModelPickerRow::Model(_)) && selected.contains(&index)
+                matches!(
+                    row,
+                    ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
+                ) && selected.contains(&index)
             });
         let has_after =
             picker.rows[separator_index + 1..]
                 .iter()
                 .enumerate()
                 .any(|(offset, row)| {
-                    matches!(row, ModelPickerRow::Model(_))
-                        && selected.contains(&(separator_index + 1 + offset))
+                    matches!(
+                        row,
+                        ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
+                    ) && selected.contains(&(separator_index + 1 + offset))
                 });
 
         has_before && has_after

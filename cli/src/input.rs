@@ -335,14 +335,15 @@ impl Input {
         rows.iter()
             .enumerate()
             .filter_map(|(index, row)| match row {
-                ModelPickerRow::Model(model)
+                ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model)
                     if query.is_empty() || model.id.to_lowercase().contains(&query) =>
                 {
                     Some(index)
                 }
                 ModelPickerRow::Header(_)
                 | ModelPickerRow::Separator
-                | ModelPickerRow::Model(_) => None,
+                | ModelPickerRow::Model(_)
+                | ModelPickerRow::RecentModel(_) => None,
             })
             .collect()
     }

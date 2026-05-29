@@ -68,6 +68,7 @@ pub enum ModelPickerRow {
     Header(String),
     Separator,
     Model(AvailableModel),
+    RecentModel(AvailableModel),
 }
 
 pub struct Models;
@@ -162,6 +163,18 @@ impl Models {
         Ok(recent)
     }
 
+    pub fn forget_recent_model(
+        model: &AvailableModel,
+    ) -> Result<Vec<AvailableModel>, Box<dyn Error>> {
+        let recent = Self::load_recent()?;
+        let recent: Vec<AvailableModel> = recent
+            .into_iter()
+            .filter(|m| m != model)
+            .collect();
+        Self::save_recent(&recent)?;
+        Ok(recent)
+    }
+
     fn recent_cache_path() -> Result<PathBuf, Box<dyn Error>> {
         Ok(cache_dir()?.join("recent_models.json"))
     }
@@ -208,7 +221,7 @@ pub fn model_picker_selectable_models(
     model_picker_rows(input, models, recent)
         .into_iter()
         .filter_map(|row| match row {
-            ModelPickerRow::Model(model) => Some(model),
+            ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model) => Some(model),
             ModelPickerRow::Header(_) | ModelPickerRow::Separator => None,
         })
         .collect()
@@ -228,14 +241,10 @@ pub fn model_picker_rows(
     let mut rows = Vec::new();
     if !recent_models.is_empty() {
         rows.push(ModelPickerRow::Header("Recent".to_string()));
-        rows.extend(recent_models.into_iter().map(ModelPickerRow::Model));
+        rows.extend(recent_models.into_iter().map(ModelPickerRow::RecentModel));
     }
 
-    if rows
-        .iter()
-        .any(|row| matches!(row, ModelPickerRow::Model(_)))
-        && !remaining_models.is_empty()
-    {
+    if !rows.is_empty() && !remaining_models.is_empty() {
         rows.push(ModelPickerRow::Separator);
     }
 
