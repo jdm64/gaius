@@ -38,7 +38,7 @@ struct PickListRenderSpec {
     title: &'static str,
     max_width: u16,
     empty_text: &'static str,
-    help_text: &'static str,
+    help_text: Text<'static>,
 }
 
 pub struct Render {}
@@ -103,7 +103,11 @@ impl Render {
                 title: "Commands",
                 max_width: 50,
                 empty_text: "No matching commands",
-                help_text: "  Type: filter | Enter: select | Esc: close",
+                help_text: Self::help_spec_to_text(vec![
+                    ("Type", "filter"),
+                    ("Enter", "select"),
+                    ("Esc", "close"),
+                ]),
             },
             |cmd, row_index, selected_row| {
                 let content = format!("/{} - {}", cmd.name, cmd.description);
@@ -123,9 +127,14 @@ impl Render {
         renaming: bool,
     ) {
         let help_text = if renaming {
-            "  Enter: save | Esc: cancel"
+            Self::help_spec_to_text(vec![("Enter", "save"), ("Esc", "cancel")])
         } else {
-            "  Enter: load | Ctrl+E: rename | Ctrl+D: delete | Esc: close"
+            Self::help_spec_to_text(vec![
+                ("Enter", "load"),
+                ("Ctrl+E", "rename"),
+                ("Ctrl+D", "delete"),
+                ("Esc", "close"),
+            ])
         };
         Self::draw_pick_list(
             frame,
@@ -159,7 +168,14 @@ impl Render {
                 title: "Models",
                 max_width: 80,
                 empty_text: "No matching models",
-                help_text: "  Type: filter | Enter: select | Ctrl+N: add provider | Ctrl+R: reload | Ctrl+D delete | Esc: close",
+                help_text: Self::help_spec_to_text(vec![
+                    ("Type", "filter"),
+                    ("Enter", "select"),
+                    ("Ctrl+N", "add provider"),
+                    ("Ctrl+R", "reload"),
+                    ("Ctrl+D", "delete"),
+                    ("Esc", "close"),
+                ]),
             },
             |row, row_index, selected_row| match row {
                 ModelPickerRow::Header(label) => {
@@ -218,11 +234,13 @@ impl Render {
                 .title("Add Provider")
                 .padding(Padding::horizontal(1)),
         );
-        let help_para = Paragraph::new(
-            "  Type: edit | Up/Down: field | Enter: validate and save | Esc: cancel",
-        )
-        .block(Block::default().borders(Borders::NONE))
-        .style(Style::default().fg(Color::Yellow));
+        let help_text = Self::help_spec_to_text(vec![
+            ("Type", "edit"),
+            ("Up/Down", "field"),
+            ("Enter", "validate/save"),
+            ("Esc", "cancel"),
+        ]);
+        let help_para = Paragraph::new(help_text).block(Block::default().borders(Borders::NONE));
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -327,7 +345,11 @@ impl Render {
                 title: "Agents",
                 max_width: 60,
                 empty_text: "No matching agents",
-                help_text: "  Type: filter | Enter: select | Esc: close",
+                help_text: Self::help_spec_to_text(vec![
+                    ("Type", "filter"),
+                    ("Enter", "select"),
+                    ("Esc", "close"),
+                ]),
             },
             |agent, row_index, selected_row| {
                 let item = ListItem::new(agent.name.as_str());
@@ -349,7 +371,11 @@ impl Render {
                 title: "Files",
                 max_width: 60,
                 empty_text: "No matching files",
-                help_text: "  Type: filter | Enter: select | Esc: close",
+                help_text: Self::help_spec_to_text(vec![
+                    ("Type", "filter"),
+                    ("Enter", "select"),
+                    ("Esc", "close"),
+                ]),
             },
             |file, row_index, selected_row| {
                 let item = ListItem::new(file.name.clone());
@@ -419,9 +445,8 @@ impl Render {
                 .padding(Padding::horizontal(1)),
         );
 
-        let help_para = Paragraph::new(spec.help_text)
-            .block(Block::default().borders(Borders::NONE))
-            .style(Style::default().fg(Color::Yellow));
+        let help_para =
+            Paragraph::new(spec.help_text).block(Block::default().borders(Borders::NONE));
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -497,10 +522,13 @@ impl Render {
             )
             .style(Style::default().fg(Color::White));
 
-        let help_para =
-            Paragraph::new("  Type: add response | Enter: send | Up/Down: select | Tab: cancel")
-                .block(Block::default().borders(Borders::NONE))
-                .style(Style::default().fg(Color::Yellow));
+        let help_text = Self::help_spec_to_text(vec![
+            ("Type", "add response"),
+            ("Enter", "send"),
+            ("Up/Down", "select"),
+            ("Tab", "cancel"),
+        ]);
+        let help_para = Paragraph::new(help_text).block(Block::default().borders(Borders::NONE));
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -899,6 +927,22 @@ impl Render {
 
     fn user_prompt_style() -> Style {
         Style::default().bg(Color::Rgb(64, 64, 64))
+    }
+
+    fn help_spec_to_text(spec: Vec<(&str, &str)>) -> Text<'static> {
+        let mut spans = Vec::new();
+        let style = Style::default().fg(Color::Yellow);
+        let dim = Style::default().dim();
+        spans.push(Span::raw("  "));
+        for (i, (label, desc)) in spec.into_iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw("  "));
+            }
+            spans.push(Span::styled(label.to_string(), style));
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(desc.to_string(), dim));
+        }
+        Text::from(Line::from(spans))
     }
 
     fn arguments_json_fields(arguments: &Value, fields: &[&str]) -> String {
