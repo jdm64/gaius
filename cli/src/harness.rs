@@ -55,7 +55,7 @@ pub async fn validate_model(
     Ok(())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum HarnessEvent {
     UserPrompt(String),
     AgentMessage(String),
@@ -201,12 +201,19 @@ impl Harness {
     ///
     /// TUI and CLI callers can use this as the single code path for rendering
     /// both live turns and previously-saved history.
-    pub fn replay_history<F>(&self, mut on_event: F)
+    pub fn replay_history<F>(&self, on_event: F)
+    where
+        F: FnMut(HarnessEvent),
+    {
+        Self::replay_messages(&self.history.messages, on_event);
+    }
+
+    pub fn replay_messages<F>(history: &[ChatMessage], mut on_event: F)
     where
         F: FnMut(HarnessEvent),
     {
         let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
-        let mut messages = self.history.messages.iter().peekable();
+        let mut messages = history.iter().peekable();
 
         while let Some(message) = messages.next() {
             match message.role {
@@ -222,8 +229,14 @@ impl Harness {
 
                     // Emit any stored thinking/reasoning content first
                     for part in message.content.parts() {
-                        if let ContentPart::ThoughtSignature(text) = part && !text.is_empty() {
-                            on_event(HarnessEvent::Thinking(text.clone()));
+                        match part {
+                            ContentPart::ThoughtSignature(text)
+                            | ContentPart::ReasoningContent(text)
+                                if !text.is_empty() =>
+                            {
+                                on_event(HarnessEvent::Thinking(text.clone()));
+                            }
+                            _ => {}
                         }
                     }
 
@@ -409,6 +422,7 @@ impl Harness {
         let chat_options = ChatOptions::default()
             .with_capture_content(true)
             .with_capture_tool_calls(true)
+            .with_capture_reasoning_content(true)
             .with_capture_usage(true)
             .with_extra_headers(vec![("X-Stream-Options", "include_usage=true")]);
         let mut response = self
@@ -446,11 +460,6 @@ impl Harness {
         let stream_end = stream_end.ok_or("Chat stream ended without an end event")?;
         let content = stream_end.captured_content.unwrap_or_default();
 
-        // Surface any final captured reasoning from the stream end event
-        if let Some(reasoning_text) = stream_end.captured_reasoning_content && !reasoning_text.is_empty() {
-            on_event(HarnessEvent::Thinking(reasoning_text));
-        }
-
         if !emitted_text {
             let text = content.texts().join("");
             if !text.is_empty() {
@@ -458,9 +467,10 @@ impl Harness {
             }
         }
 
-        self.history
-            .messages
-            .push(ChatMessage::assistant(content.clone()));
+        self.history.messages.push(
+            ChatMessage::assistant(content.clone())
+                .with_reasoning_content(stream_end.captured_reasoning_content.clone()),
+        );
 
         self.context_tokens = stream_end.captured_usage.as_ref().map(|usage| {
             usage.total_tokens.unwrap_or_else(|| {
@@ -523,8 +533,13 @@ impl Harness {
         }
     }
 
-    fn send_tool_call_event<F>(&mut self, tc: &ToolCall, result: String, error: bool, on_event: &mut F)
-    where
+    fn send_tool_call_event<F>(
+        &mut self,
+        tc: &ToolCall,
+        result: String,
+        error: bool,
+        on_event: &mut F,
+    ) where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         self.history
