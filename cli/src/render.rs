@@ -39,8 +39,7 @@ struct PickListRenderSpec {
     max_width: u16,
     empty_text: &'static str,
     help_text: Text<'static>,
-    block_style: Style,
-    list_style: Style,
+    background: Style,
 }
 
 enum QuestionRow {
@@ -49,13 +48,53 @@ enum QuestionRow {
     Option(usize, String),
 }
 
-pub struct Render {}
+struct ColorTheme {
+    header: Color,
+    selected: Color,
+    thinking: Color,
+    user_bar: Color,
+    user_box: Color,
+    inputbox: Color,
+    toolcall: Color,
+    error: Color,
+}
+
+impl Default for ColorTheme {
+    fn default() -> Self {
+        ColorTheme {
+            header: Color::Yellow,
+            selected: Color::Magenta,
+            thinking: Color::LightBlue,
+            user_bar: Color::Magenta,
+            user_box: Color::Rgb(64, 64, 64),
+            inputbox: Color::Rgb(64, 0, 64),
+            toolcall: Color::Cyan,
+            error: Color::Red,
+        }
+    }
+}
+
+pub struct Render {
+    theme: ColorTheme,
+}
+
+impl Default for Render {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Render {
-    pub fn draw(app: &mut TuiApp, frame: &mut Frame<'_>) {
+    pub fn new() -> Self {
+        Render {
+            theme: ColorTheme::default(),
+        }
+    }
+
+    pub fn draw(&self, app: &mut TuiApp, frame: &mut Frame<'_>) {
         let area = frame.area();
         let input_width = area.width - 4;
-        let input_prompt = Self::input_prompt_lines(app.input.clone(), input_width);
+        let input_prompt = self.input_prompt_lines(app.input.clone(), input_width);
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -66,30 +105,30 @@ impl Render {
             .split(area);
 
         frame.render_widget(Clear, area);
-        Self::draw_history(app, frame, chunks[0]);
-        Self::draw_input(app, frame, chunks[1], input_prompt, input_width as usize);
+        self.draw_history(app, frame, chunks[0]);
+        self.draw_input(app, frame, chunks[1], input_prompt, input_width as usize);
 
         match &app.mode {
             InputMode::Command { picker } => {
-                Self::draw_commands(frame, chunks[1], picker);
+                self.draw_commands(frame, chunks[1], picker);
             }
             InputMode::Session { picker } => {
-                Self::draw_sessions(frame, chunks[1], picker, false);
+                self.draw_sessions(frame, chunks[1], picker, false);
             }
             InputMode::SessionRename { picker } => {
-                Self::draw_sessions(frame, chunks[1], picker, true);
+                self.draw_sessions(frame, chunks[1], picker, true);
             }
             InputMode::Models { picker } => {
-                Self::draw_models(frame, chunks[1], picker);
+                self.draw_models(frame, chunks[1], picker);
             }
             InputMode::AddProvider { picker } => {
-                Self::draw_add_provider(frame, chunks[1], picker, app.input.as_str());
+                self.draw_add_provider(frame, chunks[1], picker, app.input.as_str());
             }
             InputMode::Agents { picker } => {
-                Self::draw_agents(frame, chunks[1], picker);
+                self.draw_agents(frame, chunks[1], picker);
             }
             InputMode::Files { picker } => {
-                Self::draw_files(frame, chunks[1], picker);
+                self.draw_files(frame, chunks[1], picker);
             }
             InputMode::PromptInput | InputMode::Exit => {}
             InputMode::Question {
@@ -97,13 +136,13 @@ impl Render {
                 options,
                 selected,
             } => {
-                Self::draw_question(frame, chunks[1], title, options, *selected);
+                self.draw_question(frame, chunks[1], title, options, *selected);
             }
         }
     }
 
-    fn draw_commands(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<Command>) {
-        Self::draw_pick_list(
+    fn draw_commands(&self, frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<Command>) {
+        self.draw_pick_list(
             frame,
             input_area,
             picker,
@@ -111,35 +150,35 @@ impl Render {
                 title: "Commands",
                 max_width: 50,
                 empty_text: "No matching commands",
-                help_text: Self::help_spec_to_text(vec![
+                help_text: self.help_spec_to_text(vec![
                     ("Type", "filter"),
                     ("Enter", "select"),
                     ("Esc", "close"),
                 ]),
-                block_style: Style::default(),
-                list_style: Style::default(),
+                background: Style::default(),
             },
             |cmd, _index| ListItem::new(format!("/{} - {}", cmd.name, cmd.description)),
         );
     }
 
     fn draw_sessions(
+        &self,
         frame: &mut Frame<'_>,
         input_area: Rect,
         picker: &PickList<Session>,
         renaming: bool,
     ) {
         let help_text = if renaming {
-            Self::help_spec_to_text(vec![("Enter", "save"), ("Esc", "cancel")])
+            self.help_spec_to_text(vec![("Enter", "save"), ("Esc", "cancel")])
         } else {
-            Self::help_spec_to_text(vec![
+            self.help_spec_to_text(vec![
                 ("Enter", "load"),
                 ("Ctrl+E", "rename"),
                 ("Ctrl+D", "delete"),
                 ("Esc", "close"),
             ])
         };
-        Self::draw_pick_list(
+        self.draw_pick_list(
             frame,
             input_area,
             picker,
@@ -148,16 +187,21 @@ impl Render {
                 max_width: 50,
                 empty_text: "No sessions",
                 help_text,
-                block_style: Style::default(),
-                list_style: Style::default(),
+                background: Style::default(),
             },
             |session, _index| ListItem::new(session.display_name()),
         );
     }
 
-    fn draw_models(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<ModelPickerRow>) {
+    fn draw_models(
+        &self,
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        picker: &PickList<ModelPickerRow>,
+    ) {
         let display_rows = Self::model_display_rows(picker);
-        Self::draw_indexed_pick_list(
+        let header_color = self.theme.header;
+        self.draw_indexed_pick_list(
             frame,
             input_area,
             picker,
@@ -166,7 +210,7 @@ impl Render {
                 title: "Models",
                 max_width: 80,
                 empty_text: "No matching models",
-                help_text: Self::help_spec_to_text(vec![
+                help_text: self.help_spec_to_text(vec![
                     ("Type", "filter"),
                     ("Enter", "select"),
                     ("Ctrl+N", "add provider"),
@@ -174,12 +218,11 @@ impl Render {
                     ("Ctrl+D", "delete"),
                     ("Esc", "close"),
                 ]),
-                block_style: Style::default(),
-                list_style: Style::default(),
+                background: Style::default(),
             },
             |row, _index| match row {
                 ModelPickerRow::Header(label) => {
-                    ListItem::new(label.as_str()).style(Style::default().fg(Color::Yellow))
+                    ListItem::new(label.as_str()).style(Style::default().fg(header_color))
                 }
                 ModelPickerRow::Separator => ListItem::new(""),
                 ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model) => {
@@ -190,6 +233,7 @@ impl Render {
     }
 
     fn draw_add_provider(
+        &self,
         frame: &mut Frame<'_>,
         input_area: Rect,
         picker: &PickList<ProviderInfoRow>,
@@ -197,7 +241,7 @@ impl Render {
     ) {
         let selected = picker.selected;
         let indices: Vec<usize> = (0..picker.rows.len()).collect();
-        Self::draw_indexed_pick_list(
+        self.draw_indexed_pick_list(
             frame,
             input_area,
             picker,
@@ -206,14 +250,13 @@ impl Render {
                 title: "Add Provider",
                 max_width: 80,
                 empty_text: "",
-                help_text: Self::help_spec_to_text(vec![
+                help_text: self.help_spec_to_text(vec![
                     ("Type", "edit"),
                     ("Up/Down", "field"),
                     ("Enter", "validate/save"),
                     ("Esc", "cancel"),
                 ]),
-                block_style: Style::default(),
-                list_style: Style::default(),
+                background: Style::default(),
             },
             |row, index| {
                 let display_value = if index == selected {
@@ -226,8 +269,13 @@ impl Render {
         );
     }
 
-    fn draw_agents(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<AgentDefinition>) {
-        Self::draw_pick_list(
+    fn draw_agents(
+        &self,
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        picker: &PickList<AgentDefinition>,
+    ) {
+        self.draw_pick_list(
             frame,
             input_area,
             picker,
@@ -235,20 +283,19 @@ impl Render {
                 title: "Agents",
                 max_width: 60,
                 empty_text: "No matching agents",
-                help_text: Self::help_spec_to_text(vec![
+                help_text: self.help_spec_to_text(vec![
                     ("Type", "filter"),
                     ("Enter", "select"),
                     ("Esc", "close"),
                 ]),
-                block_style: Style::default(),
-                list_style: Style::default(),
+                background: Style::default(),
             },
             |agent, _index| ListItem::new(agent.name.as_str()),
         );
     }
 
-    fn draw_files(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<FileEntry>) {
-        Self::draw_pick_list(
+    fn draw_files(&self, frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<FileEntry>) {
+        self.draw_pick_list(
             frame,
             input_area,
             picker,
@@ -256,19 +303,19 @@ impl Render {
                 title: "Files",
                 max_width: 60,
                 empty_text: "No matching files",
-                help_text: Self::help_spec_to_text(vec![
+                help_text: self.help_spec_to_text(vec![
                     ("Type", "filter"),
                     ("Enter", "select"),
                     ("Esc", "close"),
                 ]),
-                block_style: Style::default(),
-                list_style: Style::default(),
+                background: Style::default(),
             },
             |file, _index| ListItem::new(file.name.clone()),
         );
     }
 
     fn draw_question(
+        &self,
         frame: &mut Frame<'_>,
         input_area: Rect,
         title: &str,
@@ -277,7 +324,6 @@ impl Render {
     ) {
         let wrap_width: usize = 70usize.saturating_sub(4).max(1);
 
-        // Build QuestionRow items: word-wrapped title lines, blank separator, then options
         let mut rows: Vec<QuestionRow> = Vec::new();
         let mut line_buf = String::new();
         for word in title.split_whitespace() {
@@ -308,7 +354,7 @@ impl Render {
             filtered: indices,
         };
 
-        Self::draw_indexed_pick_list(
+        self.draw_indexed_pick_list(
             frame,
             input_area,
             &picker,
@@ -317,14 +363,13 @@ impl Render {
                 title: "Question",
                 max_width: 70,
                 empty_text: "",
-                help_text: Self::help_spec_to_text(vec![
+                help_text: self.help_spec_to_text(vec![
                     ("Type", "add response"),
                     ("Enter", "send"),
                     ("Up/Down", "select"),
                     ("Tab", "cancel"),
                 ]),
-                block_style: Style::default().bg(Color::Rgb(90, 0, 0)),
-                list_style: Style::default().fg(Color::White),
+                background: Style::default().bg(self.theme.inputbox),
             },
             |row, _index| match row {
                 QuestionRow::Title(text) => ListItem::new(text.as_str()),
@@ -335,6 +380,7 @@ impl Render {
     }
 
     fn draw_pick_list<'a, T, F>(
+        &self,
         frame: &mut Frame<'_>,
         input_area: Rect,
         picker: &'a PickList<T>,
@@ -343,10 +389,11 @@ impl Render {
     ) where
         F: Fn(&'a T, usize) -> ListItem<'a>,
     {
-        Self::draw_indexed_pick_list(frame, input_area, picker, &picker.filtered, spec, row_item);
+        self.draw_indexed_pick_list(frame, input_area, picker, &picker.filtered, spec, row_item);
     }
 
     fn draw_indexed_pick_list<'a, T, F>(
+        &self,
         frame: &mut Frame<'_>,
         input_area: Rect,
         picker: &'a PickList<T>,
@@ -384,22 +431,20 @@ impl Render {
                     let row_index = *row_index;
                     let mut item = row_item(&picker.rows[row_index], row_index);
                     if row_index == selected_row {
-                        item = item.style(Style::default().bg(Color::DarkGray));
+                        item = item.style(Style::default().bg(self.theme.selected));
                     }
                     item
                 })
                 .collect()
         };
 
-        let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(spec.title)
-                    .padding(Padding::horizontal(1))
-                    .style(spec.block_style),
-            )
-            .style(spec.list_style);
+        let list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(spec.title)
+                .padding(Padding::horizontal(1))
+                .style(spec.background),
+        );
 
         let help_para =
             Paragraph::new(spec.help_text).block(Block::default().borders(Borders::NONE));
@@ -417,18 +462,18 @@ impl Render {
         frame.render_widget(help_para, chunks[1]);
     }
 
-    fn draw_history(app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
+    fn draw_history(&self, app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
         let text_width = area.width.saturating_sub(4).max(1);
         let text_height = area.height.saturating_sub(2).max(1);
         app.history_page_size = text_height;
 
-        Self::sync_history_lines(app);
+        self.sync_history_lines(app);
 
         let wrapped_height = wrapped_line_count(&app.history_lines, text_width);
         let max_scroll = wrapped_height.saturating_sub(text_height);
         let clamped_scroll = app.history_scroll.min(max_scroll);
         let start = max_scroll.saturating_sub(clamped_scroll);
-        let lines = Self::visible_history_lines(
+        let lines = self.visible_history_lines(
             &app.history_lines,
             text_width,
             start as usize,
@@ -457,17 +502,17 @@ impl Render {
         app.history_scroll = clamped_scroll;
     }
 
-    pub fn render_message(msg: &TuiMessage, show_thinking: bool) -> Vec<Line<'static>> {
+    pub fn render_message(&self, msg: &TuiMessage, show_thinking: bool) -> Vec<Line<'static>> {
         match msg {
             TuiMessage::Thinking(text) => {
                 if !show_thinking {
                     return vec![
                         Line::from(format!("Thinking... {}", text.len()))
-                            .style(Style::default().fg(Color::LightBlue)),
+                            .style(Style::default().fg(self.theme.thinking)),
                     ];
                 }
                 let style = Style::default()
-                    .fg(Color::LightBlue)
+                    .fg(self.theme.thinking)
                     .add_modifier(Modifier::ITALIC)
                     .add_modifier(Modifier::DIM);
                 let options = Options::default();
@@ -494,14 +539,14 @@ impl Render {
                     .collect()
             }
             TuiMessage::UserPrompt(text) => {
-                let style = Self::user_prompt_style();
+                let style = self.user_prompt_style();
                 vec![
-                    Self::user_prompt_bar_line(),
+                    self.user_prompt_bar_line(),
                     Line::from(vec![
-                        Span::styled("\u{2503} ", style.fg(Color::Magenta)),
+                        Span::styled("\u{2503} ", style.fg(self.theme.user_bar)),
                         Span::raw(text.clone()).style(style.italic().bold()),
                     ]),
-                    Self::user_prompt_bar_line(),
+                    self.user_prompt_bar_line(),
                 ]
             }
             TuiMessage::ToolCall {
@@ -510,7 +555,7 @@ impl Render {
                 result,
                 error,
             } => {
-                let style = Style::default().fg(Color::Cyan);
+                let style = Style::default().fg(self.theme.toolcall);
                 let json_args = from_str::<Value>(arguments).unwrap_or_default();
                 let display = match name.as_str() {
                     "read_file" => Self::arguments_json_fields(
@@ -536,7 +581,7 @@ impl Render {
                 ];
                 let mut ret = vec![Line::from(spans)];
                 if *error {
-                    let e_style = Style::default().fg(Color::Red);
+                    let e_style = Style::default().fg(self.theme.error);
                     let error_lines: Vec<&str> = result.split('\n').collect();
                     for i in error_lines {
                         if !i.is_empty() {
@@ -551,7 +596,9 @@ impl Render {
                 ret
             }
             TuiMessage::SystemMessage(text) => {
-                let style = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
+                let style = Style::default()
+                    .fg(self.theme.error)
+                    .add_modifier(Modifier::BOLD);
                 vec![Line::from(text.clone()).style(style)]
             }
         }
@@ -610,6 +657,7 @@ impl Render {
     }
 
     fn draw_input(
+        &self,
         app: &TuiApp,
         frame: &mut Frame<'_>,
         area: Rect,
@@ -621,7 +669,7 @@ impl Render {
                 Block::default()
                     .title(format!(" {} ", app.status))
                     .borders(Borders::ALL)
-                    .style(Style::default().bg(Color::Rgb(64, 0, 64)))
+                    .style(Style::default().bg(self.theme.inputbox))
                     .padding(Padding::horizontal(1)),
             )
             .wrap(Wrap { trim: false });
@@ -719,12 +767,13 @@ impl Render {
         has_before && has_after
     }
 
-    fn sync_history_lines(app: &mut TuiApp) {
+    fn sync_history_lines(&self, app: &mut TuiApp) {
         if app.rendered_history_generation == app.history_generation {
             return;
         }
 
-        app.history_lines = Self::history_lines(app)
+        app.history_lines = self
+            .history_lines(app)
             .into_iter()
             .map(Self::owned_line)
             .collect();
@@ -743,7 +792,7 @@ impl Render {
         owned
     }
 
-    fn history_lines(app: &TuiApp) -> Vec<Line<'_>> {
+    fn history_lines(&self, app: &TuiApp) -> Vec<Line<'_>> {
         let mut lines = Vec::new();
         lines.push(Line::from(""));
         for (index, message) in app.messages.iter().enumerate() {
@@ -754,13 +803,14 @@ impl Render {
                 }
             }
 
-            lines.extend(Self::render_message(message, app.show_thinking));
+            lines.extend(self.render_message(message, app.show_thinking));
         }
 
         lines
     }
 
     pub fn visible_history_lines(
+        &self,
         lines: &[Line<'static>],
         width: u16,
         start: usize,
@@ -774,7 +824,7 @@ impl Render {
             if Self::is_user_prompt_line(line) {
                 let content_line = Self::strip_user_prompt_prefix(line);
                 for wrapped in Self::wrap_line(&content_line, width - 3) {
-                    let line = Self::format_user_prompt_line(wrapped, width);
+                    let line = self.format_user_prompt_line(wrapped, width);
                     if Self::push_visible_line(&mut visible, line, &mut wrapped_index, start, end) {
                         return visible;
                     }
@@ -815,15 +865,15 @@ impl Render {
         result
     }
 
-    fn format_user_prompt_line(mut line: Line<'static>, width: u16) -> Line<'static> {
-        let bar_style = Self::user_prompt_style().fg(Color::Magenta);
+    fn format_user_prompt_line(&self, mut line: Line<'static>, width: u16) -> Line<'static> {
+        let bar_style = self.user_prompt_style().fg(self.theme.user_bar);
         line.spans.insert(0, Span::styled("\u{2503} ", bar_style));
         let width = width.max(1) as usize;
         let used = line.width();
         if used < width {
             line.spans.push(Span::styled(
                 " ".repeat(width - used),
-                Self::user_prompt_style(),
+                self.user_prompt_style(),
             ));
         }
         line
@@ -897,9 +947,12 @@ impl Render {
         line
     }
 
-    fn user_prompt_bar_line() -> Line<'static> {
-        let style = Self::user_prompt_style();
-        Line::from(vec![Span::styled("\u{2503} ", style.fg(Color::Magenta))])
+    fn user_prompt_bar_line(&self) -> Line<'static> {
+        let style = self.user_prompt_style();
+        Line::from(vec![Span::styled(
+            "\u{2503} ",
+            style.fg(self.theme.user_bar),
+        )])
     }
 
     fn is_user_prompt_line(line: &Line<'_>) -> bool {
@@ -909,13 +962,13 @@ impl Render {
             .unwrap_or(false)
     }
 
-    fn user_prompt_style() -> Style {
-        Style::default().bg(Color::Rgb(64, 64, 64))
+    fn user_prompt_style(&self) -> Style {
+        Style::default().bg(self.theme.user_box)
     }
 
-    fn help_spec_to_text(spec: Vec<(&str, &str)>) -> Text<'static> {
+    fn help_spec_to_text(&self, spec: Vec<(&str, &str)>) -> Text<'static> {
         let mut spans = Vec::new();
-        let style = Style::default().fg(Color::Yellow);
+        let style = Style::default().fg(self.theme.header);
         let dim = Style::default().dim();
         spans.push(Span::raw("  "));
         for (i, (label, desc)) in spec.into_iter().enumerate() {
@@ -945,9 +998,9 @@ impl Render {
             .join(" ")
     }
 
-    fn input_prompt_lines(input: String, width: u16) -> Vec<Line<'static>> {
+    fn input_prompt_lines(&self, input: String, width: u16) -> Vec<Line<'static>> {
         let line = Line::from(vec![
-            Span::styled(INPUT_PROMPT_PREFIX, Style::default().fg(Color::Green)),
+            Span::raw(INPUT_PROMPT_PREFIX),
             Span::raw(input),
             Span::raw(" "),
         ]);

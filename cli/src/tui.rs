@@ -153,7 +153,8 @@ impl TuiApp {
 
         let mut guard = TerminalGuard::enter()?;
         let mut terminal_events = EventStream::new();
-        guard.terminal.draw(|frame| Render::draw(self, frame))?;
+        let render = Render::new();
+        guard.terminal.draw(|frame| render.draw(self, frame))?;
 
         loop {
             tokio::select! {
@@ -177,7 +178,7 @@ impl TuiApp {
                 break;
             }
 
-            guard.terminal.draw(|frame| Render::draw(self, frame))?;
+            guard.terminal.draw(|frame| render.draw(self, frame))?;
         }
 
         if self.actor_busy {

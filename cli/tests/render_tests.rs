@@ -10,9 +10,10 @@ use ratatui::{
 
 #[test]
 fn markdown_heading_has_bold_style() {
+    let render = Render::new();
     let md = "# Heading";
     let msg = TuiMessage::AgentMessage(md.to_string());
-    let lines = Render::render_message(&msg, false);
+    let lines = render.render_message(&msg, false);
     assert!(!lines.is_empty());
     // The heading style should be applied to the Line's style, not the span.
     let line = &lines[0];
@@ -33,9 +34,10 @@ fn markdown_heading_has_bold_style() {
 
 #[test]
 fn markdown_list_has_style() {
+    let render = Render::new();
     let md = "- item1\n- item2";
     let msg = TuiMessage::AgentMessage(md.to_string());
-    let lines = Render::render_message(&msg, false);
+    let lines = render.render_message(&msg, false);
     assert!(!lines.is_empty());
     // List items should have a style (maybe a marker).
     // Check lines contain the items; style might be default but marker could have style?
@@ -50,6 +52,7 @@ fn markdown_list_has_style() {
 
 #[test]
 fn visible_history_lines_returns_bottom_window() {
+    let render = Render::new();
     let raw = vec![
         Line::from("one"),
         Line::from("two"),
@@ -70,13 +73,14 @@ fn visible_history_lines_returns_bottom_window() {
             owned
         })
         .collect();
-    let visible = Render::visible_history_lines(&lines, 20, 2, 2);
+    let visible = render.visible_history_lines(&lines, 20, 2, 2);
 
     assert_eq!(line_texts(&visible), vec!["three", "four"]);
 }
 
 #[test]
 fn visible_history_lines_slices_wrapped_lines() {
+    let render = Render::new();
     let raw = vec![Line::from("abcdef"), Line::from("gh")];
     let lines: Vec<Line<'static>> = raw
         .into_iter()
@@ -92,23 +96,25 @@ fn visible_history_lines_slices_wrapped_lines() {
             owned
         })
         .collect();
-    let visible = Render::visible_history_lines(&lines, 2, 1, 3);
+    let visible = render.visible_history_lines(&lines, 2, 1, 3);
 
     assert_eq!(line_texts(&visible), vec!["cd", "ef", "gh"]);
 }
 
 #[test]
 fn visible_history_lines_handles_empty_history() {
-    let visible = Render::visible_history_lines(&[], 20, 0, 5);
+    let render = Render::new();
+    let visible = render.visible_history_lines(&[], 20, 0, 5);
 
     assert!(visible.is_empty());
 }
 
 #[test]
 fn visible_history_lines_pads_user_prompts_to_width() {
-    let lines = Render::render_message(&TuiMessage::UserPrompt("hello".to_string()), false);
+    let render = Render::new();
+    let lines = render.render_message(&TuiMessage::UserPrompt("hello".to_string()), false);
 
-    let visible = Render::visible_history_lines(&lines, 10, 0, 3);
+    let visible = render.visible_history_lines(&lines, 10, 0, 3);
 
     assert_eq!(visible.len(), 3);
     assert_eq!(visible[0].width(), 10);
@@ -121,14 +127,13 @@ fn visible_history_lines_pads_user_prompts_to_width() {
 
 #[test]
 fn draw_input_expands_height_for_wrapped_prompt() {
+    let render = Render::new();
     let mut app = TuiApp::new(Config::new());
     app.input = "abcdefghijklmnopq".to_string();
     app.input_cursor = app.input.chars().count();
     let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
 
-    terminal
-        .draw(|frame| Render::draw(&mut app, frame))
-        .unwrap();
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
 
     assert_eq!(
         terminal.get_cursor_position().unwrap(),
@@ -138,14 +143,13 @@ fn draw_input_expands_height_for_wrapped_prompt() {
 
 #[test]
 fn draw_input_places_cursor_on_next_wrapped_line_at_boundary() {
+    let render = Render::new();
     let mut app = TuiApp::new(Config::new());
     app.input = "abcdefghijklmno".to_string();
     app.input_cursor = 14;
     let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
 
-    terminal
-        .draw(|frame| Render::draw(&mut app, frame))
-        .unwrap();
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
 
     assert_eq!(
         terminal.get_cursor_position().unwrap(),

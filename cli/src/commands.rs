@@ -479,8 +479,9 @@ impl Commands {
         match key.code {
             KeyCode::Esc => {
                 Input::clear_input(app);
+                let result = Self::build_models_picklist(app).await;
                 app.status = "Add provider cancelled".to_string();
-                return Self::build_models_picklist(app).await;
+                return result;
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return InputMode::Exit;
