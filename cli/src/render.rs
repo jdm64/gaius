@@ -39,6 +39,14 @@ struct PickListRenderSpec {
     max_width: u16,
     empty_text: &'static str,
     help_text: Text<'static>,
+    block_style: Style,
+    list_style: Style,
+}
+
+enum QuestionRow {
+    Title(String),
+    Blank,
+    Option(usize, String),
 }
 
 pub struct Render {}
@@ -108,15 +116,10 @@ impl Render {
                     ("Enter", "select"),
                     ("Esc", "close"),
                 ]),
+                block_style: Style::default(),
+                list_style: Style::default(),
             },
-            |cmd, row_index, selected_row| {
-                let content = format!("/{} - {}", cmd.name, cmd.description);
-                if row_index == selected_row {
-                    ListItem::new(content).style(Style::default().bg(Color::DarkGray))
-                } else {
-                    ListItem::new(content)
-                }
-            },
+            |cmd, _index| ListItem::new(format!("/{} - {}", cmd.name, cmd.description)),
         );
     }
 
@@ -145,15 +148,10 @@ impl Render {
                 max_width: 50,
                 empty_text: "No sessions",
                 help_text,
+                block_style: Style::default(),
+                list_style: Style::default(),
             },
-            |session, row_index, selected_row| {
-                let item = ListItem::new(session.display_name());
-                if row_index == selected_row {
-                    item.style(Style::default().bg(Color::DarkGray))
-                } else {
-                    item
-                }
-            },
+            |session, _index| ListItem::new(session.display_name()),
         );
     }
 
@@ -176,19 +174,16 @@ impl Render {
                     ("Ctrl+D", "delete"),
                     ("Esc", "close"),
                 ]),
+                block_style: Style::default(),
+                list_style: Style::default(),
             },
-            |row, row_index, selected_row| match row {
+            |row, _index| match row {
                 ModelPickerRow::Header(label) => {
                     ListItem::new(label.as_str()).style(Style::default().fg(Color::Yellow))
                 }
                 ModelPickerRow::Separator => ListItem::new(""),
                 ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model) => {
-                    let item = ListItem::new(model.label());
-                    if row_index == selected_row {
-                        item.style(Style::default().bg(Color::DarkGray))
-                    } else {
-                        item
-                    }
+                    ListItem::new(model.label())
                 }
             },
         );
@@ -201,55 +196,443 @@ impl Render {
         active_input: &str,
     ) {
         let selected = picker.selected;
-        let items: Vec<ListItem> = picker
-            .rows
-            .iter()
-            .enumerate()
-            .map(|(index, row)| {
+        let indices: Vec<usize> = (0..picker.rows.len()).collect();
+        Self::draw_indexed_pick_list(
+            frame,
+            input_area,
+            picker,
+            &indices,
+            PickListRenderSpec {
+                title: "Add Provider",
+                max_width: 80,
+                empty_text: "",
+                help_text: Self::help_spec_to_text(vec![
+                    ("Type", "edit"),
+                    ("Up/Down", "field"),
+                    ("Enter", "validate/save"),
+                    ("Esc", "cancel"),
+                ]),
+                block_style: Style::default(),
+                list_style: Style::default(),
+            },
+            |row, index| {
                 let display_value = if index == selected {
                     active_input.to_string()
                 } else {
                     row.masked_value()
                 };
-                let item = ListItem::new(format!("{}: {}", row.label(), display_value));
-                if index == selected {
-                    item.style(Style::default().bg(Color::DarkGray))
-                } else {
-                    item
-                }
-            })
-            .collect();
+                ListItem::new(format!("{}: {}", row.label(), display_value))
+            },
+        );
+    }
 
-        let count = picker.rows.len() as u16;
+    fn draw_agents(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<AgentDefinition>) {
+        Self::draw_pick_list(
+            frame,
+            input_area,
+            picker,
+            PickListRenderSpec {
+                title: "Agents",
+                max_width: 60,
+                empty_text: "No matching agents",
+                help_text: Self::help_spec_to_text(vec![
+                    ("Type", "filter"),
+                    ("Enter", "select"),
+                    ("Esc", "close"),
+                ]),
+                block_style: Style::default(),
+                list_style: Style::default(),
+            },
+            |agent, _index| ListItem::new(agent.name.as_str()),
+        );
+    }
+
+    fn draw_files(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<FileEntry>) {
+        Self::draw_pick_list(
+            frame,
+            input_area,
+            picker,
+            PickListRenderSpec {
+                title: "Files",
+                max_width: 60,
+                empty_text: "No matching files",
+                help_text: Self::help_spec_to_text(vec![
+                    ("Type", "filter"),
+                    ("Enter", "select"),
+                    ("Esc", "close"),
+                ]),
+                block_style: Style::default(),
+                list_style: Style::default(),
+            },
+            |file, _index| ListItem::new(file.name.clone()),
+        );
+    }
+
+    fn draw_question(
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        title: &str,
+        options: &[String],
+        selected: usize,
+    ) {
+        let wrap_width: usize = 70usize.saturating_sub(4).max(1);
+
+        // Build QuestionRow items: word-wrapped title lines, blank separator, then options
+        let mut rows: Vec<QuestionRow> = Vec::new();
+        let mut line_buf = String::new();
+        for word in title.split_whitespace() {
+            if line_buf.is_empty() {
+                line_buf.push_str(word);
+            } else if line_buf.len() + 1 + word.len() <= wrap_width {
+                line_buf.push(' ');
+                line_buf.push_str(word);
+            } else {
+                rows.push(QuestionRow::Title(std::mem::take(&mut line_buf)));
+                line_buf = word.to_string();
+            }
+        }
+        if !line_buf.is_empty() {
+            rows.push(QuestionRow::Title(line_buf));
+        }
+        rows.push(QuestionRow::Blank);
+        for (i, opt) in options.iter().enumerate() {
+            rows.push(QuestionRow::Option(i, opt.clone()));
+        }
+
+        let title_len = rows.len() - options.len();
+
+        let indices: Vec<usize> = (0..rows.len()).collect();
+        let picker = PickList {
+            selected: title_len + selected,
+            rows,
+            filtered: indices,
+        };
+
+        Self::draw_indexed_pick_list(
+            frame,
+            input_area,
+            &picker,
+            &picker.filtered,
+            PickListRenderSpec {
+                title: "Question",
+                max_width: 70,
+                empty_text: "",
+                help_text: Self::help_spec_to_text(vec![
+                    ("Type", "add response"),
+                    ("Enter", "send"),
+                    ("Up/Down", "select"),
+                    ("Tab", "cancel"),
+                ]),
+                block_style: Style::default().bg(Color::Rgb(90, 0, 0)),
+                list_style: Style::default().fg(Color::White),
+            },
+            |row, _index| match row {
+                QuestionRow::Title(text) => ListItem::new(text.as_str()),
+                QuestionRow::Blank => ListItem::new(""),
+                QuestionRow::Option(i, text) => ListItem::new(format!("{}) {}", i + 1, text)),
+            },
+        );
+    }
+
+    fn draw_pick_list<'a, T, F>(
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        picker: &'a PickList<T>,
+        spec: PickListRenderSpec,
+        row_item: F,
+    ) where
+        F: Fn(&'a T, usize) -> ListItem<'a>,
+    {
+        Self::draw_indexed_pick_list(frame, input_area, picker, &picker.filtered, spec, row_item);
+    }
+
+    fn draw_indexed_pick_list<'a, T, F>(
+        frame: &mut Frame<'_>,
+        input_area: Rect,
+        picker: &'a PickList<T>,
+        display_rows: &[usize],
+        spec: PickListRenderSpec,
+        row_item: F,
+    ) where
+        F: Fn(&'a T, usize) -> ListItem<'a>,
+    {
+        let row_count = display_rows.len().max(1);
+        let visible_rows = (row_count as u16).clamp(1, 10);
         let help_height = 1u16;
-        let height = count + 2 + help_height;
-        let width = 80.min(input_area.width.saturating_sub(4).max(1));
+        let width = spec
+            .max_width
+            .min(input_area.width.saturating_sub(4).max(1));
+        let height = visible_rows + 2 + help_height;
         let x = input_area.x + 2;
-        let y = input_area.y.saturating_sub(height);
+        let y = input_area.y - height;
         let rect = Rect::new(x, y, width, height);
 
-        let list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Add Provider")
-                .padding(Padding::horizontal(1)),
-        );
-        let help_text = Self::help_spec_to_text(vec![
-            ("Type", "edit"),
-            ("Up/Down", "field"),
-            ("Enter", "validate/save"),
-            ("Esc", "cancel"),
-        ]);
-        let help_para = Paragraph::new(help_text).block(Block::default().borders(Borders::NONE));
+        let selected_row = picker.selected_row_index().unwrap_or(0);
+        let items: Vec<ListItem> = if display_rows.is_empty() {
+            vec![ListItem::new(spec.empty_text)]
+        } else {
+            let selected_display = display_rows
+                .iter()
+                .position(|row_index| *row_index == selected_row)
+                .unwrap_or(0);
+            let visible = display_rows.len().clamp(1, 10);
+            let start = selected_display.saturating_add(1).saturating_sub(visible);
+            let end = (start + visible).min(display_rows.len());
+            display_rows[start..end]
+                .iter()
+                .map(|row_index| {
+                    let row_index = *row_index;
+                    let mut item = row_item(&picker.rows[row_index], row_index);
+                    if row_index == selected_row {
+                        item = item.style(Style::default().bg(Color::DarkGray));
+                    }
+                    item
+                })
+                .collect()
+        };
+
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(spec.title)
+                    .padding(Padding::horizontal(1))
+                    .style(spec.block_style),
+            )
+            .style(spec.list_style);
+
+        let help_para =
+            Paragraph::new(spec.help_text).block(Block::default().borders(Borders::NONE));
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(count + 2), Constraint::Length(help_height)])
+            .constraints([
+                Constraint::Min(visible_rows + 2),
+                Constraint::Length(help_height),
+            ])
             .split(rect);
 
         frame.render_widget(Clear, rect);
         frame.render_widget(list, chunks[0]);
         frame.render_widget(help_para, chunks[1]);
+    }
+
+    fn draw_history(app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
+        let text_width = area.width.saturating_sub(4).max(1);
+        let text_height = area.height.saturating_sub(2).max(1);
+        app.history_page_size = text_height;
+
+        Self::sync_history_lines(app);
+
+        let wrapped_height = wrapped_line_count(&app.history_lines, text_width);
+        let max_scroll = wrapped_height.saturating_sub(text_height);
+        let clamped_scroll = app.history_scroll.min(max_scroll);
+        let start = max_scroll.saturating_sub(clamped_scroll);
+        let lines = Self::visible_history_lines(
+            &app.history_lines,
+            text_width,
+            start as usize,
+            text_height as usize,
+        );
+
+        let title = if let Some(tokens) = app.context_tokens {
+            format!(
+                " Gaius - {} - {} | Context: {} ",
+                app.model, app.agent_name, tokens
+            )
+        } else {
+            format!(" Gaius - {} - {} ", app.model, app.agent_name)
+        };
+
+        let history = Paragraph::new(Text::from(lines))
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::TOP)
+                    .padding(Padding::horizontal(1)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(history, area);
+
+        app.history_scroll = clamped_scroll;
+    }
+
+    pub fn render_message(msg: &TuiMessage, show_thinking: bool) -> Vec<Line<'static>> {
+        match msg {
+            TuiMessage::Thinking(text) => {
+                if !show_thinking {
+                    return vec![
+                        Line::from(format!("Thinking... {}", text.len()))
+                            .style(Style::default().fg(Color::LightBlue)),
+                    ];
+                }
+                let style = Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::ITALIC)
+                    .add_modifier(Modifier::DIM);
+                let options = Options::default();
+                let lines: Vec<Line> = from_str_with_options(text, &options)
+                    .lines
+                    .into_iter()
+                    .map(|mut line| {
+                        line.spans = line
+                            .spans
+                            .into_iter()
+                            .map(|span| Span::styled(span.content, style.patch(span.style)))
+                            .collect();
+                        Self::owned_line(line)
+                    })
+                    .collect();
+                lines
+            }
+            TuiMessage::AgentMessage(text) => {
+                let options = Options::default();
+                from_str_with_options(text, &options)
+                    .lines
+                    .into_iter()
+                    .map(Self::owned_line)
+                    .collect()
+            }
+            TuiMessage::UserPrompt(text) => {
+                let style = Self::user_prompt_style();
+                vec![
+                    Self::user_prompt_bar_line(),
+                    Line::from(vec![
+                        Span::styled("\u{2503} ", style.fg(Color::Magenta)),
+                        Span::raw(text.clone()).style(style.italic().bold()),
+                    ]),
+                    Self::user_prompt_bar_line(),
+                ]
+            }
+            TuiMessage::ToolCall {
+                name,
+                arguments,
+                result,
+                error,
+            } => {
+                let style = Style::default().fg(Color::Cyan);
+                let json_args = from_str::<Value>(arguments).unwrap_or_default();
+                let display = match name.as_str() {
+                    "read_file" => Self::arguments_json_fields(
+                        &json_args,
+                        &["file_path", "start_line", "max_lines"],
+                    ),
+                    "write_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
+                    "edit_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
+                    "bash" => Self::arguments_json_fields(&json_args, &["command"]),
+                    "glob" => Self::arguments_json_fields(&json_args, &["path", "pattern"]),
+                    "grep" => {
+                        Self::arguments_json_fields(&json_args, &["path", "include", "pattern"])
+                    }
+                    "question" => Self::arguments_json_fields(&json_args, &["title"]),
+                    "plan" => "".to_string(),
+                    _ => "".to_string(),
+                };
+
+                let spans = vec![
+                    Span::styled(name.clone(), style.add_modifier(Modifier::BOLD)),
+                    Span::raw(" "),
+                    Span::styled(display, style.add_modifier(Modifier::ITALIC)),
+                ];
+                let mut ret = vec![Line::from(spans)];
+                if *error {
+                    let e_style = Style::default().fg(Color::Red);
+                    let error_lines: Vec<&str> = result.split('\n').collect();
+                    for i in error_lines {
+                        if !i.is_empty() {
+                            ret.push(Line::from(vec![
+                                Span::styled(" \u{21B3} ", e_style),
+                                Span::styled(i.to_string(), e_style),
+                            ]));
+                        }
+                    }
+                }
+                Self::render_tool_results(name, &json_args, result, &mut ret, style);
+                ret
+            }
+            TuiMessage::SystemMessage(text) => {
+                let style = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
+                vec![Line::from(text.clone()).style(style)]
+            }
+        }
+    }
+
+    fn render_tool_results(
+        name: &str,
+        args: &Value,
+        result: &str,
+        lines: &mut Vec<Line>,
+        style: Style,
+    ) {
+        match name {
+            "question" => {
+                let answers = result
+                    .split("\n")
+                    .map(|l| " - ".to_string() + l)
+                    .collect::<Vec<_>>();
+                for l in answers {
+                    lines.push(Line::from(Span::styled::<String, Style>(l, style)));
+                }
+            }
+            "plan" => {
+                let mut md = String::new();
+                if let Some(goal) = args.get("goal").and_then(|g| g.as_str()) {
+                    md.push_str("# Goal\n\n");
+                    md.push_str(goal);
+                    md.push_str("\n\n");
+                }
+                if let Some(context) = args.get("context").and_then(|c| c.as_str()) {
+                    md.push_str("# Context\n\n");
+                    md.push_str(context);
+                    md.push_str("\n\n");
+                }
+                if let Some(steps) = args.get("steps").and_then(|s| s.as_array()) {
+                    for (index, step) in steps.iter().enumerate() {
+                        if let Some(step_text) = step.as_str() {
+                            md.push_str(&format!("# Step {}\n\n{}\n\n", index + 1, step_text));
+                        }
+                    }
+                }
+
+                let options = Options::default();
+                let rendered_lines: Vec<Line> = from_str_with_options(&md, &options)
+                    .lines
+                    .into_iter()
+                    .map(Self::owned_line)
+                    .collect();
+
+                lines.push(Line::raw(" "));
+                lines.extend(rendered_lines);
+                lines.push(Line::raw(" "));
+            }
+            _ => {}
+        }
+    }
+
+    fn draw_input(
+        app: &TuiApp,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        lines: Vec<Line<'static>>,
+        width: usize,
+    ) {
+        let input = Paragraph::new(Text::from(lines))
+            .block(
+                Block::default()
+                    .title(format!(" {} ", app.status))
+                    .borders(Borders::ALL)
+                    .style(Style::default().bg(Color::Rgb(64, 0, 64)))
+                    .padding(Padding::horizontal(1)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(input, area);
+
+        let cursor = app.input_cursor + 2;
+        let (row, col) = (cursor / width, cursor % width);
+        let cursor_x = area.x.saturating_add(2).saturating_add(col as u16);
+        let cursor_y = area.y.saturating_add(1).saturating_add(row as u16);
+
+        frame.set_cursor_position((cursor_x, cursor_y));
     }
 
     fn model_display_rows(picker: &PickList<ModelPickerRow>) -> Vec<usize> {
@@ -334,253 +717,6 @@ impl Render {
                 });
 
         has_before && has_after
-    }
-
-    fn draw_agents(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<AgentDefinition>) {
-        Self::draw_pick_list(
-            frame,
-            input_area,
-            picker,
-            PickListRenderSpec {
-                title: "Agents",
-                max_width: 60,
-                empty_text: "No matching agents",
-                help_text: Self::help_spec_to_text(vec![
-                    ("Type", "filter"),
-                    ("Enter", "select"),
-                    ("Esc", "close"),
-                ]),
-            },
-            |agent, row_index, selected_row| {
-                let item = ListItem::new(agent.name.as_str());
-                if row_index == selected_row {
-                    item.style(Style::default().bg(Color::DarkGray))
-                } else {
-                    item
-                }
-            },
-        );
-    }
-
-    fn draw_files(frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<FileEntry>) {
-        Self::draw_pick_list(
-            frame,
-            input_area,
-            picker,
-            PickListRenderSpec {
-                title: "Files",
-                max_width: 60,
-                empty_text: "No matching files",
-                help_text: Self::help_spec_to_text(vec![
-                    ("Type", "filter"),
-                    ("Enter", "select"),
-                    ("Esc", "close"),
-                ]),
-            },
-            |file, row_index, selected_row| {
-                let item = ListItem::new(file.name.clone());
-                if row_index == selected_row {
-                    item.style(Style::default().bg(Color::DarkGray))
-                } else {
-                    item
-                }
-            },
-        );
-    }
-
-    fn draw_pick_list<'a, T, F>(
-        frame: &mut Frame<'_>,
-        input_area: Rect,
-        picker: &'a PickList<T>,
-        spec: PickListRenderSpec,
-        row_item: F,
-    ) where
-        F: Fn(&'a T, usize, usize) -> ListItem<'a>,
-    {
-        Self::draw_indexed_pick_list(frame, input_area, picker, &picker.filtered, spec, row_item);
-    }
-
-    fn draw_indexed_pick_list<'a, T, F>(
-        frame: &mut Frame<'_>,
-        input_area: Rect,
-        picker: &'a PickList<T>,
-        display_rows: &[usize],
-        spec: PickListRenderSpec,
-        row_item: F,
-    ) where
-        F: Fn(&'a T, usize, usize) -> ListItem<'a>,
-    {
-        let row_count = display_rows.len().max(1);
-        let visible_rows = (row_count as u16).clamp(1, 10);
-        let help_height = 1u16;
-        let width = spec
-            .max_width
-            .min(input_area.width.saturating_sub(4).max(1));
-        let height = visible_rows + 2 + help_height;
-        let x = input_area.x + 2;
-        let y = input_area.y - height;
-        let rect = Rect::new(x, y, width, height);
-
-        let selected_row = picker.selected_row_index().unwrap_or(0);
-        let items: Vec<ListItem> = if display_rows.is_empty() {
-            vec![ListItem::new(spec.empty_text)]
-        } else {
-            let selected_display = display_rows
-                .iter()
-                .position(|row_index| *row_index == selected_row)
-                .unwrap_or(0);
-            let visible = display_rows.len().clamp(1, 10);
-            let start = selected_display.saturating_add(1).saturating_sub(visible);
-            let end = (start + visible).min(display_rows.len());
-            display_rows[start..end]
-                .iter()
-                .map(|row_index| row_item(&picker.rows[*row_index], *row_index, selected_row))
-                .collect()
-        };
-
-        let list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(spec.title)
-                .padding(Padding::horizontal(1)),
-        );
-
-        let help_para =
-            Paragraph::new(spec.help_text).block(Block::default().borders(Borders::NONE));
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(visible_rows + 2),
-                Constraint::Length(help_height),
-            ])
-            .split(rect);
-
-        frame.render_widget(Clear, rect);
-        frame.render_widget(list, chunks[0]);
-        frame.render_widget(help_para, chunks[1]);
-    }
-
-    fn draw_question(
-        frame: &mut Frame<'_>,
-        input_area: Rect,
-        title: &str,
-        options: &[String],
-        selected: usize,
-    ) {
-        let wrap_width: usize = 70usize.saturating_sub(4).max(1);
-        let visible_limit = 10u16;
-
-        let mut items = Vec::new();
-        // Simple word-wrap helper
-        let mut line_buf = String::new();
-        for word in title.split_whitespace() {
-            if line_buf.is_empty() {
-                line_buf.push_str(word);
-            } else if line_buf.len() + 1 + word.len() <= wrap_width {
-                line_buf.push(' ');
-                line_buf.push_str(word);
-            } else {
-                items.push(ListItem::new(std::mem::take(&mut line_buf)));
-                line_buf = word.to_string();
-            }
-        }
-        if !line_buf.is_empty() {
-            items.push(ListItem::new(line_buf));
-        }
-
-        items.push(ListItem::new(""));
-
-        if !options.is_empty() {
-            for (i, opt) in options.iter().enumerate() {
-                let item = ListItem::new(format!("{}) {}", i + 1, opt));
-                if selected == i {
-                    items.push(item.style(Style::default().bg(Color::DarkGray)));
-                } else {
-                    items.push(item);
-                }
-            }
-        }
-
-        let visible_rows = (items.len().max(1) as u16).min(visible_limit);
-        let help_height = 1u16;
-        let height = visible_rows + 2 + help_height;
-
-        let max_width: u16 = 70;
-        let width = max_width.min(input_area.width.saturating_sub(4).max(1));
-        let x = input_area.x + 2;
-        let y = input_area.y.saturating_sub(height);
-        let rect = Rect::new(x, y, width, height);
-
-        let content_list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Question")
-                    .padding(Padding::horizontal(1))
-                    .style(Style::default().bg(Color::Rgb(90, 0, 0))),
-            )
-            .style(Style::default().fg(Color::White));
-
-        let help_text = Self::help_spec_to_text(vec![
-            ("Type", "add response"),
-            ("Enter", "send"),
-            ("Up/Down", "select"),
-            ("Tab", "cancel"),
-        ]);
-        let help_para = Paragraph::new(help_text).block(Block::default().borders(Borders::NONE));
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(visible_rows + 2),
-                Constraint::Length(help_height),
-            ])
-            .split(rect);
-
-        frame.render_widget(Clear, rect);
-        frame.render_widget(content_list, chunks[0]);
-        frame.render_widget(help_para, chunks[1]);
-    }
-
-    fn draw_history(app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
-        let text_width = area.width.saturating_sub(4).max(1);
-        let text_height = area.height.saturating_sub(2).max(1);
-        app.history_page_size = text_height;
-
-        Self::sync_history_lines(app);
-
-        let wrapped_height = wrapped_line_count(&app.history_lines, text_width);
-        let max_scroll = wrapped_height.saturating_sub(text_height);
-        let clamped_scroll = app.history_scroll.min(max_scroll);
-        let start = max_scroll.saturating_sub(clamped_scroll);
-        let lines = Self::visible_history_lines(
-            &app.history_lines,
-            text_width,
-            start as usize,
-            text_height as usize,
-        );
-
-        let title = if let Some(tokens) = app.context_tokens {
-            format!(
-                " Gaius - {} - {} | Context: {} ",
-                app.model, app.agent_name, tokens
-            )
-        } else {
-            format!(" Gaius - {} - {} ", app.model, app.agent_name)
-        };
-
-        let history = Paragraph::new(Text::from(lines))
-            .block(
-                Block::default()
-                    .title(title)
-                    .borders(Borders::TOP)
-                    .padding(Padding::horizontal(1)),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(history, area);
-
-        app.history_scroll = clamped_scroll;
     }
 
     fn sync_history_lines(app: &mut TuiApp) {
@@ -761,158 +897,6 @@ impl Render {
         line
     }
 
-    pub fn render_message(msg: &TuiMessage, show_thinking: bool) -> Vec<Line<'static>> {
-        match msg {
-            TuiMessage::Thinking(text) => {
-                if !show_thinking {
-                    return vec![
-                        Line::from(format!("Thinking... {}", text.len()))
-                            .style(Style::default().fg(Color::LightBlue)),
-                    ];
-                }
-                let style = Style::default()
-                    .fg(Color::LightBlue)
-                    .add_modifier(Modifier::ITALIC)
-                    .add_modifier(Modifier::DIM);
-                let options = Options::default();
-                let lines: Vec<Line> = from_str_with_options(text, &options)
-                    .lines
-                    .into_iter()
-                    .map(|mut line| {
-                        line.spans = line
-                            .spans
-                            .into_iter()
-                            .map(|span| Span::styled(span.content, style.patch(span.style)))
-                            .collect();
-                        Self::owned_line(line)
-                    })
-                    .collect();
-                lines
-            }
-            TuiMessage::AgentMessage(text) => {
-                let options = Options::default();
-                from_str_with_options(text, &options)
-                    .lines
-                    .into_iter()
-                    .map(Self::owned_line)
-                    .collect()
-            }
-            TuiMessage::UserPrompt(text) => {
-                let style = Self::user_prompt_style();
-                vec![
-                    Self::user_prompt_bar_line(),
-                    Line::from(vec![
-                        Span::styled("\u{2503} ", style.fg(Color::Magenta)),
-                        Span::raw(text.clone()).style(style.italic().bold()),
-                    ]),
-                    Self::user_prompt_bar_line(),
-                ]
-            }
-            TuiMessage::ToolCall {
-                name,
-                arguments,
-                result,
-                error,
-            } => {
-                let style = Style::default().fg(Color::Cyan);
-                let json_args = from_str::<Value>(arguments).unwrap_or_default();
-                let display = match name.as_str() {
-                    "read_file" => Self::arguments_json_fields(
-                        &json_args,
-                        &["file_path", "start_line", "max_lines"],
-                    ),
-                    "write_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
-                    "edit_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
-                    "bash" => Self::arguments_json_fields(&json_args, &["command"]),
-                    "glob" => Self::arguments_json_fields(&json_args, &["path", "pattern"]),
-                    "grep" => {
-                        Self::arguments_json_fields(&json_args, &["path", "include", "pattern"])
-                    }
-                    "question" => Self::arguments_json_fields(&json_args, &["title"]),
-                    "plan" => "".to_string(),
-                    _ => "".to_string(),
-                };
-
-                let spans = vec![
-                    Span::styled(name.clone(), style.add_modifier(Modifier::BOLD)),
-                    Span::raw(" "),
-                    Span::styled(display, style.add_modifier(Modifier::ITALIC)),
-                ];
-                let mut ret = vec![Line::from(spans)];
-                if *error {
-                    let e_style = Style::default().fg(Color::Red);
-                    let error_lines: Vec<&str> = result.split('\n').collect();
-                    for i in error_lines {
-                        if !i.is_empty() {
-                            ret.push(Line::from(vec![
-                                Span::styled(" \u{21B3} ", e_style),
-                                Span::styled(i.to_string(), e_style),
-                            ]));
-                        }
-                    }
-                }
-                Self::render_tool_results(name, &json_args, result, &mut ret, style);
-                ret
-            }
-            TuiMessage::SystemMessage(text) => {
-                let style = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
-                vec![Line::from(text.clone()).style(style)]
-            }
-        }
-    }
-
-    fn render_tool_results(
-        name: &str,
-        args: &Value,
-        result: &str,
-        lines: &mut Vec<Line>,
-        style: Style,
-    ) {
-        match name {
-            "question" => {
-                let answers = result
-                    .split("\n")
-                    .map(|l| " - ".to_string() + l)
-                    .collect::<Vec<_>>();
-                for l in answers {
-                    lines.push(Line::from(Span::styled::<String, Style>(l, style)));
-                }
-            }
-            "plan" => {
-                let mut md = String::new();
-                if let Some(goal) = args.get("goal").and_then(|g| g.as_str()) {
-                    md.push_str("# Goal\n\n");
-                    md.push_str(goal);
-                    md.push_str("\n\n");
-                }
-                if let Some(context) = args.get("context").and_then(|c| c.as_str()) {
-                    md.push_str("# Context\n\n");
-                    md.push_str(context);
-                    md.push_str("\n\n");
-                }
-                if let Some(steps) = args.get("steps").and_then(|s| s.as_array()) {
-                    for (index, step) in steps.iter().enumerate() {
-                        if let Some(step_text) = step.as_str() {
-                            md.push_str(&format!("# Step {}\n\n{}\n\n", index + 1, step_text));
-                        }
-                    }
-                }
-
-                let options = Options::default();
-                let rendered_lines: Vec<Line> = from_str_with_options(&md, &options)
-                    .lines
-                    .into_iter()
-                    .map(Self::owned_line)
-                    .collect();
-
-                lines.push(Line::raw(" "));
-                lines.extend(rendered_lines);
-                lines.push(Line::raw(" "));
-            }
-            _ => {}
-        }
-    }
-
     fn user_prompt_bar_line() -> Line<'static> {
         let style = Self::user_prompt_style();
         Line::from(vec![Span::styled("\u{2503} ", style.fg(Color::Magenta))])
@@ -959,32 +943,6 @@ impl Render {
             })
             .collect::<Vec<_>>()
             .join(" ")
-    }
-
-    fn draw_input(
-        app: &TuiApp,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        lines: Vec<Line<'static>>,
-        width: usize,
-    ) {
-        let input = Paragraph::new(Text::from(lines))
-            .block(
-                Block::default()
-                    .title(format!(" {} ", app.status))
-                    .borders(Borders::ALL)
-                    .style(Style::default().bg(Color::Rgb(64, 0, 64)))
-                    .padding(Padding::horizontal(1)),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(input, area);
-
-        let cursor = app.input_cursor + 2;
-        let (row, col) = (cursor / width, cursor % width);
-        let cursor_x = area.x.saturating_add(2).saturating_add(col as u16);
-        let cursor_y = area.y.saturating_add(1).saturating_add(row as u16);
-
-        frame.set_cursor_position((cursor_x, cursor_y));
     }
 
     fn input_prompt_lines(input: String, width: u16) -> Vec<Line<'static>> {
