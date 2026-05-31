@@ -621,41 +621,42 @@ pub fn list_files() -> Vec<FileEntry> {
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut entries: Vec<FileEntry> = Vec::new();
 
-    fn walk_dir(path: &PathBuf, relative_path: &str, entries: &mut Vec<FileEntry>) {
-        if let Ok(read_dir) = std::fs::read_dir(path) {
-            for entry in read_dir.filter_map(|e| e.ok()) {
-                let entry_path = entry.path();
-                let name = entry_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
+    walk_dir(&current_dir, "", &mut entries);
 
-                // Skip ignored directories
-                if [".git", "target", "node_modules", "build", "dist", "bin"]
-                    .iter()
-                    .any(|&ignored| name == ignored)
-                {
-                    continue;
-                }
+    entries.sort_by(|l, r| l.name.cmp(&r.name));
+    entries
+}
 
-                let rel_name = if relative_path.is_empty() {
-                    name
-                } else {
-                    format!("{}/{}", relative_path, name)
-                };
-                entries.push(FileEntry {
-                    name: rel_name.clone(),
-                    path: entry_path.clone(),
-                });
-                if entry_path.is_dir() {
-                    walk_dir(&entry_path, &rel_name, entries);
-                }
+fn walk_dir(path: &PathBuf, relative_path: &str, entries: &mut Vec<FileEntry>) {
+    if let Ok(read_dir) = std::fs::read_dir(path) {
+        for entry in read_dir.filter_map(|e| e.ok()) {
+            let entry_path = entry.path();
+            let name = entry_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Skip ignored directories
+            if [".git", "target", "node_modules", "build", "dist", "bin"]
+                .iter()
+                .any(|&ignored| name == ignored)
+            {
+                continue;
+            }
+
+            let rel_name = if relative_path.is_empty() {
+                name
+            } else {
+                format!("{}/{}", relative_path, name)
+            };
+            entries.push(FileEntry {
+                name: rel_name.clone(),
+                path: entry_path.clone(),
+            });
+            if entry_path.is_dir() {
+                walk_dir(&entry_path, &rel_name, entries);
             }
         }
     }
-
-    walk_dir(&current_dir, "", &mut entries);
-
-    entries
 }
