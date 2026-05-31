@@ -33,12 +33,13 @@ use tui_markdown::{Options, from_str_with_options};
 
 pub const INPUT_HEIGHT: u16 = 3;
 const INPUT_PROMPT_PREFIX: &str = "> ";
+const USER_PROMPT_BAR: &str = "\u{2503} ";
 
 struct PickListRenderSpec {
     title: &'static str,
     max_width: u16,
     empty_text: &'static str,
-    help_text: Text<'static>,
+    help_items: Vec<(&'static str, &'static str)>,
     background: Style,
 }
 
@@ -150,11 +151,7 @@ impl Render {
                 title: "Commands",
                 max_width: 50,
                 empty_text: "No matching commands",
-                help_text: self.help_spec_to_text(vec![
-                    ("Type", "filter"),
-                    ("Enter", "select"),
-                    ("Esc", "close"),
-                ]),
+                help_items: vec![("Type", "filter"), ("Enter", "select"), ("Esc", "close")],
                 background: Style::default(),
             },
             |cmd, _index| ListItem::new(format!("/{} - {}", cmd.name, cmd.description)),
@@ -169,14 +166,14 @@ impl Render {
         renaming: bool,
     ) {
         let help_text = if renaming {
-            self.help_spec_to_text(vec![("Enter", "save"), ("Esc", "cancel")])
+            vec![("Enter", "save"), ("Esc", "cancel")]
         } else {
-            self.help_spec_to_text(vec![
+            vec![
                 ("Enter", "load"),
                 ("Ctrl+E", "rename"),
                 ("Ctrl+D", "delete"),
                 ("Esc", "close"),
-            ])
+            ]
         };
         self.draw_pick_list(
             frame,
@@ -186,7 +183,7 @@ impl Render {
                 title: "Sessions",
                 max_width: 50,
                 empty_text: "No sessions",
-                help_text,
+                help_items: help_text,
                 background: Style::default(),
             },
             |session, _index| ListItem::new(session.display_name()),
@@ -210,14 +207,14 @@ impl Render {
                 title: "Models",
                 max_width: 80,
                 empty_text: "No matching models",
-                help_text: self.help_spec_to_text(vec![
+                help_items: vec![
                     ("Type", "filter"),
                     ("Enter", "select"),
                     ("Ctrl+N", "add provider"),
                     ("Ctrl+R", "reload"),
                     ("Ctrl+D", "delete"),
                     ("Esc", "close"),
-                ]),
+                ],
                 background: Style::default(),
             },
             |row, _index| match row {
@@ -250,12 +247,12 @@ impl Render {
                 title: "Add Provider",
                 max_width: 80,
                 empty_text: "",
-                help_text: self.help_spec_to_text(vec![
+                help_items: vec![
                     ("Type", "edit"),
                     ("Up/Down", "field"),
                     ("Enter", "validate/save"),
                     ("Esc", "cancel"),
-                ]),
+                ],
                 background: Style::default(),
             },
             |row, index| {
@@ -283,11 +280,7 @@ impl Render {
                 title: "Agents",
                 max_width: 60,
                 empty_text: "No matching agents",
-                help_text: self.help_spec_to_text(vec![
-                    ("Type", "filter"),
-                    ("Enter", "select"),
-                    ("Esc", "close"),
-                ]),
+                help_items: vec![("Type", "filter"), ("Enter", "select"), ("Esc", "close")],
                 background: Style::default(),
             },
             |agent, _index| ListItem::new(agent.name.as_str()),
@@ -303,11 +296,7 @@ impl Render {
                 title: "Files",
                 max_width: 60,
                 empty_text: "No matching files",
-                help_text: self.help_spec_to_text(vec![
-                    ("Type", "filter"),
-                    ("Enter", "select"),
-                    ("Esc", "close"),
-                ]),
+                help_items: vec![("Type", "filter"), ("Enter", "select"), ("Esc", "close")],
                 background: Style::default(),
             },
             |file, _index| ListItem::new(file.name.clone()),
@@ -363,12 +352,12 @@ impl Render {
                 title: "Question",
                 max_width: 70,
                 empty_text: "",
-                help_text: self.help_spec_to_text(vec![
+                help_items: vec![
                     ("Type", "add response"),
                     ("Enter", "send"),
                     ("Up/Down", "select"),
                     ("Tab", "cancel"),
-                ]),
+                ],
                 background: Style::default().bg(self.theme.inputbox),
             },
             |row, _index| match row {
@@ -446,8 +435,8 @@ impl Render {
                 .style(spec.background),
         );
 
-        let help_para =
-            Paragraph::new(spec.help_text).block(Block::default().borders(Borders::NONE));
+        let help_para = Paragraph::new(self.help_spec_to_text(spec.help_items))
+            .block(Block::default().borders(Borders::NONE));
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -543,7 +532,7 @@ impl Render {
                 vec![
                     self.user_prompt_bar_line(),
                     Line::from(vec![
-                        Span::styled("\u{2503} ", style.fg(self.theme.user_bar)),
+                        Span::styled(USER_PROMPT_BAR, style.fg(self.theme.user_bar)),
                         Span::raw(text.clone()).style(style.italic().bold()),
                     ]),
                     self.user_prompt_bar_line(),
@@ -570,8 +559,7 @@ impl Render {
                         Self::arguments_json_fields(&json_args, &["path", "include", "pattern"])
                     }
                     "question" => Self::arguments_json_fields(&json_args, &["title"]),
-                    "plan" => "".to_string(),
-                    _ => "".to_string(),
+                    "plan" | _ => "".to_string(),
                 };
 
                 let spans = vec![
@@ -848,7 +836,11 @@ impl Render {
     }
 
     fn strip_user_prompt_prefix(line: &Line<'_>) -> Line<'static> {
-        let spans: Vec<_> = if line.spans.first().is_some_and(|s| s.content == "\u{2503} ") {
+        let spans: Vec<_> = if line
+            .spans
+            .first()
+            .is_some_and(|s| s.content == USER_PROMPT_BAR)
+        {
             line.spans[1..]
                 .iter()
                 .map(|s| Span::styled(s.content.to_string(), s.style))
@@ -867,7 +859,8 @@ impl Render {
 
     fn format_user_prompt_line(&self, mut line: Line<'static>, width: u16) -> Line<'static> {
         let bar_style = self.user_prompt_style().fg(self.theme.user_bar);
-        line.spans.insert(0, Span::styled("\u{2503} ", bar_style));
+        line.spans
+            .insert(0, Span::styled(USER_PROMPT_BAR, bar_style));
         let width = width.max(1) as usize;
         let used = line.width();
         if used < width {
@@ -950,7 +943,7 @@ impl Render {
     fn user_prompt_bar_line(&self) -> Line<'static> {
         let style = self.user_prompt_style();
         Line::from(vec![Span::styled(
-            "\u{2503} ",
+            USER_PROMPT_BAR,
             style.fg(self.theme.user_bar),
         )])
     }
@@ -958,7 +951,7 @@ impl Render {
     fn is_user_prompt_line(line: &Line<'_>) -> bool {
         line.spans
             .first()
-            .map(|span| span.content == "\u{2503} ")
+            .map(|span| span.content == USER_PROMPT_BAR)
             .unwrap_or(false)
     }
 
