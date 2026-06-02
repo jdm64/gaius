@@ -1,9 +1,13 @@
-use gaius::harness::{Harness, HarnessEvent};
-use genai::chat::{ChatMessage, ContentPart};
+use gaius::{
+    harness::{Harness, HarnessEvent},
+    token_usage::{TokenUsageLedger, TokenUsageSpan},
+};
+use genai::chat::{ChatMessage, ContentPart, Usage};
 
 fn replay_events(messages: Vec<ChatMessage>) -> Vec<HarnessEvent> {
     let mut events = Vec::new();
-    Harness::replay_messages(&messages, |event| events.push(event));
+    let usage = TokenUsageLedger::default();
+    Harness::replay_messages(&messages, &usage, |event| events.push(event));
     events
 }
 
@@ -45,5 +49,83 @@ fn replay_assistant_text_unchanged() {
     assert_eq!(
         events,
         vec![HarnessEvent::AgentMessage("visible".to_string())]
+    );
+}
+
+#[test]
+fn token_usage_records_initial_prompt_as_baseline() {
+    let mut ledger = TokenUsageLedger::default();
+    let spans = ledger.record(
+        1,
+        1,
+        &Usage {
+            prompt_tokens: Some(100),
+            completion_tokens: Some(25),
+            total_tokens: Some(125),
+            ..Usage::default()
+        },
+    );
+
+    assert_eq!(spans.len(), 2);
+    assert_eq!(
+        spans[0],
+        TokenUsageSpan {
+            start: 0,
+            end: 1,
+            prompt: Some(100),
+            response: None,
+        }
+    );
+    assert_eq!(
+        spans[1],
+        TokenUsageSpan {
+            start: 1,
+            end: 2,
+            prompt: None,
+            response: Some(25),
+        }
+    );
+}
+
+#[test]
+fn token_usage_records_prompt_delta_for_message_range() {
+    let mut ledger = TokenUsageLedger::default();
+    ledger.record(
+        1,
+        1,
+        &Usage {
+            prompt_tokens: Some(100),
+            completion_tokens: Some(25),
+            ..Usage::default()
+        },
+    );
+
+    let spans = ledger.record(
+        4,
+        4,
+        &Usage {
+            prompt_tokens: Some(210),
+            completion_tokens: Some(50),
+            ..Usage::default()
+        },
+    );
+
+    assert_eq!(
+        spans[0],
+        TokenUsageSpan {
+            start: 1,
+            end: 4,
+            prompt: Some(110),
+            response: None,
+        }
+    );
+    assert_eq!(
+        spans[1],
+        TokenUsageSpan {
+            start: 4,
+            end: 5,
+            prompt: None,
+            response: Some(50),
+        }
     );
 }

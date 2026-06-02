@@ -14,7 +14,10 @@
  */
 
 use crate::{
-    agents::AgentDefinition, session::Session, tools::ToolEngine, tools::ToolResult,
+    agents::AgentDefinition,
+    session::Session,
+    token_usage::{TokenUsageLedger, format_arrows},
+    tools::{ToolEngine, ToolResult},
     util::prompt_input,
 };
 use futures::StreamExt;
@@ -66,6 +69,11 @@ pub enum HarnessEvent {
         result: String,
         error: bool,
     },
+    TokenUsage {
+        prompt: Option<i32>,
+        response: Option<i32>,
+        total: Option<i32>,
+    },
     AskUser {
         title: String,
         options: Vec<String>,
@@ -78,7 +86,6 @@ pub struct HarnessSnapshot {
     pub has_history: bool,
     pub model: String,
     pub agent_name: String,
-    pub context_tokens: Option<i32>,
     pub streaming: bool,
 }
 
@@ -90,7 +97,7 @@ pub struct Harness {
     agent: AgentDefinition,
     oneshot_prompt: Option<String>,
     session: Session,
-    context_tokens: Option<i32>,
+    token_usage: TokenUsageLedger,
     streaming: bool,
 }
 
@@ -109,7 +116,7 @@ impl Harness {
             None => Session::new(),
         };
 
-        let mut history = session.load()?;
+        let (mut history, token_usage) = session.load()?;
         history.tools = Some(tool_engine.build_tools());
         apply_agent_prompt(&mut history, &agent);
 
@@ -121,7 +128,7 @@ impl Harness {
             agent,
             oneshot_prompt,
             session,
-            context_tokens: None,
+            token_usage,
             streaming: true,
         })
     }
@@ -140,10 +147,6 @@ impl Harness {
 
     pub fn agent_name(&self) -> &str {
         &self.agent.name
-    }
-
-    pub fn context_tokens(&self) -> Option<i32> {
-        self.context_tokens
     }
 
     pub fn streaming(&self) -> bool {
@@ -174,15 +177,20 @@ impl Harness {
 
     pub fn load_session(&mut self, session: Session) -> Result<(), Box<dyn Error>> {
         self.session = session;
-        self.history = self.session.load()?;
+        let (history, token_usage) = self.session.load()?;
+        self.history = history;
+        self.token_usage = token_usage;
         self.history.tools = Some(self.tool_engine.build_tools());
         apply_agent_prompt(&mut self.history, &self.agent);
-        self.context_tokens = None;
         Ok(())
     }
 
     pub fn history(&self) -> &ChatRequest {
         &self.history
+    }
+
+    pub fn token_usage(&self) -> &TokenUsageLedger {
+        &self.token_usage
     }
 
     pub fn snapshot(&self) -> HarnessSnapshot {
@@ -191,7 +199,6 @@ impl Harness {
             has_history: !self.history().messages.is_empty(),
             model: self.model().clone(),
             agent_name: self.agent_name().to_string(),
-            context_tokens: self.context_tokens(),
             streaming: self.streaming(),
         }
     }
@@ -205,17 +212,20 @@ impl Harness {
     where
         F: FnMut(HarnessEvent),
     {
-        Self::replay_messages(&self.history.messages, on_event);
+        Self::replay_messages(&self.history.messages, &self.token_usage, on_event);
     }
 
-    pub fn replay_messages<F>(history: &[ChatMessage], mut on_event: F)
-    where
+    pub fn replay_messages<F>(
+        history: &[ChatMessage],
+        token_usage: &TokenUsageLedger,
+        mut on_event: F,
+    ) where
         F: FnMut(HarnessEvent),
     {
         let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
-        let mut messages = history.iter().peekable();
+        let mut messages = history.iter().enumerate().peekable();
 
-        while let Some(message) = messages.next() {
+        while let Some((index, message)) = messages.next() {
             match message.role {
                 ChatRole::User => {
                     pending_tool_calls.clear();
@@ -223,6 +233,7 @@ impl Harness {
                     if !text.is_empty() {
                         on_event(HarnessEvent::UserPrompt(text));
                     }
+                    token_usage.emit_usage(index, &mut on_event);
                 }
                 ChatRole::Assistant => {
                     let text = message.content.texts().join("");
@@ -248,18 +259,19 @@ impl Harness {
                     if !text.is_empty() {
                         on_event(HarnessEvent::AgentMessage(text));
                     }
+                    token_usage.emit_usage(index, &mut on_event);
 
                     // Match consecutive Tool-role response messages to the pending
                     // tool calls in order.
                     loop {
                         let is_tool = match messages.peek() {
-                            Some(m) => m.role == ChatRole::Tool,
+                            Some((_, m)) => m.role == ChatRole::Tool,
                             None => false,
                         };
                         if !is_tool {
                             break;
                         }
-                        let next_msg = messages.next().unwrap();
+                        let (next_index, next_msg) = messages.next().unwrap();
                         let responses: Vec<&genai::chat::ToolResponse> =
                             next_msg.content.tool_responses();
                         for resp in responses {
@@ -273,6 +285,7 @@ impl Harness {
                                 pending_tool_calls.remove(0);
                             }
                         }
+                        token_usage.emit_usage(next_index, &mut on_event);
                     }
 
                     // Any remaining unmatched calls — emit with empty result so
@@ -298,9 +311,11 @@ impl Harness {
                             tr.call_id, tr.content
                         )));
                     }
+                    token_usage.emit_usage(index, &mut on_event);
                 }
                 ChatRole::System => {
                     pending_tool_calls.clear();
+                    token_usage.emit_usage(index, &mut on_event);
                 }
             }
         }
@@ -366,6 +381,20 @@ impl Harness {
                 }
                 None
             }
+            HarnessEvent::TokenUsage {
+                prompt,
+                response,
+                total,
+            } => {
+                if agent_started {
+                    println!();
+                    agent_started = false;
+                }
+                let net = format_arrows(prompt, response);
+                let total_str = total.unwrap_or_default();
+                println!("tokens> {net} {total_str}");
+                None
+            }
             HarnessEvent::AskUser { title, options } => {
                 if agent_started {
                     println!();
@@ -419,6 +448,7 @@ impl Harness {
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
+        let prompt_message_end = self.history.messages.len();
         let chat_options = ChatOptions::default()
             .with_capture_content(true)
             .with_capture_tool_calls(true)
@@ -472,11 +502,15 @@ impl Harness {
                 .with_reasoning_content(stream_end.captured_reasoning_content.clone()),
         );
 
-        self.context_tokens = stream_end.captured_usage.as_ref().map(|usage| {
-            usage.total_tokens.unwrap_or_else(|| {
-                usage.prompt_tokens.unwrap_or(0) + usage.completion_tokens.unwrap_or(0)
-            })
-        });
+        let assistant_message_index = self.history.messages.len() - 1;
+        if let Some(usage) = stream_end.captured_usage.as_ref() {
+            self.token_usage.record_with_event(
+                prompt_message_end,
+                assistant_message_index,
+                usage,
+                on_event,
+            );
+        }
 
         Ok(content.into_tool_calls())
     }
@@ -488,6 +522,7 @@ impl Harness {
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
+        let prompt_message_end = self.history.messages.len();
         let response = self
             .client
             .exec_chat(&self.model, self.history.clone(), None)
@@ -502,11 +537,13 @@ impl Harness {
             .messages
             .push(ChatMessage::assistant(response.content.clone()));
 
-        self.context_tokens = response.usage.total_tokens.or_else(|| {
-            let prompt = response.usage.prompt_tokens?;
-            let completion = response.usage.completion_tokens?;
-            Some(prompt + completion)
-        });
+        let assistant_message_index = self.history.messages.len() - 1;
+        self.token_usage.record_with_event(
+            prompt_message_end,
+            assistant_message_index,
+            &response.usage,
+            on_event,
+        );
 
         Ok(response.content.into_tool_calls())
     }
@@ -554,7 +591,7 @@ impl Harness {
     }
 
     fn save_history(&mut self) -> Result<(), Box<dyn Error>> {
-        self.session.save(&self.history)?;
+        self.session.save(&self.history, &self.token_usage)?;
         Ok(())
     }
 }

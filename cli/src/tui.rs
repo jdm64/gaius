@@ -21,6 +21,7 @@ use crate::{
     harness_actor::{HarnessActorEvent, HarnessActorHandle},
     input::{Input, InputMode},
     render::Render,
+    token_usage::format_arrows,
     util::cache_dir,
 };
 use crossterm::{
@@ -47,6 +48,7 @@ pub enum TuiMessage {
     AgentMessage(String),
     Thinking(String),
     SystemMessage(String),
+    TokenInfo(String),
     ToolCall {
         name: String,
         arguments: String,
@@ -138,10 +140,7 @@ impl TuiApp {
         }
     }
 
-    pub async fn run(
-        &mut self,
-        harness: Harness,
-    ) -> Result<HarnessSnapshot, Box<dyn Error>> {
+    pub async fn run(&mut self, harness: Harness) -> Result<HarnessSnapshot, Box<dyn Error>> {
         self.agents = self.config.agents().clone();
         self.load_history(&harness);
         if let Err(e) = self.load_prompt_history() {
@@ -385,7 +384,6 @@ impl TuiApp {
     pub fn apply_snapshot(&mut self, snapshot: &HarnessSnapshot) {
         self.model = snapshot.model.clone();
         self.agent_name = snapshot.agent_name.clone();
-        self.context_tokens = snapshot.context_tokens;
     }
 
     pub fn harness_idle(&self) -> bool {
@@ -417,6 +415,15 @@ impl TuiApp {
                 });
                 Input::reset_history_scroll(self);
             }
+            HarnessEvent::TokenUsage {
+                prompt,
+                response,
+                total,
+            } => {
+                let info = format_arrows(prompt, response);
+                self.append_token_info(info);
+                self.context_tokens = total;
+            }
             HarnessEvent::AskUser { .. } => {}
         }
     }
@@ -439,6 +446,25 @@ impl TuiApp {
                 } else {
                     self.push_message(TuiMessage::AgentMessage(chunk));
                 }
+            }
+        }
+
+        self.mark_history_dirty();
+        Input::reset_history_scroll(self);
+    }
+
+    pub fn append_token_info(&mut self, chunk: String) {
+        if chunk.is_empty() {
+            return;
+        }
+
+        match self.messages.last_mut() {
+            Some(TuiMessage::TokenInfo(text)) => {
+                text.push(' ');
+                text.push_str(chunk.as_str());
+            }
+            _ => {
+                self.push_message(TuiMessage::TokenInfo(chunk));
             }
         }
 
@@ -470,6 +496,15 @@ impl TuiApp {
                     result,
                     error,
                 });
+            }
+            HarnessEvent::TokenUsage {
+                prompt,
+                response,
+                total,
+            } => {
+                let info = format_arrows(prompt, response);
+                self.append_token_info(info);
+                self.context_tokens = total;
             }
             HarnessEvent::AskUser {
                 title: _,

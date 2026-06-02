@@ -22,6 +22,7 @@ pub mod input;
 pub mod models;
 pub mod render;
 pub mod session;
+pub mod token_usage;
 pub mod tools;
 pub mod tui;
 pub mod util;

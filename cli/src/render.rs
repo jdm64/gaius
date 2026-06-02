@@ -470,10 +470,7 @@ impl Render {
         );
 
         let title = if let Some(tokens) = app.context_tokens {
-            format!(
-                " Gaius - {} - {} | Context: {} ",
-                app.model, app.agent_name, tokens
-            )
+            format!(" Gaius - {} - {} - {} ", app.model, app.agent_name, tokens)
         } else {
             format!(" Gaius - {} - {} ", app.model, app.agent_name)
         };
@@ -588,6 +585,10 @@ impl Render {
                     .fg(self.theme.error)
                     .add_modifier(Modifier::BOLD);
                 vec![Line::from(text.clone()).style(style)]
+            }
+            TuiMessage::TokenInfo(text) => {
+                let style = Style::default().fg(self.theme.header);
+                vec![Line::from(text.clone()).style(style).right_aligned()]
             }
         }
     }
@@ -786,7 +787,9 @@ impl Render {
         for (index, message) in app.messages.iter().enumerate() {
             if index > 0 {
                 let previous = &app.messages[index - 1];
-                if std::mem::discriminant(previous) != std::mem::discriminant(message) {
+                if std::mem::discriminant(previous) != std::mem::discriminant(message)
+                    && !matches!(message, TuiMessage::TokenInfo(_))
+                {
                     lines.push(Line::from(""));
                 }
             }

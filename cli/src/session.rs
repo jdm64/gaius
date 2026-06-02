@@ -24,7 +24,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::util::data_dir;
+use crate::{token_usage::TokenUsageLedger, util::data_dir};
 
 fn sessions_dir() -> Result<PathBuf, Box<dyn Error>> {
     Ok(data_dir()?.join("sessions"))
@@ -53,6 +53,7 @@ pub struct SessionFile {
     _id: i32,
     name: String,
     messages: Option<Vec<ChatMessage>>,
+    token_usage: Option<TokenUsageLedger>,
 }
 
 pub struct Session {
@@ -97,47 +98,65 @@ impl Session {
         let version: i32 = Deserialize::deserialize(&mut des)?;
         let name: String = Deserialize::deserialize(&mut des)?;
         let mut messages: Option<Vec<ChatMessage>> = None;
+        let mut token_usage: Option<TokenUsageLedger> = None;
         if read_msgs {
             messages = Deserialize::deserialize(&mut des)?;
+            if version >= 2 {
+                token_usage = Deserialize::deserialize(&mut des)?;
+            }
         }
 
         Ok(SessionFile {
             _id: version,
             name,
             messages,
+            token_usage,
         })
     }
 
-    fn serialize_session(&self, path: &Path, history: &ChatRequest) -> Result<(), Box<dyn Error>> {
+    fn serialize_session(
+        &self,
+        path: &Path,
+        history: &ChatRequest,
+        token_usage: &TokenUsageLedger,
+    ) -> Result<(), Box<dyn Error>> {
         let file = File::create(path)?;
         let mut ser = Serializer::new(file).with_struct_map();
 
-        1.serialize(&mut ser)?;
+        2.serialize(&mut ser)?;
         let name = self.name.clone().unwrap_or(Self::derived_name(history));
         name.serialize(&mut ser)?;
         history.messages.serialize(&mut ser)?;
+        token_usage.serialize(&mut ser)?;
 
         Ok(())
     }
 
-    pub fn load(&self) -> Result<ChatRequest, Box<dyn Error>> {
+    pub fn load(&self) -> Result<(ChatRequest, TokenUsageLedger), Box<dyn Error>> {
         let Some(session_id) = self.id.clone() else {
-            return Ok(ChatRequest::new(vec![]));
+            return Ok((ChatRequest::new(vec![]), TokenUsageLedger::default()));
         };
 
         let path = session_file(session_id.as_str())?;
         if path.is_file() {
             let data = Self::deserialize_session(path.as_path(), true)?;
-            Ok(ChatRequest::new(data.messages.unwrap_or_default()))
+            Ok((
+                ChatRequest::new(data.messages.unwrap_or_default()),
+                data.token_usage.unwrap_or_default(),
+            ))
         } else {
-            Ok(ChatRequest::new(vec![]))
+            Ok((ChatRequest::new(vec![]), TokenUsageLedger::default()))
         }
     }
 
-    pub fn save(&self, history: &ChatRequest) -> Result<(), Box<dyn Error>> {
+    pub fn save(
+        &self,
+        history: &ChatRequest,
+        token_usage: &TokenUsageLedger,
+    ) -> Result<(), Box<dyn Error>> {
         if let Some(session_id) = &self.id {
             let path = session_file(session_id.as_str())?;
-            self.serialize_session(path.as_path(), history)?;
+            self.serialize_session(path.as_path(), history, token_usage)?;
         }
 
         Ok(())
@@ -199,12 +218,12 @@ impl Session {
             return Err("Cannot rename a session without an id".into());
         };
 
-        let history = self.load()?;
+        let (history, token_usage) = self.load()?;
         let path = session_file(session_id.as_str())?;
         let tmp_path = path.with_extension("tmp");
 
         self.name = Some(new_name);
-        self.serialize_session(tmp_path.as_path(), &history)?;
+        self.serialize_session(tmp_path.as_path(), &history, &token_usage)?;
         std::fs::rename(&tmp_path, &path)?;
 
         Ok(())
