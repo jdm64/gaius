@@ -396,7 +396,12 @@ impl Commands {
                 picker.move_down();
             }
             KeyCode::Enter => {
-                let Some(ModelPickerRow::Model(selected_model)) = picker.selected_row() else {
+                let Some(selected_model) = picker.selected_row().and_then(|row| match row {
+                    ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model) => {
+                        Some(model)
+                    }
+                    ModelPickerRow::Header(_) | ModelPickerRow::Separator => None,
+                }) else {
                     app.status = "No matching models".to_string();
                     return InputMode::Models { picker };
                 };
