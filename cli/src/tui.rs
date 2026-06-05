@@ -96,6 +96,7 @@ pub struct TuiApp {
     pub mode: InputMode,
     pub context_tokens: Option<i32>,
     pub show_thinking: bool,
+    pub show_token_info: bool,
     pub prompt_history: Vec<String>,
     pub prompt_history_idx: Option<usize>,
     pub history_lines: Vec<Line<'static>>,
@@ -129,6 +130,7 @@ impl TuiApp {
             mode: InputMode::PromptInput,
             context_tokens: None,
             show_thinking: false,
+            show_token_info: true,
             prompt_history: Vec::new(),
             prompt_history_idx: None,
             history_lines: Vec::new(),
@@ -523,6 +525,15 @@ impl TuiApp {
         self.status = format!(
             "Thinking display: {}",
             if self.show_thinking { "on" } else { "off" }
+        );
+        self.mark_history_dirty();
+    }
+
+    pub fn toggle_token_info(&mut self) {
+        self.show_token_info = !self.show_token_info;
+        self.status = format!(
+            "Token info display: {}",
+            if self.show_token_info { "on" } else { "off" }
         );
         self.mark_history_dirty();
     }

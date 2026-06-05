@@ -60,6 +60,10 @@ impl Commands {
                 name: "thinking",
                 description: "Toggle rendering of thinking messages on/off",
             },
+            Command {
+                name: "show-tokens",
+                description: "Toggle rendering of token info messages on/off",
+            },
         ]
     }
 
@@ -161,6 +165,11 @@ impl Commands {
             }
             "thinking" => {
                 app.toggle_thinking();
+                Input::clear_input(app);
+                InputMode::PromptInput
+            }
+            "show-tokens" => {
+                app.toggle_token_info();
                 Input::clear_input(app);
                 InputMode::PromptInput
             }

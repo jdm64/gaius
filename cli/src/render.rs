@@ -488,7 +488,12 @@ impl Render {
         app.history_scroll = clamped_scroll;
     }
 
-    pub fn render_message(&self, msg: &TuiMessage, show_thinking: bool) -> Vec<Line<'static>> {
+    pub fn render_message(
+        &self,
+        msg: &TuiMessage,
+        show_thinking: bool,
+        show_token_info: bool,
+    ) -> Vec<Line<'static>> {
         match msg {
             TuiMessage::Thinking(text) => {
                 if !show_thinking {
@@ -587,6 +592,9 @@ impl Render {
                 vec![Line::from(text.clone()).style(style)]
             }
             TuiMessage::TokenInfo(text) => {
+                if !show_token_info {
+                    return vec![];
+                }
                 let style = Style::default().fg(self.theme.header);
                 vec![Line::from(text.clone()).style(style).right_aligned()]
             }
@@ -794,7 +802,7 @@ impl Render {
                 }
             }
 
-            lines.extend(self.render_message(message, app.show_thinking));
+            lines.extend(self.render_message(message, app.show_thinking, app.show_token_info));
         }
 
         lines

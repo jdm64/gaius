@@ -13,7 +13,7 @@ fn markdown_heading_has_bold_style() {
     let render = Render::new();
     let md = "# Heading";
     let msg = TuiMessage::AgentMessage(md.to_string());
-    let lines = render.render_message(&msg, false);
+    let lines = render.render_message(&msg, false, true);
     assert!(!lines.is_empty());
     // The heading style should be applied to the Line's style, not the span.
     let line = &lines[0];
@@ -37,7 +37,7 @@ fn markdown_list_has_style() {
     let render = Render::new();
     let md = "- item1\n- item2";
     let msg = TuiMessage::AgentMessage(md.to_string());
-    let lines = render.render_message(&msg, false);
+    let lines = render.render_message(&msg, false, true);
     assert!(!lines.is_empty());
     // List items should have a style (maybe a marker).
     // Check lines contain the items; style might be default but marker could have style?
@@ -112,7 +112,7 @@ fn visible_history_lines_handles_empty_history() {
 #[test]
 fn visible_history_lines_pads_user_prompts_to_width() {
     let render = Render::new();
-    let lines = render.render_message(&TuiMessage::UserPrompt("hello".to_string()), false);
+    let lines = render.render_message(&TuiMessage::UserPrompt("hello".to_string()), false, true);
 
     let visible = render.visible_history_lines(&lines, 10, 0, 3);
 
