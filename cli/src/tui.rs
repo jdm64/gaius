@@ -394,6 +394,9 @@ impl TuiApp {
 
     fn apply_harness_event(&mut self, event: HarnessEvent) {
         match event {
+            HarnessEvent::SystemMessage(text) => {
+                self.push_message(TuiMessage::SystemMessage(text));
+            }
             HarnessEvent::UserPrompt(prompt_msg) => {
                 self.push_message(TuiMessage::UserPrompt(prompt_msg));
             }
@@ -477,6 +480,9 @@ impl TuiApp {
     pub fn load_history(&mut self, harness: &Harness) {
         self.messages.clear();
         harness.replay_history(|event| match event {
+            HarnessEvent::SystemMessage(text) => {
+                self.push_message(TuiMessage::SystemMessage(text));
+            }
             HarnessEvent::UserPrompt(text) => {
                 self.push_message(TuiMessage::UserPrompt(text));
             }

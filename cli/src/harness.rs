@@ -33,6 +33,10 @@ use genai::{
 use std::{
     error::Error,
     io::{self, Write},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 pub fn create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
@@ -62,6 +66,7 @@ pub async fn validate_model(
 pub enum HarnessEvent {
     UserPrompt(String),
     AgentMessage(String),
+    SystemMessage(String),
     Thinking(String),
     ToolCall {
         name: String,
@@ -99,6 +104,7 @@ pub struct Harness {
     session: Session,
     token_usage: TokenUsageLedger,
     streaming: bool,
+    canceled: Arc<AtomicBool>,
 }
 
 impl Harness {
@@ -130,6 +136,7 @@ impl Harness {
             session,
             token_usage,
             streaming: true,
+            canceled: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -155,6 +162,18 @@ impl Harness {
 
     pub fn set_streaming(&mut self, streaming: bool) {
         self.streaming = streaming;
+    }
+
+    fn is_cancel(&self) -> bool {
+        self.canceled.load(Ordering::Relaxed)
+    }
+
+    pub fn set_cancel(&self, val: bool) {
+        self.canceled.store(val, Ordering::Relaxed);
+    }
+
+    pub fn cancel_handle(&self) -> Arc<AtomicBool> {
+        self.canceled.clone()
     }
 
     pub fn set_model(&mut self, client: Client, model: String) {
@@ -363,6 +382,15 @@ impl Harness {
                 let _ = io::stdout().flush();
                 None
             }
+            HarnessEvent::SystemMessage(text) => {
+                if !agent_started {
+                    print!("agent> ");
+                    agent_started = true;
+                }
+                print!("{}", text);
+                let _ = io::stdout().flush();
+                None
+            }
             HarnessEvent::ToolCall {
                 name,
                 arguments,
@@ -424,18 +452,30 @@ impl Harness {
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
+        self.set_cancel(false);
         on_event(HarnessEvent::UserPrompt(prompt.clone()));
         self.history.messages.push(ChatMessage::user(prompt));
 
         loop {
+            if self.is_cancel() {
+                self.send_system_message("Request Cancelled".to_string(), &mut on_event);
+                return Ok(());
+            }
+
             let tool_calls = if self.streaming {
                 self.send_request_streaming(&mut on_event).await?
             } else {
                 self.send_request_waiting(&mut on_event).await?
             };
+
             self.call_tools(&tool_calls, &mut on_event);
+
             self.save_history()?;
+
             if tool_calls.is_empty() {
+                if self.is_cancel() {
+                    self.send_system_message("Request Cancelled".to_string(), &mut on_event);
+                }
                 return Ok(());
             }
         }
@@ -484,6 +524,10 @@ impl Harness {
                     stream_end = Some(end);
                 }
                 ChatStreamEvent::Start | ChatStreamEvent::ToolCallChunk(_) => {}
+            }
+
+            if self.is_cancel() {
+                return Ok(vec![]);
             }
         }
 
@@ -553,6 +597,9 @@ impl Harness {
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         for tc in tool_calls {
+            if self.is_cancel() {
+                return;
+            }
             let result = self.tool_engine.execute(&tc.fn_name, &tc.fn_arguments);
             match result {
                 ToolResult::Question(title, options) => {
@@ -568,6 +615,13 @@ impl Harness {
                 }
             }
         }
+    }
+
+    fn send_system_message<F>(&self, message: String, on_event: &mut F)
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        on_event(HarnessEvent::SystemMessage(message));
     }
 
     fn send_tool_call_event<F>(

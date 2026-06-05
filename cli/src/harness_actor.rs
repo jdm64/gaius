@@ -18,6 +18,7 @@ use crate::{
     harness::{Harness, HarnessEvent, HarnessSnapshot},
 };
 use genai::Client;
+use std::sync::atomic::Ordering;
 use tokio::sync::{mpsc, oneshot};
 
 type CommandResult = Result<HarnessSnapshot, String>;
@@ -60,6 +61,7 @@ pub enum HarnessCommand {
     ReplayHistory {
         reply_tx: oneshot::Sender<CommandResult>,
     },
+    Cancel,
     Shutdown {
         reply_tx: oneshot::Sender<HarnessSnapshot>,
     },
@@ -159,6 +161,13 @@ impl HarnessActorHandle {
             .map_err(|_| "Harness actor stopped".to_string())?
     }
 
+    pub async fn cancel(&self) -> Result<(), String> {
+        self.tx
+            .send(HarnessCommand::Cancel)
+            .await
+            .map_err(|_| "Harness actor stopped".to_string())
+    }
+
     pub async fn shutdown(&self) -> Result<HarnessSnapshot, String> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
@@ -180,24 +189,47 @@ async fn run_actor(
         match command {
             HarnessCommand::RunPrompt(prompt) => {
                 let _ = event_tx.send(HarnessActorEvent::TurnStarted);
-                let result: Result<(), String> = harness
-                    .run_turn_with_events(prompt, |event| match event {
-                        HarnessEvent::AskUser { title, options } => {
-                            let (answer_tx, answer_rx) = oneshot::channel();
-                            let _ = event_tx.send(HarnessActorEvent::AskUser {
-                                title,
-                                options,
-                                answer_tx,
-                            });
-                            Some(futures::executor::block_on(answer_rx).unwrap_or_default())
+                let cancel_flag = harness.cancel_handle();
+                let on_event = {
+                    let event_tx = event_tx.clone();
+                    move |event: HarnessEvent| -> Option<String> {
+                        match event {
+                            HarnessEvent::AskUser { title, options } => {
+                                let (answer_tx, answer_rx) = oneshot::channel();
+                                let _ = event_tx.send(HarnessActorEvent::AskUser {
+                                    title,
+                                    options,
+                                    answer_tx,
+                                });
+                                Some(futures::executor::block_on(answer_rx).unwrap_or_default())
+                            }
+                            event => {
+                                let _ = event_tx.send(HarnessActorEvent::Harness(event));
+                                None
+                            }
                         }
-                        event => {
-                            let _ = event_tx.send(HarnessActorEvent::Harness(event));
-                            None
+                    }
+                };
+
+                let mut turn = Box::pin(harness.run_turn_with_events(prompt, on_event));
+                let result: Result<(), String> = loop {
+                    tokio::select! {
+                        result = &mut turn => {
+                            break result.map_err(|err| err.to_string());
                         }
-                    })
-                    .await
-                    .map_err(|err| err.to_string());
+                        cmd = command_rx.recv() => {
+                            match cmd {
+                                Some(HarnessCommand::Cancel) => {
+                                    cancel_flag.store(true, Ordering::Relaxed);
+                                }
+                                Some(_) => {}
+                                None => break Err("Actor channel closed".into()),
+                            }
+                        }
+                    }
+                };
+
+                drop(turn);
 
                 let current = harness.snapshot();
                 match result {
@@ -247,6 +279,9 @@ async fn run_actor(
                 harness.replay_history(|event| events.push(event));
                 let _ = event_tx.send(HarnessActorEvent::HistoryReplayed(events));
                 let _ = reply_tx.send(Ok(harness.snapshot()));
+            }
+            HarnessCommand::Cancel => {
+                harness.set_cancel(true);
             }
             HarnessCommand::Shutdown { reply_tx } => {
                 let _ = reply_tx.send(harness.snapshot());

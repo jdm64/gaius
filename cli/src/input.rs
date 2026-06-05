@@ -186,6 +186,10 @@ impl Input {
     ) -> Result<InputMode, Box<dyn Error>> {
         Self::handle_input_cursor(app, key);
         match key.code {
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.status = "Cancelling agent...".to_string();
+                actor.cancel().await?;
+            }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Ok(InputMode::Exit);
             }
