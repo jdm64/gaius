@@ -137,7 +137,7 @@ fn draw_input_expands_height_for_wrapped_prompt() {
 
     assert_eq!(
         terminal.get_cursor_position().unwrap(),
-        Position { x: 5, y: 6 }
+        Position { x: 5, y: 5 }
     );
 }
 
@@ -153,7 +153,7 @@ fn draw_input_places_cursor_on_next_wrapped_line_at_boundary() {
 
     assert_eq!(
         terminal.get_cursor_position().unwrap(),
-        Position { x: 2, y: 6 }
+        Position { x: 2, y: 5 }
     );
 }
 

@@ -39,7 +39,6 @@ struct PickListRenderSpec {
     title: &'static str,
     max_width: u16,
     empty_text: &'static str,
-    help_items: Vec<(&'static str, &'static str)>,
     background: Style,
 }
 
@@ -96,12 +95,14 @@ impl Render {
         let area = frame.area();
         let input_width = area.width - 4;
         let input_prompt = self.input_prompt_lines(app.input.clone(), input_width);
+        let input_height = 2 + input_prompt.len() as u16;
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(1),
-                Constraint::Length(2 + input_prompt.len() as u16),
+                Constraint::Length(input_height),
+                Constraint::Length(1),
             ])
             .split(area);
 
@@ -109,112 +110,105 @@ impl Render {
         self.draw_history(app, frame, chunks[0]);
         self.draw_input(app, frame, chunks[1], input_prompt, input_width as usize);
 
-        match &app.mode {
-            InputMode::Command { picker } => {
-                self.draw_commands(frame, chunks[1], picker);
-            }
-            InputMode::Session { picker } => {
-                self.draw_sessions(frame, chunks[1], picker, false);
-            }
+        let active_help: Option<Vec<(&'static str, &'static str)>> = match &app.mode {
+            InputMode::Command { picker } => self.draw_commands(frame, chunks[1], picker),
+            InputMode::Session { picker } => self.draw_sessions(frame, chunks[1], picker, false),
             InputMode::SessionRename { picker } => {
-                self.draw_sessions(frame, chunks[1], picker, true);
+                self.draw_sessions(frame, chunks[1], picker, true)
             }
-            InputMode::Models { picker } => {
-                self.draw_models(frame, chunks[1], picker);
-            }
+            InputMode::Models { picker } => self.draw_models(frame, chunks[1], picker),
             InputMode::AddProvider { picker } => {
-                self.draw_add_provider(frame, chunks[1], picker, app.input.as_str());
+                self.draw_add_provider(frame, chunks[1], picker, app.input.as_str())
             }
-            InputMode::Agents { picker } => {
-                self.draw_agents(frame, chunks[1], picker);
-            }
-            InputMode::Files { picker } => {
-                self.draw_files(frame, chunks[1], picker);
-            }
-            InputMode::PromptInput | InputMode::Exit => {}
+            InputMode::Agents { picker } => self.draw_agents(frame, chunks[1], picker),
+            InputMode::Files { picker } => self.draw_files(frame, chunks[1], picker),
+            InputMode::PromptInput | InputMode::Exit => None,
             InputMode::Question {
                 title,
                 options,
                 selected,
-            } => {
-                self.draw_question(frame, chunks[1], title, options, *selected);
-            }
-        }
+            } => self.draw_question(frame, chunks[1], title, options, *selected),
+        };
+
+        let help_items = active_help.unwrap_or(vec![("Ctrl+C", "quit"), ("Ctrl+D", "cancel")]);
+        let help_para = Paragraph::new(self.help_spec_to_text(help_items.clone()))
+            .block(Block::default().borders(Borders::NONE));
+        frame.render_widget(help_para, chunks[2]);
     }
 
-    fn draw_commands(&self, frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<Command>) {
+    fn draw_commands(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        picker: &PickList<Command>,
+    ) -> Option<Vec<(&'static str, &'static str)>> {
         self.draw_pick_list(
             frame,
-            input_area,
+            area,
             picker,
             PickListRenderSpec {
                 title: "Commands",
                 max_width: 50,
                 empty_text: "No matching commands",
-                help_items: vec![("Type", "filter"), ("Enter", "select"), ("Esc", "close")],
                 background: Style::default(),
             },
             |cmd, _index| ListItem::new(format!("/{} - {}", cmd.name, cmd.description)),
         );
+        Some(vec![
+            ("Type", "filter"),
+            ("Enter", "select"),
+            ("Esc", "close"),
+        ])
     }
 
     fn draw_sessions(
         &self,
         frame: &mut Frame<'_>,
-        input_area: Rect,
+        area: Rect,
         picker: &PickList<Session>,
         renaming: bool,
-    ) {
-        let help_text = if renaming {
-            vec![("Enter", "save"), ("Esc", "cancel")]
-        } else {
-            vec![
-                ("Enter", "load"),
-                ("Ctrl+E", "rename"),
-                ("Ctrl+D", "delete"),
-                ("Esc", "close"),
-            ]
-        };
+    ) -> Option<Vec<(&'static str, &'static str)>> {
         self.draw_pick_list(
             frame,
-            input_area,
+            area,
             picker,
             PickListRenderSpec {
                 title: "Sessions",
                 max_width: 50,
                 empty_text: "No sessions",
-                help_items: help_text,
                 background: Style::default(),
             },
             |session, _index| ListItem::new(session.display_name()),
         );
+        if renaming {
+            Some(vec![("Enter", "save"), ("Esc", "cancel")])
+        } else {
+            Some(vec![
+                ("Enter", "load"),
+                ("Ctrl+E", "rename"),
+                ("Ctrl+D", "delete"),
+                ("Esc", "close"),
+            ])
+        }
     }
 
     fn draw_models(
         &self,
         frame: &mut Frame<'_>,
-        input_area: Rect,
+        area: Rect,
         picker: &PickList<ModelPickerRow>,
-    ) {
+    ) -> Option<Vec<(&'static str, &'static str)>> {
         let display_rows = Self::model_display_rows(picker);
         let header_color = self.theme.header;
         self.draw_indexed_pick_list(
             frame,
-            input_area,
+            area,
             picker,
             &display_rows,
             PickListRenderSpec {
                 title: "Models",
                 max_width: 80,
                 empty_text: "No matching models",
-                help_items: vec![
-                    ("Type", "filter"),
-                    ("Enter", "select"),
-                    ("Ctrl+N", "add provider"),
-                    ("Ctrl+R", "reload"),
-                    ("Ctrl+D", "delete"),
-                    ("Esc", "close"),
-                ],
                 background: Style::default(),
             },
             |row, _index| match row {
@@ -227,32 +221,34 @@ impl Render {
                 }
             },
         );
+        Some(vec![
+            ("Type", "filter"),
+            ("Enter", "select"),
+            ("Ctrl+N", "add provider"),
+            ("Ctrl+R", "reload"),
+            ("Ctrl+D", "delete"),
+            ("Esc", "close"),
+        ])
     }
 
     fn draw_add_provider(
         &self,
         frame: &mut Frame<'_>,
-        input_area: Rect,
+        area: Rect,
         picker: &PickList<ProviderInfoRow>,
         active_input: &str,
-    ) {
+    ) -> Option<Vec<(&'static str, &'static str)>> {
         let selected = picker.selected;
         let indices: Vec<usize> = (0..picker.rows.len()).collect();
         self.draw_indexed_pick_list(
             frame,
-            input_area,
+            area,
             picker,
             &indices,
             PickListRenderSpec {
                 title: "Add Provider",
                 max_width: 80,
                 empty_text: "",
-                help_items: vec![
-                    ("Type", "edit"),
-                    ("Up/Down", "field"),
-                    ("Enter", "validate/save"),
-                    ("Esc", "cancel"),
-                ],
                 background: Style::default(),
             },
             |row, index| {
@@ -264,53 +260,72 @@ impl Render {
                 ListItem::new(format!("{}: {}", row.label(), display_value))
             },
         );
+        Some(vec![
+            ("Type", "edit"),
+            ("Up/Down", "field"),
+            ("Enter", "validate/save"),
+            ("Esc", "cancel"),
+        ])
     }
 
     fn draw_agents(
         &self,
         frame: &mut Frame<'_>,
-        input_area: Rect,
+        area: Rect,
         picker: &PickList<AgentDefinition>,
-    ) {
+    ) -> Option<Vec<(&'static str, &'static str)>> {
         self.draw_pick_list(
             frame,
-            input_area,
+            area,
             picker,
             PickListRenderSpec {
                 title: "Agents",
                 max_width: 60,
                 empty_text: "No matching agents",
-                help_items: vec![("Type", "filter"), ("Enter", "select"), ("Esc", "close")],
                 background: Style::default(),
             },
             |agent, _index| ListItem::new(agent.name.as_str()),
         );
+        Some(vec![
+            ("Type", "filter"),
+            ("Enter", "select"),
+            ("Esc", "close"),
+        ])
     }
 
-    fn draw_files(&self, frame: &mut Frame<'_>, input_area: Rect, picker: &PickList<FileEntry>) {
+    fn draw_files(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        picker: &PickList<FileEntry>,
+    ) -> Option<Vec<(&'static str, &'static str)>> {
         self.draw_pick_list(
             frame,
-            input_area,
+            area,
             picker,
             PickListRenderSpec {
                 title: "Files",
                 max_width: 60,
                 empty_text: "No matching files",
-                help_items: vec![("Type", "filter"), ("Enter", "select"), ("Esc", "close")],
                 background: Style::default(),
             },
             |file, _index| ListItem::new(file.name.clone()),
         );
+        Some(vec![
+            ("Type", "filter"),
+            ("Enter", "select"),
+            ("Esc", "close"),
+        ])
     }
 
     fn draw_question(
         &self,
         frame: &mut Frame<'_>,
-        input_area: Rect,
+        area: Rect,
         title: &str,
         options: &[String],
         selected: usize,
-    ) {
+    ) -> Option<Vec<(&'static str, &'static str)>> {
         let wrap_width: usize = 70usize.saturating_sub(4).max(1);
 
         let mut rows: Vec<QuestionRow> = Vec::new();
@@ -345,19 +360,13 @@ impl Render {
 
         self.draw_indexed_pick_list(
             frame,
-            input_area,
+            area,
             &picker,
             &picker.filtered,
             PickListRenderSpec {
                 title: "Question",
                 max_width: 70,
                 empty_text: "",
-                help_items: vec![
-                    ("Type", "add response"),
-                    ("Enter", "send"),
-                    ("Up/Down", "select"),
-                    ("Tab", "cancel"),
-                ],
                 background: Style::default().bg(self.theme.inputbox),
             },
             |row, _index| match row {
@@ -366,25 +375,31 @@ impl Render {
                 QuestionRow::Option(i, text) => ListItem::new(format!("{}) {}", i + 1, text)),
             },
         );
+        Some(vec![
+            ("Type", "add response"),
+            ("Enter", "send"),
+            ("Up/Down", "select"),
+            ("Tab", "cancel"),
+        ])
     }
 
     fn draw_pick_list<'a, T, F>(
         &self,
         frame: &mut Frame<'_>,
-        input_area: Rect,
+        area: Rect,
         picker: &'a PickList<T>,
         spec: PickListRenderSpec,
         row_item: F,
     ) where
         F: Fn(&'a T, usize) -> ListItem<'a>,
     {
-        self.draw_indexed_pick_list(frame, input_area, picker, &picker.filtered, spec, row_item);
+        self.draw_indexed_pick_list(frame, area, picker, &picker.filtered, spec, row_item);
     }
 
     fn draw_indexed_pick_list<'a, T, F>(
         &self,
         frame: &mut Frame<'_>,
-        input_area: Rect,
+        area: Rect,
         picker: &'a PickList<T>,
         display_rows: &[usize],
         spec: PickListRenderSpec,
@@ -394,13 +409,10 @@ impl Render {
     {
         let row_count = display_rows.len().max(1);
         let visible_rows = (row_count as u16).clamp(1, 10);
-        let help_height = 1u16;
-        let width = spec
-            .max_width
-            .min(input_area.width.saturating_sub(4).max(1));
-        let height = visible_rows + 2 + help_height;
-        let x = input_area.x + 2;
-        let y = input_area.y - height;
+        let width = spec.max_width.min(area.width.saturating_sub(4).max(1));
+        let height = visible_rows + 2;
+        let x = area.x + 2;
+        let y = area.y - height;
         let rect = Rect::new(x, y, width, height);
 
         let selected_row = picker.selected_row_index().unwrap_or(0);
@@ -435,20 +447,8 @@ impl Render {
                 .style(spec.background),
         );
 
-        let help_para = Paragraph::new(self.help_spec_to_text(spec.help_items))
-            .block(Block::default().borders(Borders::NONE));
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(visible_rows + 2),
-                Constraint::Length(help_height),
-            ])
-            .split(rect);
-
         frame.render_widget(Clear, rect);
-        frame.render_widget(list, chunks[0]);
-        frame.render_widget(help_para, chunks[1]);
+        frame.render_widget(list, rect);
     }
 
     fn draw_history(&self, app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
