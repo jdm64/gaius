@@ -15,7 +15,7 @@
 
 use gaius::config::Config;
 use gaius::harness::Harness;
-use gaius::models::Models;
+use gaius::models::{Models, RecentModelDef};
 use gaius::tui::TuiApp;
 use pico_args::Arguments;
 use std::error::Error;
@@ -89,17 +89,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut config = Config::new();
     config.load().await?;
 
-    let selected_model = match config.select_first_model().await {
-        Ok(model) => model,
-        Err(err) => {
-            eprintln!("{}", err);
-            std::process::exit(1);
-        }
+    let selected_models = config.configured_models();
+    let Some(selected_model) = selected_models.first() else {
+        eprintln!("Unable to find configured model");
+        std::process::exit(1);
+    };
+
+    let cached_models = Models::list(&config).await.unwrap_or_default();
+    if cached_models.is_empty() {
+        eprintln!("Unable to load model cache");
+        std::process::exit(1);
+    }
+
+    let r_model = vec![RecentModelDef {
+        provider: selected_model.provider_name.clone(),
+        id: selected_model.model_id.clone(),
+    }];
+
+    let resolved_models = RecentModelDef::from_cache(&r_model, &cached_models);
+    let Some(first_model) = resolved_models.first() else {
+        eprintln!("Unable to load model from cache");
+        std::process::exit(1);
+    };
+
+    let Ok(client) = selected_model.create_client() else {
+        eprintln!("Unable to create client");
+        std::process::exit(1);
     };
 
     let mut harness = Harness::new(
-        selected_model.client,
-        selected_model.model_id.clone(),
+        client,
+        first_model.clone(),
         config.agents().default_agent().clone(),
         initial_prompt,
         args.session_id,
@@ -114,10 +134,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     } else {
         // restore the last used model instead of what' in config
-        if let Some(model) = Models::load_recent().unwrap_or_default().first()
+        if let Some(model) = RecentModelDef::load(&cached_models).first()
             && let Ok(client) = model.create_client(&config)
         {
-            harness.set_model(client, model.id.clone());
+            harness.set_model(client, model.clone());
         }
 
         let snapshot = TuiApp::new(config).run(harness).await?;

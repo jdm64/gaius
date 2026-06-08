@@ -469,10 +469,23 @@ impl Render {
             text_height as usize,
         );
 
-        let title = if let Some(tokens) = app.context_tokens {
-            format!(" Gaius - {} - {} - {} ", app.model, app.agent_name, tokens)
-        } else {
-            format!(" Gaius - {} - {} ", app.model, app.agent_name)
+        let title = match (app.context_tokens, app.model.context_len) {
+            (Some(tokens), Some(context_len)) if context_len > 0 => {
+                let pct = tokens as f64 / context_len as f64 * 100.0;
+                format!(
+                    " Gaius - {} - {} - {} ({:.0}%) ",
+                    app.model.id, app.agent_name, tokens, pct
+                )
+            }
+            (Some(tokens), _) => {
+                format!(
+                    " Gaius - {} - {} - {} ",
+                    app.model.id, app.agent_name, tokens
+                )
+            }
+            _ => {
+                format!(" Gaius - {} - {} ", app.model.id, app.agent_name)
+            }
         };
 
         let history = Paragraph::new(Text::from(lines))

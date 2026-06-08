@@ -16,6 +16,7 @@
 use crate::{
     agents::AgentDefinition,
     harness::{Harness, HarnessEvent, HarnessSnapshot},
+    models::ModelDef,
 };
 use genai::Client;
 use std::sync::atomic::Ordering;
@@ -41,7 +42,7 @@ pub enum HarnessCommand {
     RunPrompt(String),
     SetModel {
         client: Client,
-        model: String,
+        model: ModelDef,
         reply_tx: oneshot::Sender<CommandResult>,
     },
     SetAgent {
@@ -88,7 +89,7 @@ impl HarnessActorHandle {
             .map_err(|_| "Harness actor stopped".to_string())
     }
 
-    pub async fn set_model(&self, client: Client, model: String) -> CommandResult {
+    pub async fn set_model(&self, client: Client, model: ModelDef) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
             .send(HarnessCommand::SetModel {

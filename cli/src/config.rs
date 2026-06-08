@@ -15,11 +15,14 @@
 
 use crate::{
     agents::Agents,
-    harness::{create_client, validate_model},
+    harness::validate_model,
     util::{config_dir, prompt_input},
 };
-use genai::Client;
-use genai::adapter::AdapterKind;
+use genai::{
+    Client, ModelIden, ServiceTarget,
+    adapter::AdapterKind,
+    resolver::{AuthData, Endpoint, ServiceTargetResolver},
+};
 use serde::{Deserialize, Serialize};
 use std::{error::Error, path::PathBuf};
 use url::Url;
@@ -49,9 +52,55 @@ pub struct ModelConfig {
     pub id: String,
 }
 
-pub struct SelectedModel {
-    pub client: Client,
+pub struct ConfiguredModel {
+    pub provider_name: String,
+    pub provider_kind: String,
+    pub provider_url: String,
+    pub provider_key: String,
     pub model_id: String,
+}
+
+impl ConfiguredModel {
+    pub fn new(provider: ProviderConfig, model: ModelConfig) -> ConfiguredModel {
+        ConfiguredModel {
+            provider_name: provider.name,
+            provider_kind: provider.kind,
+            provider_url: provider.url,
+            provider_key: provider.key,
+            model_id: model.id,
+        }
+    }
+
+    pub fn create_client(&self) -> Result<Client, Box<dyn Error>> {
+        let kind =
+            AdapterKind::from_lower_str(&self.provider_kind.to_lowercase()).ok_or_else(|| {
+                format!(
+                    "Provider '{}' has invalid kind '{}'.",
+                    self.provider_name, self.provider_kind
+                )
+            })?;
+
+        Ok(Self::raw_create_client(
+            kind,
+            self.provider_url.clone(),
+            self.provider_key.clone(),
+            self.model_id.clone(),
+        ))
+    }
+
+    fn raw_create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
+        let resolver = ServiceTargetResolver::from_resolver_fn(
+            move |mut service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
+                service_target.endpoint = Endpoint::from_owned(url.clone());
+                service_target.auth = AuthData::Key(key.clone());
+                service_target.model = ModelIden::new(kind, model.clone());
+                Ok(service_target)
+            },
+        );
+        Client::builder()
+            .with_service_target_resolver(resolver)
+            .build()
+    }
 }
 
 pub fn config_file() -> Result<PathBuf, Box<dyn Error>> {
@@ -112,19 +161,34 @@ impl Config {
                 Err(_) => "default".to_string(),
             };
 
-            let client = create_client(adapter_kind, url.clone(), key.clone(), model_id.clone());
-            match validate_model(&client, &model_id).await {
+            let model = ConfiguredModel {
+                provider_name: name,
+                provider_kind: adapter_kind.as_lower_str().to_string(),
+                provider_url: url,
+                provider_key: key,
+                model_id,
+            };
+
+            let client = match model.create_client() {
+                Ok(client) => client,
+                Err(err) => {
+                    eprintln!("Error creating client: {}", err);
+                    continue;
+                }
+            };
+
+            match validate_model(&client, &model.model_id.clone()).await {
                 Ok(()) => {
                     let provider = ProviderConfig {
-                        name: name.to_string(),
-                        url,
-                        kind: adapter_kind.as_lower_str().to_string(),
-                        key,
+                        name: model.provider_name.clone(),
+                        url: model.provider_url,
+                        kind: model.provider_kind,
+                        key: model.provider_key.clone(),
                     };
                     let model = ModelConfig {
-                        name: model_id.clone(),
-                        provider: name.to_string(),
-                        id: model_id,
+                        name: model.model_id.clone(),
+                        provider: model.provider_name.clone(),
+                        id: model.model_id.clone(),
                     };
                     let config = Config {
                         provider: vec![provider],
@@ -145,48 +209,28 @@ impl Config {
         }
     }
 
-    pub async fn select_first_model(&self) -> Result<SelectedModel, Box<dyn Error>> {
-        for model in &self.model {
-            let provider = match self
-                .provider
-                .iter()
-                .find(|provider| provider.name == model.provider)
-            {
-                Some(provider) => provider,
-                None => {
-                    eprintln!(
-                        "Model '{}' references missing provider '{}'.",
-                        model.name, model.provider
-                    );
-                    continue;
-                }
-            };
+    pub fn configured_models(&self) -> Vec<ConfiguredModel> {
+        self.model
+            .iter()
+            .filter_map(|model| {
+                let provider = match self
+                    .provider
+                    .iter()
+                    .find(|provider| provider.name == model.provider)
+                {
+                    Some(provider) => provider,
+                    None => {
+                        eprintln!(
+                            "Model '{}' references missing provider '{}'.",
+                            model.name, model.provider
+                        );
+                        return None;
+                    }
+                };
 
-            let adapter_kind = match AdapterKind::from_lower_str(&provider.kind.to_lowercase()) {
-                Some(kind) => kind,
-                None => {
-                    eprintln!(
-                        "Provider '{}' has invalid kind '{}'.",
-                        provider.name, provider.kind
-                    );
-                    continue;
-                }
-            };
-
-            let client = create_client(
-                adapter_kind,
-                provider.url.clone(),
-                provider.key.clone(),
-                model.id.clone(),
-            );
-
-            return Ok(SelectedModel {
-                client,
-                model_id: model.id.clone(),
-            });
-        }
-
-        Err("No valid model was found. Check config file.".into())
+                Some(ConfiguredModel::new(provider.clone(), model.clone()))
+            })
+            .collect()
     }
 
     pub fn providers(&self) -> &[ProviderConfig] {

@@ -15,6 +15,7 @@
 
 use crate::{
     agents::AgentDefinition,
+    models::ModelDef,
     session::Session,
     token_usage::{TokenUsageLedger, format_arrows},
     tools::{ToolEngine, ToolResult},
@@ -22,13 +23,11 @@ use crate::{
 };
 use futures::StreamExt;
 use genai::{
-    Client, ModelIden, ServiceTarget,
-    adapter::AdapterKind,
+    Client,
     chat::{
         ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, ContentPart, ToolCall,
         ToolResponse,
     },
-    resolver::{AuthData, Endpoint, ServiceTargetResolver},
 };
 use std::{
     error::Error,
@@ -38,20 +37,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-
-pub fn create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
-    let resolver = ServiceTargetResolver::from_resolver_fn(
-        move |mut service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
-            service_target.endpoint = Endpoint::from_owned(url.clone());
-            service_target.auth = AuthData::Key(key.clone());
-            service_target.model = ModelIden::new(kind, model.clone());
-            Ok(service_target)
-        },
-    );
-    Client::builder()
-        .with_service_target_resolver(resolver)
-        .build()
-}
 
 pub async fn validate_model(
     client: &Client,
@@ -89,7 +74,7 @@ pub enum HarnessEvent {
 pub struct HarnessSnapshot {
     pub session_id: Option<String>,
     pub has_history: bool,
-    pub model: String,
+    pub model: ModelDef,
     pub agent_name: String,
     pub streaming: bool,
 }
@@ -98,7 +83,7 @@ pub struct Harness {
     history: ChatRequest,
     client: Client,
     tool_engine: ToolEngine,
-    model: String,
+    model: ModelDef,
     agent: AgentDefinition,
     oneshot_prompt: Option<String>,
     session: Session,
@@ -110,7 +95,7 @@ pub struct Harness {
 impl Harness {
     pub fn new(
         client: Client,
-        model: String,
+        model: ModelDef,
         agent: AgentDefinition,
         oneshot_prompt: Option<String>,
         session_id: Option<String>,
@@ -148,7 +133,7 @@ impl Harness {
         self.session.id.clone()
     }
 
-    pub fn model(&self) -> &String {
+    pub fn model(&self) -> &ModelDef {
         &self.model
     }
 
@@ -176,7 +161,7 @@ impl Harness {
         self.canceled.clone()
     }
 
-    pub fn set_model(&mut self, client: Client, model: String) {
+    pub fn set_model(&mut self, client: Client, model: ModelDef) {
         self.client = client;
         self.model = model;
     }
@@ -497,7 +482,7 @@ impl Harness {
             .with_extra_headers(vec![("X-Stream-Options", "include_usage=true")]);
         let mut response = self
             .client
-            .exec_chat_stream(&self.model, self.history.clone(), Some(&chat_options))
+            .exec_chat_stream(&self.model.id, self.history.clone(), Some(&chat_options))
             .await?;
 
         let mut stream_end = None;
@@ -569,7 +554,7 @@ impl Harness {
         let prompt_message_end = self.history.messages.len();
         let response = self
             .client
-            .exec_chat(&self.model, self.history.clone(), None)
+            .exec_chat(&self.model.id, self.history.clone(), None)
             .await?;
 
         let full_text = response.content.texts().join("");

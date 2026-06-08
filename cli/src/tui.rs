@@ -20,6 +20,7 @@ use crate::{
     harness::{Harness, HarnessEvent, HarnessSnapshot},
     harness_actor::{HarnessActorEvent, HarnessActorHandle},
     input::{Input, InputMode},
+    models::ModelDef,
     render::Render,
     token_usage::format_arrows,
     util::cache_dir,
@@ -84,7 +85,7 @@ impl Drop for TerminalGuard {
 
 pub struct TuiApp {
     pub config: Config,
-    pub model: String,
+    pub model: ModelDef,
     pub agent_name: String,
     pub agents: Agents,
     pub input: String,
@@ -118,7 +119,11 @@ impl TuiApp {
         let agents = config.agents().clone();
         Self {
             config,
-            model: String::new(),
+            model: ModelDef {
+                provider: String::new(),
+                id: String::new(),
+                context_len: None,
+            },
             agent_name: String::new(),
             agents,
             input: String::new(),

@@ -18,7 +18,7 @@ use crate::{
     config::ProviderConfig,
     harness_actor::HarnessActorHandle,
     input::{Input, InputMode, PickList, ProviderInfoRow},
-    models::{ModelPickerRow, Models, model_picker_rows},
+    models::{ModelPickerRow, Models, RecentModelDef},
     session::Session,
     tui::{TuiApp, TuiMessage},
 };
@@ -422,14 +422,13 @@ impl Commands {
                                     .to_string();
                             return InputMode::Models { picker };
                         }
-                        let model_id = selected_model.id.clone();
-                        match actor.set_model(client, model_id.clone()).await {
+                        match actor.set_model(client, selected_model.clone()).await {
                             Ok(snapshot) => {
                                 app.apply_snapshot(&snapshot);
-                                app.model = model_id.clone();
-                                let _ = Models::remember_recent_model(selected_model);
+                                app.model = selected_model.clone();
+                                let _ = RecentModelDef::add(selected_model);
                                 Input::clear_input(app);
-                                app.status = format!("Selected model: {}", model_id);
+                                app.status = format!("Selected model: {}", selected_model.label());
                                 return InputMode::PromptInput;
                             }
                             Err(err) => app.status = err,
@@ -446,10 +445,11 @@ impl Commands {
                     app.status = "Can only delete recent models".to_string();
                     return InputMode::Models { picker };
                 };
-                match Models::forget_recent_model(&model) {
+                match RecentModelDef::remove(&model) {
                     Ok(updated_recent) => {
                         if let Ok(models) = Models::list(&app.config).await {
-                            let rows = model_picker_rows(&app.input, &models, &updated_recent);
+                            let recent = RecentModelDef::from_cache(&updated_recent, &models);
+                            let rows = Models::filter_rows(&app.input, &models, &recent);
                             let filtered = Input::filter_model_rows(&app.input, &rows);
                             picker.replace_rows(rows, filtered);
                         }
@@ -464,8 +464,8 @@ impl Commands {
                 app.status = "Reloading models...".to_string();
                 match Models::reload(&app.config).await {
                     Ok(reloaded_models) => {
-                        let recent_models = Models::load_recent().unwrap_or_default();
-                        let rows = model_picker_rows(&app.input, &reloaded_models, &recent_models);
+                        let recent = RecentModelDef::load(&reloaded_models);
+                        let rows = Models::filter_rows(&app.input, &reloaded_models, &recent);
                         let filtered = Input::filter_model_rows(&app.input, &rows);
                         let count = reloaded_models.len();
                         picker.replace_rows(rows, filtered);
@@ -540,12 +540,12 @@ impl Commands {
                 }
 
                 app.status = "Validating provider...".to_string();
-                match Models::list_models(&provider).await {
+                match provider.list_models().await {
                     Ok(_) => match app.config.add_provider(provider) {
                         Ok(()) => match Models::reload(&app.config).await {
                             Ok(reloaded_models) => {
-                                let recent_models = Models::load_recent().unwrap_or_default();
-                                let rows = model_picker_rows("", &reloaded_models, &recent_models);
+                                let recent = RecentModelDef::load(&reloaded_models);
+                                let rows = Models::filter_rows("", &reloaded_models, &recent);
                                 let filtered = Input::filter_model_rows("", &rows);
                                 Input::clear_input(app);
                                 app.status = format!(
@@ -583,8 +583,8 @@ impl Commands {
     async fn build_models_picklist(app: &mut TuiApp) -> InputMode {
         match Models::list(&app.config).await {
             Ok(models) => {
-                let recent_models = Models::load_recent().unwrap_or_default();
-                let rows = model_picker_rows("", &models, &recent_models);
+                let recent = RecentModelDef::load(&models);
+                let rows = Models::filter_rows("", &models, &recent);
                 let filtered = Input::filter_model_rows("", &rows);
                 app.status = format!("Loaded {} models", models.len());
                 InputMode::Models {
