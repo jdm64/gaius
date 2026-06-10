@@ -674,14 +674,15 @@ impl Render {
         lines: Vec<Line<'static>>,
         width: usize,
     ) {
+        let mut block = Block::default()
+            .borders(Borders::ALL)
+            .style(Style::default().bg(self.theme.inputbox))
+            .padding(Padding::horizontal(1));
+        if !app.status.is_empty() {
+            block = block.title(format!(" {} ", app.status));
+        }
         let input = Paragraph::new(Text::from(lines))
-            .block(
-                Block::default()
-                    .title(format!(" {} ", app.status))
-                    .borders(Borders::ALL)
-                    .style(Style::default().bg(self.theme.inputbox))
-                    .padding(Padding::horizontal(1)),
-            )
+            .block(block)
             .wrap(Wrap { trim: false });
         frame.render_widget(input, area);
 

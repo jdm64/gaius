@@ -131,7 +131,7 @@ impl TuiApp {
             history_scroll: 0,
             history_page_size: 1,
             messages: Vec::new(),
-            status: "Ctrl-C to quit".to_string(),
+            status: "".to_string(),
             mode: InputMode::PromptInput,
             context_tokens: None,
             show_thinking: false,
@@ -296,7 +296,7 @@ impl TuiApp {
                 self.status = if self.queued_prompts > 0 {
                     format!("Queued prompt ({} pending)", self.queued_prompts)
                 } else {
-                    "Ctrl-C to quit".to_string()
+                    "".to_string()
                 };
                 Some(snapshot)
             }
