@@ -19,6 +19,7 @@ use crate::{
     input::{FileEntry, InputMode, PickList, ProviderInfoRow},
     models::ModelPickerRow,
     session::Session,
+    tools::ToolName,
     tui::{TuiApp, TuiMessage, wrapped_line_count},
 };
 use ratatui::{
@@ -561,21 +562,10 @@ impl Render {
             } => {
                 let style = Style::default().fg(self.theme.toolcall);
                 let json_args = from_str::<Value>(arguments).unwrap_or_default();
-                let display = match name.as_str() {
-                    "read_file" => Self::arguments_json_fields(
-                        &json_args,
-                        &["file_path", "start_line", "max_lines"],
-                    ),
-                    "create_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
-                    "edit_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
-                    "bash" => Self::arguments_json_fields(&json_args, &["command"]),
-                    "glob" => Self::arguments_json_fields(&json_args, &["path", "pattern"]),
-                    "grep" => {
-                        Self::arguments_json_fields(&json_args, &["path", "include", "pattern"])
-                    }
-                    "question" => Self::arguments_json_fields(&json_args, &["title"]),
-                    _ => "".to_string(),
-                };
+                let tool_name = ToolName::from_name(name.as_str());
+                let display = tool_name.map_or_else(String::new, |tool| {
+                    Self::arguments_json_fields(&json_args, tool.display_fields())
+                });
 
                 let spans = vec![
                     Span::styled(name.clone(), style.add_modifier(Modifier::BOLD)),
@@ -595,7 +585,7 @@ impl Render {
                         }
                     }
                 }
-                Self::render_tool_results(name, &json_args, result, &mut ret, style);
+                Self::render_tool_results(tool_name, &json_args, result, &mut ret, style);
                 ret
             }
             TuiMessage::SystemMessage(text) => {
@@ -615,14 +605,14 @@ impl Render {
     }
 
     fn render_tool_results(
-        name: &str,
+        name: Option<ToolName>,
         args: &Value,
         result: &str,
         lines: &mut Vec<Line>,
         style: Style,
     ) {
         match name {
-            "question" => {
+            Some(ToolName::Question) => {
                 let answers = result
                     .split("\n")
                     .map(|l| " - ".to_string() + l)
@@ -631,7 +621,7 @@ impl Render {
                     lines.push(Line::from(Span::styled::<String, Style>(l, style)));
                 }
             }
-            "plan" => {
+            Some(ToolName::Plan) => {
                 let mut md = String::new();
                 if let Some(goal) = args.get("goal").and_then(|g| g.as_str()) {
                     md.push_str("# Goal\n\n");

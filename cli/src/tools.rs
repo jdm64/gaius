@@ -29,12 +29,66 @@ pub enum ToolResult {
     Question(String, Vec<String>),
 }
 
-pub struct ToolEngine {}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ToolName {
+    ReadFile,
+    CreateFile,
+    EditFile,
+    Bash,
+    Glob,
+    Grep,
+    Question,
+    Plan,
+}
 
-impl ToolEngine {
-    pub fn build_tools(&self) -> Vec<Tool> {
-        vec![
-            Tool::new("read_file")
+impl ToolName {
+    pub const ALL: [ToolName; 8] = [
+        ToolName::ReadFile,
+        ToolName::CreateFile,
+        ToolName::EditFile,
+        ToolName::Bash,
+        ToolName::Glob,
+        ToolName::Grep,
+        ToolName::Question,
+        ToolName::Plan,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ToolName::ReadFile => "read_file",
+            ToolName::CreateFile => "create_file",
+            ToolName::EditFile => "edit_file",
+            ToolName::Bash => "bash",
+            ToolName::Glob => "glob",
+            ToolName::Grep => "grep",
+            ToolName::Question => "question",
+            ToolName::Plan => "plan",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<ToolName> {
+        ToolName::ALL
+            .iter()
+            .copied()
+            .find(|tool| tool.as_str() == name)
+    }
+
+    pub fn display_fields(self) -> &'static [&'static str] {
+        match self {
+            ToolName::ReadFile => &["file_path", "start_line", "max_lines"],
+            ToolName::CreateFile => &["file_path"],
+            ToolName::EditFile => &["file_path"],
+            ToolName::Bash => &["command"],
+            ToolName::Glob => &["path", "pattern"],
+            ToolName::Grep => &["path", "include", "pattern"],
+            ToolName::Question => &["title"],
+            ToolName::Plan => &[],
+        }
+    }
+
+    fn genai_tool(self) -> Tool {
+        match self {
+            ToolName::ReadFile => Tool::new(self.as_str())
                 .with_description("Read the contents of a file")
                 .with_schema(json!({
                     "type": "object",
@@ -56,7 +110,7 @@ impl ToolEngine {
                     },
                     "required": ["file_path"]
                 })),
-            Tool::new("create_file")
+            ToolName::CreateFile => Tool::new(self.as_str())
                 .with_description("Create a new file with the provided contents")
                 .with_schema(json!({
                     "type": "object",
@@ -72,7 +126,7 @@ impl ToolEngine {
                     },
                     "required": ["file_path", "contents"]
                 })),
-            Tool::new("edit_file")
+            ToolName::EditFile => Tool::new(self.as_str())
                 .with_description("Modify an existing file by replacing exactly one string match")
                 .with_schema(json!({
                     "type": "object",
@@ -92,7 +146,7 @@ impl ToolEngine {
                     },
                     "required": ["file_path", "find", "replace"]
                 })),
-            Tool::new("bash")
+            ToolName::Bash => Tool::new(self.as_str())
                 .with_description("Execute a bash command")
                 .with_schema(json!({
                     "type": "object",
@@ -104,7 +158,7 @@ impl ToolEngine {
                     },
                     "required": ["command"]
                 })),
-            Tool::new("glob")
+            ToolName::Glob => Tool::new(self.as_str())
                 .with_description("Find files matching a glob pattern")
                 .with_schema(json!({
                     "type": "object",
@@ -120,7 +174,7 @@ impl ToolEngine {
                     },
                     "required": ["pattern"]
                 })),
-            Tool::new("grep")
+            ToolName::Grep => Tool::new(self.as_str())
                 .with_description("Search file contents using regex pattern")
                 .with_schema(json!({
                     "type": "object",
@@ -144,7 +198,7 @@ impl ToolEngine {
                     },
                     "required": ["pattern", "path"]
                 })),
-            Tool::new("question")
+            ToolName::Question => Tool::new(self.as_str())
                 .with_description("Ask the user a question with optional choices")
                 .with_schema(json!({
                     "type": "object",
@@ -161,7 +215,7 @@ impl ToolEngine {
                     },
                     "required": ["title"]
                 })),
-            Tool::new("plan")
+            ToolName::Plan => Tool::new(self.as_str())
                 .with_description("Create a plan with goal, context, and steps rendered as markdown")
                 .with_schema(json!({
                     "type": "object",
@@ -182,20 +236,28 @@ impl ToolEngine {
                     },
                     "required": ["goal"]
                 })),
-        ]
+        }
+    }
+}
+
+pub struct ToolEngine {}
+
+impl ToolEngine {
+    pub fn build_tools(&self) -> Vec<Tool> {
+        ToolName::ALL.iter().map(|tool| tool.genai_tool()).collect()
     }
 
     pub fn execute(&self, name: &str, args: &Value) -> ToolResult {
-        match name {
-            "read_file" => self.read_file_tool(args),
-            "create_file" => self.create_file_tool(args),
-            "edit_file" => self.edit_file_tool(args),
-            "bash" => self.bash_tool(args),
-            "glob" => self.glob_tool(args),
-            "grep" => self.grep_tool(args),
-            "question" => self.question_tool(args),
-            "plan" => self.plan_tool(args),
-            _ => ToolResult::Error(format!("Unknown tool call: {} ({})", name, args)),
+        match ToolName::from_name(name) {
+            Some(ToolName::ReadFile) => self.read_file_tool(args),
+            Some(ToolName::CreateFile) => self.create_file_tool(args),
+            Some(ToolName::EditFile) => self.edit_file_tool(args),
+            Some(ToolName::Bash) => self.bash_tool(args),
+            Some(ToolName::Glob) => self.glob_tool(args),
+            Some(ToolName::Grep) => self.grep_tool(args),
+            Some(ToolName::Question) => self.question_tool(args),
+            Some(ToolName::Plan) => self.plan_tool(args),
+            None => ToolResult::Error(format!("Unknown tool call: {} ({})", name, args)),
         }
     }
 
