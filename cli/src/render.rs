@@ -574,7 +574,7 @@ impl Render {
                         Self::arguments_json_fields(&json_args, &["path", "include", "pattern"])
                     }
                     "question" => Self::arguments_json_fields(&json_args, &["title"]),
-                    "plan" | _ => "".to_string(),
+                    _ => "".to_string(),
                 };
 
                 let spans = vec![
