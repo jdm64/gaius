@@ -340,6 +340,11 @@ impl ToolEngine {
             Some(p) => p,
             None => return ToolResult::Error("Missing pattern".to_string()),
         };
+        if Self::is_glob_too_loose(pattern) {
+            return ToolResult::Error(
+                "Glob pattern must contain at least one non-wildcard character".to_string(),
+            );
+        }
         let path_prefix = args
             .get("path")
             .and_then(|v| v.as_str())
@@ -490,5 +495,9 @@ impl ToolEngine {
                 self.grep_file(path, regex, results);
             }
         }
+    }
+
+    pub fn is_glob_too_loose(pattern: &str) -> bool {
+        !pattern.chars().any(|c| c != '*' && c != '/')
     }
 }
