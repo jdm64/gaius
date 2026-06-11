@@ -8,9 +8,41 @@ use crate::{
     models::ModelDef,
 };
 use std::sync::atomic::Ordering;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{
+    mpsc,
+    oneshot::{self, error::RecvError},
+};
 
 type CommandResult = Result<HarnessSnapshot, String>;
+
+trait CommandReply: Sized {
+    type Output;
+
+    fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String>;
+    fn no_reply() -> Self::Output;
+}
+
+impl CommandReply for () {
+    type Output = ();
+
+    fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String> {
+        reply.map_err(|_| "Harness actor stopped".to_string())
+    }
+
+    fn no_reply() -> Self::Output {}
+}
+
+impl CommandReply for Result<HarnessSnapshot, String> {
+    type Output = HarnessSnapshot;
+
+    fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String> {
+        reply.map_err(|_| "Harness actor stopped".to_string())?
+    }
+
+    fn no_reply() -> Self::Output {
+        unreachable!("commands without a reply should use `()`")
+    }
+}
 
 #[derive(Debug)]
 pub enum HarnessActorEvent {
@@ -51,7 +83,7 @@ pub enum HarnessCommand {
     },
     Cancel,
     Shutdown {
-        reply_tx: oneshot::Sender<HarnessSnapshot>,
+        reply_tx: oneshot::Sender<CommandResult>,
     },
 }
 
@@ -70,97 +102,80 @@ impl HarnessActorHandle {
     }
 
     pub async fn run_prompt(&self, prompt: String) -> Result<(), String> {
-        self.tx
-            .send(HarnessCommand::RunPrompt(prompt))
+        self.send_command::<()>(HarnessCommand::RunPrompt(prompt), None)
             .await
-            .map_err(|_| "Harness actor stopped".to_string())
     }
 
     pub async fn set_model(&self, model: ModelDef) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx
-            .send(HarnessCommand::SetModel { model, reply_tx })
+        self.send_command(HarnessCommand::SetModel { model, reply_tx }, Some(reply_rx))
             .await
-            .map_err(|_| "Harness actor stopped".to_string())?;
-        reply_rx
-            .await
-            .map_err(|_| "Harness actor stopped".to_string())?
     }
 
     pub async fn set_agent(&self, agent: AgentDefinition) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx
-            .send(HarnessCommand::SetAgent { agent, reply_tx })
+        self.send_command(HarnessCommand::SetAgent { agent, reply_tx }, Some(reply_rx))
             .await
-            .map_err(|_| "Harness actor stopped".to_string())?;
-        reply_rx
-            .await
-            .map_err(|_| "Harness actor stopped".to_string())?
     }
 
     pub async fn new_session(&self) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx
-            .send(HarnessCommand::NewSession { reply_tx })
+        self.send_command(HarnessCommand::NewSession { reply_tx }, Some(reply_rx))
             .await
-            .map_err(|_| "Harness actor stopped".to_string())?;
-        reply_rx
-            .await
-            .map_err(|_| "Harness actor stopped".to_string())?
     }
 
     pub async fn load_session(&self, session_id: String) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx
-            .send(HarnessCommand::LoadSession {
+        self.send_command(
+            HarnessCommand::LoadSession {
                 session_id,
                 reply_tx,
-            })
-            .await
-            .map_err(|_| "Harness actor stopped".to_string())?;
-        reply_rx
-            .await
-            .map_err(|_| "Harness actor stopped".to_string())?
+            },
+            Some(reply_rx),
+        )
+        .await
     }
 
     pub async fn toggle_streaming(&self) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx
-            .send(HarnessCommand::ToggleStreaming { reply_tx })
+        self.send_command(HarnessCommand::ToggleStreaming { reply_tx }, Some(reply_rx))
             .await
-            .map_err(|_| "Harness actor stopped".to_string())?;
-        reply_rx
-            .await
-            .map_err(|_| "Harness actor stopped".to_string())?
     }
 
     pub async fn replay_history(&self) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx
-            .send(HarnessCommand::ReplayHistory { reply_tx })
+        self.send_command(HarnessCommand::ReplayHistory { reply_tx }, Some(reply_rx))
             .await
-            .map_err(|_| "Harness actor stopped".to_string())?;
-        reply_rx
-            .await
-            .map_err(|_| "Harness actor stopped".to_string())?
     }
 
     pub async fn cancel(&self) -> Result<(), String> {
-        self.tx
-            .send(HarnessCommand::Cancel)
-            .await
-            .map_err(|_| "Harness actor stopped".to_string())
+        self.send_command::<()>(HarnessCommand::Cancel, None).await
     }
 
-    pub async fn shutdown(&self) -> Result<HarnessSnapshot, String> {
+    pub async fn shutdown(&self) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
+        self.send_command(HarnessCommand::Shutdown { reply_tx }, Some(reply_rx))
+            .await
+    }
+
+    async fn send_command<T>(
+        &self,
+        command: HarnessCommand,
+        reply_rx: Option<oneshot::Receiver<T>>,
+    ) -> Result<T::Output, String>
+    where
+        T: CommandReply,
+    {
         self.tx
-            .send(HarnessCommand::Shutdown { reply_tx })
+            .send(command)
             .await
             .map_err(|_| "Harness actor stopped".to_string())?;
-        reply_rx
-            .await
-            .map_err(|_| "Harness actor stopped".to_string())
+
+        if let Some(reply_rx) = reply_rx {
+            T::from_reply(reply_rx.await)
+        } else {
+            Ok(T::no_reply())
+        }
     }
 }
 
@@ -268,7 +283,7 @@ async fn run_actor(
                 harness.set_cancel(true);
             }
             HarnessCommand::Shutdown { reply_tx } => {
-                let _ = reply_tx.send(harness.snapshot());
+                let _ = reply_tx.send(Ok(harness.snapshot()));
                 break;
             }
         }
