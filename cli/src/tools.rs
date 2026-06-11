@@ -18,6 +18,7 @@ use glob::glob;
 use regex::Regex;
 use serde_json::Value;
 use serde_json::json;
+use std::io::ErrorKind;
 use std::io::Write;
 use std::process::Command;
 
@@ -55,7 +56,7 @@ impl ToolEngine {
                     },
                     "required": ["file_path"]
                 })),
-            Tool::new("write_file")
+            Tool::new("create_file")
                 .with_description("Create a new file with the provided contents")
                 .with_schema(json!({
                     "type": "object",
@@ -72,7 +73,7 @@ impl ToolEngine {
                     "required": ["file_path", "contents"]
                 })),
             Tool::new("edit_file")
-                .with_description("Replace one exact string match in a file")
+                .with_description("Modify an existing file by replacing exactly one string match")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
@@ -187,7 +188,7 @@ impl ToolEngine {
     pub fn execute(&self, name: &str, args: &Value) -> ToolResult {
         match name {
             "read_file" => self.read_file_tool(args),
-            "write_file" => self.write_file_tool(args),
+            "create_file" => self.create_file_tool(args),
             "edit_file" => self.edit_file_tool(args),
             "bash" => self.bash_tool(args),
             "glob" => self.glob_tool(args),
@@ -247,7 +248,7 @@ impl ToolEngine {
         }
     }
 
-    fn write_file_tool(&self, args: &Value) -> ToolResult {
+    fn create_file_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::Error("Missing file_path".to_string()),
@@ -268,6 +269,10 @@ impl ToolEngine {
         {
             Ok(mut file) => match file.write_all(contents.as_bytes()) {
                 Ok(()) => ToolResult::Text("File written successfully".to_string()),
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => ToolResult::Error(
+                    "create_file cannot overwrite an existing file. Use edit_file instead"
+                        .to_string(),
+                ),
                 Err(e) => ToolResult::Error(format!("Error writing file: {}", e)),
             },
             Err(e) => ToolResult::Error(format!("Error creating file: {}", e)),

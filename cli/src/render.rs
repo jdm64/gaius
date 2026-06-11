@@ -566,7 +566,7 @@ impl Render {
                         &json_args,
                         &["file_path", "start_line", "max_lines"],
                     ),
-                    "write_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
+                    "create_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
                     "edit_file" => Self::arguments_json_fields(&json_args, &["file_path"]),
                     "bash" => Self::arguments_json_fields(&json_args, &["command"]),
                     "glob" => Self::arguments_json_fields(&json_args, &["path", "pattern"]),
