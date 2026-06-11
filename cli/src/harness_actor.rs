@@ -18,7 +18,6 @@ use crate::{
     harness::{Harness, HarnessEvent, HarnessSnapshot},
     models::ModelDef,
 };
-use genai::Client;
 use std::sync::atomic::Ordering;
 use tokio::sync::{mpsc, oneshot};
 
@@ -41,7 +40,6 @@ pub enum HarnessActorEvent {
 pub enum HarnessCommand {
     RunPrompt(String),
     SetModel {
-        client: Client,
         model: ModelDef,
         reply_tx: oneshot::Sender<CommandResult>,
     },
@@ -89,14 +87,10 @@ impl HarnessActorHandle {
             .map_err(|_| "Harness actor stopped".to_string())
     }
 
-    pub async fn set_model(&self, client: Client, model: ModelDef) -> CommandResult {
+    pub async fn set_model(&self, model: ModelDef) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
-            .send(HarnessCommand::SetModel {
-                client,
-                model,
-                reply_tx,
-            })
+            .send(HarnessCommand::SetModel { model, reply_tx })
             .await
             .map_err(|_| "Harness actor stopped".to_string())?;
         reply_rx
@@ -242,13 +236,13 @@ async fn run_actor(
                     }
                 }
             }
-            HarnessCommand::SetModel {
-                client,
-                model,
-                reply_tx,
-            } => {
-                harness.set_model(client, model);
-                let _ = reply_tx.send(Ok(harness.snapshot()));
+            HarnessCommand::SetModel { model, reply_tx } => {
+                let result = harness
+                    .set_model(model)
+                    .await
+                    .map(|_| harness.snapshot())
+                    .map_err(|err| err.to_string());
+                let _ = reply_tx.send(result);
             }
             HarnessCommand::SetAgent { agent, reply_tx } => {
                 harness.set_agent(agent);

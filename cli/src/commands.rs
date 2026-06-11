@@ -405,6 +405,11 @@ impl Commands {
                 picker.move_down();
             }
             KeyCode::Enter => {
+                if !app.harness_idle() {
+                    app.status =
+                        "Agent is busy; finish current turn before changing models".to_string();
+                    return InputMode::Models { picker };
+                }
                 let Some(selected_model) = picker.selected_row().and_then(|row| match row {
                     ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model) => {
                         Some(model)
@@ -414,29 +419,17 @@ impl Commands {
                     app.status = "No matching models".to_string();
                     return InputMode::Models { picker };
                 };
-                match selected_model.create_client(&app.config) {
-                    Ok(client) => {
-                        if !app.harness_idle() {
-                            app.status =
-                                "Agent is busy; finish current turn before changing models"
-                                    .to_string();
-                            return InputMode::Models { picker };
-                        }
-                        match actor.set_model(client, selected_model.clone()).await {
-                            Ok(snapshot) => {
-                                app.apply_snapshot(&snapshot);
-                                app.model = selected_model.clone();
-                                let _ = RecentModelDef::add(selected_model);
-                                Input::clear_input(app);
-                                app.status = format!("Selected model: {}", selected_model.label());
-                                return InputMode::PromptInput;
-                            }
-                            Err(err) => app.status = err,
-                        }
+
+                match actor.set_model(selected_model.clone()).await {
+                    Ok(snapshot) => {
+                        app.apply_snapshot(&snapshot);
+                        app.model = selected_model.clone();
+                        let _ = RecentModelDef::add(selected_model);
+                        Input::clear_input(app);
+                        app.status = format!("Selected model: {}", selected_model.label());
+                        return InputMode::PromptInput;
                     }
-                    Err(err) => {
-                        app.status = format!("Error selecting model: {}", err);
-                    }
+                    Err(err) => app.status = err,
                 }
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {

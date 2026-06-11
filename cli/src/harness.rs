@@ -15,6 +15,7 @@
 
 use crate::{
     agents::AgentDefinition,
+    config::Config,
     models::ModelDef,
     session::Session,
     token_usage::{TokenUsageLedger, format_arrows},
@@ -85,7 +86,6 @@ pub struct Harness {
     tool_engine: ToolEngine,
     model: ModelDef,
     agent: AgentDefinition,
-    oneshot_prompt: Option<String>,
     session: Session,
     token_usage: TokenUsageLedger,
     streaming: bool,
@@ -93,18 +93,11 @@ pub struct Harness {
 }
 
 impl Harness {
-    pub fn new(
-        client: Client,
-        model: ModelDef,
-        agent: AgentDefinition,
-        oneshot_prompt: Option<String>,
-        session_id: Option<String>,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn new(agent: AgentDefinition, session_id: Option<String>) -> Result<Self, Box<dyn Error>> {
         let tool_engine = ToolEngine {};
         let session = match session_id {
             Some(id) => Session::new_named(id)?,
-            None if oneshot_prompt.is_some() => Session::new_empty(),
-            None => Session::new(),
+            None => Session::new_empty(),
         };
 
         let (mut history, token_usage) = session.load()?;
@@ -113,20 +106,15 @@ impl Harness {
 
         Ok(Self {
             history,
-            client,
+            client: Client::default(),
             tool_engine,
-            model,
+            model: ModelDef::default(),
             agent,
-            oneshot_prompt,
             session,
             token_usage,
             streaming: true,
             canceled: Arc::new(AtomicBool::new(false)),
         })
-    }
-
-    pub fn is_oneshot(&self) -> bool {
-        self.oneshot_prompt.is_some()
     }
 
     pub fn session_id(&self) -> Option<String> {
@@ -161,9 +149,14 @@ impl Harness {
         self.canceled.clone()
     }
 
-    pub fn set_model(&mut self, client: Client, model: ModelDef) {
+    pub async fn set_model(&mut self, model: ModelDef) -> Result<(), Box<dyn Error>> {
+        let mut config = Config::new();
+        config.load().await?;
+
+        let client = model.create_client(&config)?;
         self.client = client;
         self.model = model;
+        Ok(())
     }
 
     pub fn set_agent(&mut self, agent: AgentDefinition) {
@@ -325,8 +318,8 @@ impl Harness {
         }
     }
 
-    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(prompt) = self.oneshot_prompt.take() {
+    pub async fn run(&mut self, prompt: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(prompt) = prompt {
             self.run_turn(prompt).await?;
         } else {
             loop {

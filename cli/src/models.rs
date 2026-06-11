@@ -25,7 +25,7 @@ use url::Url;
 
 pub const RECENT_MODELS_LIMIT: usize = 8;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ModelDef {
     pub provider: String,
     pub id: String,
@@ -239,6 +239,43 @@ impl RecentModelDef {
 pub struct Models;
 
 impl Models {
+    pub async fn first_from_config(config: &Config) -> Result<ModelDef, Box<dyn Error>> {
+        let configured_models = config.configured_models();
+        let Some(selected_model) = configured_models.first() else {
+            return Err("Unable to find configured model".into());
+        };
+
+        let cached_models = Models::list(config).await.unwrap_or_default();
+        if cached_models.is_empty() {
+            return Err("Unable to load model cache".into());
+        }
+
+        let found = cached_models
+            .iter()
+            .find(|model| {
+                model.provider == selected_model.provider_name
+                    && model.id == selected_model.model_id
+            })
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "Model '{}' not found in cached models",
+                    selected_model.model_id
+                )
+            })?;
+
+        Ok(found)
+    }
+
+    pub async fn first_from_recent(config: &Config) -> Option<ModelDef> {
+        let cached_models = Models::list(config).await.unwrap_or_default();
+        if cached_models.is_empty() {
+            return None;
+        }
+
+        RecentModelDef::load(&cached_models).into_iter().next()
+    }
+
     pub async fn list(config: &Config) -> Result<Vec<ModelDef>, Box<dyn Error>> {
         if let Some(models) = CachedModelDef::load()? {
             return Ok(models);

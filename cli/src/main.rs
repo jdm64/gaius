@@ -15,7 +15,7 @@
 
 use gaius::config::Config;
 use gaius::harness::Harness;
-use gaius::models::{Models, RecentModelDef};
+use gaius::models::Models;
 use gaius::tui::TuiApp;
 use pico_args::Arguments;
 use std::error::Error;
@@ -89,63 +89,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut config = Config::new();
     config.load().await?;
 
-    let selected_models = config.configured_models();
-    let Some(selected_model) = selected_models.first() else {
-        eprintln!("Unable to find configured model");
-        std::process::exit(1);
-    };
+    let mut harness = Harness::new(config.agents().default_agent().clone(), args.session_id)?;
+    let end_session: Option<String>;
 
-    let cached_models = Models::list(&config).await.unwrap_or_default();
-    if cached_models.is_empty() {
-        eprintln!("Unable to load model cache");
-        std::process::exit(1);
-    }
-
-    let r_model = vec![RecentModelDef {
-        provider: selected_model.provider_name.clone(),
-        id: selected_model.model_id.clone(),
-    }];
-
-    let resolved_models = RecentModelDef::from_cache(&r_model, &cached_models);
-    let Some(first_model) = resolved_models.first() else {
-        eprintln!("Unable to load model from cache");
-        std::process::exit(1);
-    };
-
-    let Ok(client) = selected_model.create_client() else {
-        eprintln!("Unable to create client");
-        std::process::exit(1);
-    };
-
-    let mut harness = Harness::new(
-        client,
-        first_model.clone(),
-        config.agents().default_agent().clone(),
-        initial_prompt,
-        args.session_id,
-    )?;
-
-    if harness.is_oneshot() {
-        harness.run().await?;
-        if !harness.history().messages.is_empty()
-            && let Some(session_id) = harness.session_id()
-        {
-            println!("To continue pass --session {}", session_id);
-        }
+    if let Some(prompt) = initial_prompt {
+        let first_model = Models::first_from_config(&config).await?;
+        harness.set_model(first_model.clone()).await?;
+        harness.run(Some(prompt)).await?;
+        end_session = harness.session_id();
     } else {
-        // restore the last used model instead of what' in config
-        if let Some(model) = RecentModelDef::load(&cached_models).first()
-            && let Ok(client) = model.create_client(&config)
-        {
-            harness.set_model(client, model.clone());
+        // restore the last used model instead of what's in config
+        if let Some(recent_model) = Models::first_from_recent(&config).await {
+            harness.set_model(recent_model).await?;
         }
 
         let snapshot = TuiApp::new(config).run(harness).await?;
-        if snapshot.has_history
-            && let Some(session_id) = snapshot.session_id
-        {
-            println!("To continue pass --session {}", session_id);
-        }
+        end_session = snapshot.session_id;
+    }
+
+    if let Some(session_id) = end_session {
+        println!("To continue pass --session {}", session_id);
     }
 
     Ok(())
