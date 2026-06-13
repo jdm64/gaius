@@ -13,7 +13,7 @@ use crate::{
 };
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, HorizontalAlignment, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
@@ -30,12 +30,6 @@ struct PickListRenderSpec {
     max_width: u16,
     empty_text: &'static str,
     background: Style,
-}
-
-enum QuestionRow {
-    Title(String),
-    Blank,
-    Option(usize, String),
 }
 
 struct ColorTheme {
@@ -83,9 +77,15 @@ impl Render {
 
     pub fn draw(&self, app: &mut TuiApp, frame: &mut Frame<'_>) {
         let area = frame.area();
-        let input_width = area.width - 4;
+        let input_width = area.width.saturating_sub(4).max(1);
+
+        let question_lines = self.question_lines(&app.mode, input_width);
         let input_prompt = self.input_prompt_lines(app.input.clone(), input_width);
-        let input_height = 2 + input_prompt.len() as u16;
+        let input_start_line = question_lines.len();
+
+        let mut input_lines = question_lines;
+        input_lines.extend(input_prompt);
+        let input_height = 2 + input_lines.len() as u16;
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -98,7 +98,14 @@ impl Render {
 
         frame.render_widget(Clear, area);
         self.draw_history(app, frame, chunks[0]);
-        self.draw_input(app, frame, chunks[1], input_prompt, input_width as usize);
+        self.draw_input(
+            app,
+            frame,
+            chunks[1],
+            input_lines,
+            input_start_line,
+            input_width as usize,
+        );
 
         let active_help: Option<Vec<(&'static str, &'static str)>> = match &app.mode {
             InputMode::Command { picker } => self.draw_commands(frame, chunks[1], picker),
@@ -113,11 +120,7 @@ impl Render {
             InputMode::Agents { picker } => self.draw_agents(frame, chunks[1], picker),
             InputMode::Files { picker } => self.draw_files(frame, chunks[1], picker),
             InputMode::PromptInput | InputMode::Exit => None,
-            InputMode::Question {
-                title,
-                options,
-                selected,
-            } => self.draw_question(frame, chunks[1], title, options, *selected),
+            InputMode::Question { .. } => Some(Self::question_help()),
         };
 
         let help_items = active_help.unwrap_or(vec![("Ctrl+C", "quit"), ("Ctrl+D", "cancel")]);
@@ -308,69 +311,58 @@ impl Render {
         ])
     }
 
-    fn draw_question(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        title: &str,
-        options: &[String],
-        selected: usize,
-    ) -> Option<Vec<(&'static str, &'static str)>> {
-        let wrap_width: usize = 70usize.saturating_sub(4).max(1);
+    fn question_lines(&self, mode: &InputMode, width: u16) -> Vec<Line<'static>> {
+        let InputMode::Question {
+            title,
+            options,
+            selected,
+        } = mode
+        else {
+            return vec![];
+        };
 
-        let mut rows: Vec<QuestionRow> = Vec::new();
+        let mut lines = Vec::new();
         let mut line_buf = String::new();
         for word in title.split_whitespace() {
             if line_buf.is_empty() {
                 line_buf.push_str(word);
-            } else if line_buf.len() + 1 + word.len() <= wrap_width {
+            } else if line_buf.len() + 1 + word.len() <= width as usize {
                 line_buf.push(' ');
                 line_buf.push_str(word);
             } else {
-                rows.push(QuestionRow::Title(std::mem::take(&mut line_buf)));
+                lines.extend(Self::wrap_line(
+                    &Line::raw(std::mem::take(&mut line_buf)),
+                    width,
+                ));
                 line_buf = word.to_string();
             }
         }
         if !line_buf.is_empty() {
-            rows.push(QuestionRow::Title(line_buf));
+            lines.extend(Self::wrap_line(&Line::raw(line_buf), width));
         }
-        rows.push(QuestionRow::Blank);
+
+        lines.push(Line::raw(""));
         for (i, opt) in options.iter().enumerate() {
-            rows.push(QuestionRow::Option(i, opt.clone()));
+            let style = if i == *selected {
+                Style::default().bg(self.theme.selected)
+            } else {
+                Style::default()
+            };
+            let content = format!("{}) {}", i + 1, opt);
+            lines.extend(Self::wrap_line(&Line::styled(content, style), width));
         }
+        lines.push(Line::raw(""));
 
-        let title_len = rows.len() - options.len();
+        lines
+    }
 
-        let indices: Vec<usize> = (0..rows.len()).collect();
-        let picker = PickList {
-            selected: title_len + selected,
-            rows,
-            filtered: indices,
-        };
-
-        self.draw_indexed_pick_list(
-            frame,
-            area,
-            &picker,
-            &picker.filtered,
-            PickListRenderSpec {
-                title: "Question",
-                max_width: 70,
-                empty_text: "",
-                background: Style::default().bg(self.theme.inputbox),
-            },
-            |row, _index| match row {
-                QuestionRow::Title(text) => ListItem::new(text.as_str()),
-                QuestionRow::Blank => ListItem::new(""),
-                QuestionRow::Option(i, text) => ListItem::new(format!("{}) {}", i + 1, text)),
-            },
-        );
-        Some(vec![
+    fn question_help() -> Vec<(&'static str, &'static str)> {
+        vec![
             ("Type", "add response"),
             ("Enter", "send"),
             ("Up/Down", "select"),
             ("Tab", "cancel"),
-        ])
+        ]
     }
 
     fn draw_pick_list<'a, T, F>(
@@ -524,7 +516,7 @@ impl Render {
                     .collect();
                 lines
             }
-            TuiMessage::AgentMessage(text) => {
+            TuiMessage::AgentMessage(text) | TuiMessage::PlanMessage(text) => {
                 let options = Options::default();
                 from_str_with_options(text, &options)
                     .lines
@@ -611,25 +603,7 @@ impl Render {
                 }
             }
             Some(ToolName::Plan) => {
-                let mut md = String::new();
-                if let Some(goal) = args.get("goal").and_then(|g| g.as_str()) {
-                    md.push_str("# Goal\n\n");
-                    md.push_str(goal);
-                    md.push_str("\n\n");
-                }
-                if let Some(context) = args.get("context").and_then(|c| c.as_str()) {
-                    md.push_str("# Context\n\n");
-                    md.push_str(context);
-                    md.push_str("\n\n");
-                }
-                if let Some(steps) = args.get("steps").and_then(|s| s.as_array()) {
-                    for (index, step) in steps.iter().enumerate() {
-                        if let Some(step_text) = step.as_str() {
-                            md.push_str(&format!("# Step {}\n\n{}\n\n", index + 1, step_text));
-                        }
-                    }
-                }
-
+                let md = Self::plan_to_md(args);
                 let options = Options::default();
                 let rendered_lines: Vec<Line> = from_str_with_options(&md, &options)
                     .lines
@@ -645,12 +619,35 @@ impl Render {
         }
     }
 
+    pub fn plan_to_md(args: &Value) -> String {
+        let mut md = String::new();
+        if let Some(goal) = args.get("goal").and_then(|g| g.as_str()) {
+            md.push_str("## Goal\n\n");
+            md.push_str(goal);
+            md.push_str("\n\n");
+        }
+        if let Some(context) = args.get("context").and_then(|c| c.as_str()) {
+            md.push_str("## Context\n\n");
+            md.push_str(context);
+            md.push_str("\n\n");
+        }
+        if let Some(steps) = args.get("steps").and_then(|s| s.as_array()) {
+            for (index, step) in steps.iter().enumerate() {
+                if let Some(step_text) = step.as_str() {
+                    md.push_str(&format!("## Step {}\n\n{}\n\n", index + 1, step_text));
+                }
+            }
+        }
+        md
+    }
+
     fn draw_input(
         &self,
         app: &TuiApp,
         frame: &mut Frame<'_>,
         area: Rect,
         lines: Vec<Line<'static>>,
+        input_start_line: usize,
         width: usize,
     ) {
         let mut block = Block::default()
@@ -658,7 +655,14 @@ impl Render {
             .style(Style::default().bg(self.theme.inputbox))
             .padding(Padding::horizontal(1));
         if !app.status.is_empty() {
-            block = block.title(format!(" {} ", app.status));
+            let title = format!(" {} ", app.status);
+            if matches!(&app.mode, InputMode::Question { .. }) {
+                block = block
+                    .title_bottom(title)
+                    .title_alignment(HorizontalAlignment::Right);
+            } else {
+                block = block.title(title);
+            }
         }
         let input = Paragraph::new(Text::from(lines))
             .block(block)
@@ -668,7 +672,11 @@ impl Render {
         let cursor = app.input_cursor + 2;
         let (row, col) = (cursor / width, cursor % width);
         let cursor_x = area.x.saturating_add(2).saturating_add(col as u16);
-        let cursor_y = area.y.saturating_add(1).saturating_add(row as u16);
+        let cursor_y = area
+            .y
+            .saturating_add(1)
+            .saturating_add(input_start_line as u16)
+            .saturating_add(row as u16);
 
         frame.set_cursor_position((cursor_x, cursor_y));
     }

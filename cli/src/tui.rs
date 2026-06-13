@@ -35,6 +35,7 @@ use tokio::sync::oneshot;
 #[derive(Clone)]
 pub enum TuiMessage {
     UserPrompt(String),
+    PlanMessage(String),
     AgentMessage(String),
     Thinking(String),
     SystemMessage(String),
@@ -394,6 +395,9 @@ impl TuiApp {
             HarnessEvent::UserPrompt(prompt_msg) => {
                 self.push_message(TuiMessage::UserPrompt(prompt_msg));
             }
+            HarnessEvent::PlanMessage(text) => {
+                self.push_message(TuiMessage::PlanMessage(text));
+            }
             HarnessEvent::AgentMessage(chunk) => {
                 self.append_agent_message(chunk, false);
             }
@@ -479,6 +483,9 @@ impl TuiApp {
             }
             HarnessEvent::UserPrompt(text) => {
                 self.push_message(TuiMessage::UserPrompt(text));
+            }
+            HarnessEvent::PlanMessage(text) => {
+                self.push_message(TuiMessage::PlanMessage(text));
             }
             HarnessEvent::AgentMessage(text) => {
                 self.append_agent_message(text, false);

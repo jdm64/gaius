@@ -9,6 +9,7 @@ pub mod harness;
 pub mod harness_actor;
 pub mod input;
 pub mod models;
+pub mod plan_hook;
 pub mod render;
 pub mod session;
 pub mod token_usage;

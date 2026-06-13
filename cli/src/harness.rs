@@ -6,6 +6,8 @@ use crate::{
     agents::AgentDefinition,
     config::Config,
     models::ModelDef,
+    plan_hook::PlanHook,
+    render::Render,
     session::Session,
     token_usage::{TokenUsageLedger, format_arrows},
     tools::{ToolEngine, ToolResult},
@@ -15,10 +17,11 @@ use futures::StreamExt;
 use genai::{
     Client,
     chat::{
-        ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, ContentPart, ToolCall,
-        ToolResponse,
+        ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, ContentPart, CustomPart,
+        MessageContent, ToolCall, ToolResponse,
     },
 };
+use serde_json::json;
 use std::{
     error::Error,
     io::{self, Write},
@@ -40,6 +43,7 @@ pub async fn validate_model(
 #[derive(Clone, Debug, PartialEq)]
 pub enum HarnessEvent {
     UserPrompt(String),
+    PlanMessage(String),
     AgentMessage(String),
     SystemMessage(String),
     Thinking(String),
@@ -79,6 +83,7 @@ pub struct Harness {
     token_usage: TokenUsageLedger,
     streaming: bool,
     canceled: Arc<AtomicBool>,
+    last_plan_content: Option<String>,
 }
 
 impl Harness {
@@ -103,6 +108,7 @@ impl Harness {
             token_usage,
             streaming: true,
             canceled: Arc::new(AtomicBool::new(false)),
+            last_plan_content: None,
         })
     }
 
@@ -167,8 +173,18 @@ impl Harness {
         self.history = history;
         self.token_usage = token_usage;
         self.history.tools = Some(self.tool_engine.build_tools());
+        self.last_plan_content = None;
         apply_agent_prompt(&mut self.history, &self.agent);
         Ok(())
+    }
+
+    pub fn plan_text(&mut self) -> &mut Option<String> {
+        &mut self.last_plan_content
+    }
+
+    pub fn clear_context(&mut self) {
+        self.history.messages.clear();
+        self.token_usage = TokenUsageLedger::default();
     }
 
     pub fn history(&self) -> &ChatRequest {
@@ -217,7 +233,11 @@ impl Harness {
                     pending_tool_calls.clear();
                     let text = message.content.texts().join("");
                     if !text.is_empty() {
-                        on_event(HarnessEvent::UserPrompt(text));
+                        if has_plan_marker(message) {
+                            on_event(HarnessEvent::PlanMessage(text));
+                        } else {
+                            on_event(HarnessEvent::UserPrompt(text));
+                        }
                     }
                     token_usage.emit_usage(index, &mut on_event);
                 }
@@ -331,6 +351,11 @@ impl Harness {
                 let _ = io::stdout().flush();
                 None
             }
+            HarnessEvent::PlanMessage(text) => {
+                println!("plan> {}", text);
+                let _ = io::stdout().flush();
+                None
+            }
             HarnessEvent::Thinking(text) => {
                 if !agent_started {
                     print!("agent> ");
@@ -420,8 +445,7 @@ impl Harness {
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         self.set_cancel(false);
-        on_event(HarnessEvent::UserPrompt(prompt.clone()));
-        self.history.messages.push(ChatMessage::user(prompt));
+        self.send_user_message(prompt, &mut on_event);
 
         loop {
             if self.is_cancel() {
@@ -437,9 +461,17 @@ impl Harness {
 
             self.call_tools(&tool_calls, &mut on_event);
 
+            PlanHook::run(self, &mut on_event);
+
             self.save_history()?;
 
-            if tool_calls.is_empty() {
+            let no_user_prompt = self
+                .history
+                .messages
+                .last()
+                .is_none_or(|m| m.role != ChatRole::User);
+
+            if no_user_prompt && tool_calls.is_empty() {
                 if self.is_cancel() {
                     self.send_system_message("Request Cancelled".to_string(), &mut on_event);
                 }
@@ -575,6 +607,10 @@ impl Harness {
                     self.send_tool_call_event(tc, answer, false, on_event);
                 }
                 ToolResult::Text(text) => {
+                    if tc.fn_name == "plan" {
+                        let plan_text = Render::plan_to_md(&tc.fn_arguments);
+                        self.last_plan_content = Some(plan_text);
+                    }
                     self.send_tool_call_event(tc, text, false, on_event);
                 }
                 ToolResult::Error(err) => {
@@ -582,6 +618,30 @@ impl Harness {
                 }
             }
         }
+    }
+
+    pub fn send_user_message<F>(&mut self, message: String, on_event: &mut F)
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        self.history
+            .messages
+            .push(ChatMessage::user(message.clone()));
+        on_event(HarnessEvent::UserPrompt(message));
+    }
+
+    pub fn send_plan_message<F>(&mut self, message: String, on_event: &mut F)
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        let marker = ContentPart::Custom(CustomPart {
+            model_iden: None,
+            data: json!("plan"),
+        });
+        let content = MessageContent::from_parts(vec![marker, ContentPart::Text(message.clone())]);
+
+        self.history.messages.push(ChatMessage::user(content));
+        on_event(HarnessEvent::PlanMessage(message));
     }
 
     fn send_system_message<F>(&self, message: String, on_event: &mut F)
@@ -615,6 +675,13 @@ impl Harness {
         self.session.save(&self.history, &self.token_usage)?;
         Ok(())
     }
+}
+
+fn has_plan_marker(message: &ChatMessage) -> bool {
+    matches!(
+        message.content.parts().first(),
+        Some(ContentPart::Custom(CustomPart { data, .. })) if data == &json!("plan")
+    )
 }
 
 fn apply_agent_prompt(history: &mut ChatRequest, agent: &AgentDefinition) {
