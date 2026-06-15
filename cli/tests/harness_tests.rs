@@ -1,14 +1,36 @@
 use gaius::{
+    agents::AgentDefinition,
     harness::{Harness, HarnessEvent},
     token_usage::{TokenUsageLedger, TokenUsageSpan},
 };
 use genai::chat::{ChatMessage, ContentPart, Usage};
+
+fn basic_agent() -> AgentDefinition {
+    AgentDefinition {
+        name: "basic".to_string(),
+        prompt: String::new(),
+    }
+}
 
 fn replay_events(messages: Vec<ChatMessage>) -> Vec<HarnessEvent> {
     let mut events = Vec::new();
     let usage = TokenUsageLedger::default();
     Harness::replay_messages(&messages, &usage, |event| events.push(event));
     events
+}
+
+#[test]
+fn interactive_harness_starts_with_session_id() {
+    let harness = Harness::new(basic_agent(), None).unwrap();
+
+    assert!(harness.session_id().is_some());
+}
+
+#[test]
+fn harness_without_session_starts_without_session_id() {
+    let harness = Harness::new_without_session(basic_agent()).unwrap();
+
+    assert!(harness.session_id().is_none());
 }
 
 #[test]

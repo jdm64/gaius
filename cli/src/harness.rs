@@ -87,10 +87,25 @@ pub struct Harness {
 }
 
 impl Harness {
+    /// Create a harness that persists turns to a session file.
     pub fn new(agent: AgentDefinition, session_id: Option<String>) -> Result<Self, Box<dyn Error>> {
+        Self::new_with_session(agent, session_id, true)
+    }
+
+    /// Create a harness for one-shot prompts that should not be persisted.
+    pub fn new_without_session(agent: AgentDefinition) -> Result<Self, Box<dyn Error>> {
+        Self::new_with_session(agent, None, false)
+    }
+
+    fn new_with_session(
+        agent: AgentDefinition,
+        session_id: Option<String>,
+        create_session: bool,
+    ) -> Result<Self, Box<dyn Error>> {
         let tool_engine = ToolEngine {};
         let session = match session_id {
             Some(id) => Session::new_named(id)?,
+            None if create_session => Session::new(),
             None => Session::new_empty(),
         };
 

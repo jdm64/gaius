@@ -78,7 +78,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut config = Config::new();
     config.load().await?;
 
-    let mut harness = Harness::new(config.agents().default_agent().clone(), args.session_id)?;
+    let agent = config.agents().default_agent().clone();
+    let mut harness = if initial_prompt.is_some() && args.session_id.is_none() {
+        Harness::new_without_session(agent)?
+    } else {
+        Harness::new(agent, args.session_id)?
+    };
     let end_session: Option<String>;
 
     if let Some(prompt) = initial_prompt {
