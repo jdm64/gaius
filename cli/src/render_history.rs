@@ -210,25 +210,10 @@ impl Render {
     }
 
     pub fn plan_to_md(args: &Value) -> String {
-        let mut md = String::new();
-        if let Some(goal) = args.get("goal").and_then(|g| g.as_str()) {
-            md.push_str("## Goal\n\n");
-            md.push_str(goal);
-            md.push_str("\n\n");
-        }
-        if let Some(context) = args.get("context").and_then(|c| c.as_str()) {
-            md.push_str("## Context\n\n");
-            md.push_str(context);
-            md.push_str("\n\n");
-        }
-        if let Some(steps) = args.get("steps").and_then(|s| s.as_array()) {
-            for (index, step) in steps.iter().enumerate() {
-                if let Some(step_text) = step.as_str() {
-                    md.push_str(&format!("## Step {}\n\n{}\n\n", index + 1, step_text));
-                }
-            }
-        }
-        md
+        args.get("content")
+            .and_then(|g| g.as_str())
+            .unwrap_or_default()
+            .to_string()
     }
 
     fn sync_history_lines(&self, app: &mut TuiApp) {

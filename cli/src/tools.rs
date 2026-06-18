@@ -205,25 +205,16 @@ impl ToolName {
                     "required": ["title"]
                 })),
             ToolName::Plan => Tool::new(self.as_str())
-                .with_description("Create a plan with goal, context, and steps rendered as markdown")
+                .with_description("Create a structured markdown formatted plan")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
-                        "goal": {
+                        "content": {
                             "type": "string",
-                            "description": "The goal or objective"
-                        },
-                        "context": {
-                            "type": "string",
-                            "description": "The context or background information"
-                        },
-                        "steps": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Array of step strings"
+                            "description": "The content of the plan"
                         }
                     },
-                    "required": ["goal"]
+                    "required": ["content"],
                 })),
         }
     }
@@ -457,21 +448,11 @@ impl ToolEngine {
     }
 
     fn plan_tool(&self, args: &Value) -> ToolResult {
-        if args.get("goal").is_none() {
-            return ToolResult::Error("Error: Missing goal".to_string());
+        if args.get("content").is_none() {
+            return ToolResult::Error("Error: Missing content".to_string());
         }
 
-        let has_context = args.get("context").is_some();
-        let steps = args
-            .get("steps")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.len())
-            .unwrap_or_default();
-
-        ToolResult::Text(format!(
-            "Created plan with context={} and steps={}",
-            has_context, steps,
-        ))
+        ToolResult::Text("Plan created".to_string())
     }
 
     fn grep_tool(&self, args: &Value) -> ToolResult {
