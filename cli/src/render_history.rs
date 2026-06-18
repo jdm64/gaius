@@ -38,22 +38,25 @@ impl Render {
             text_height as usize,
         );
 
+        let agent_label = if app.plan_mode_on {
+            format!("{}/plan", app.agent_name)
+        } else {
+            app.agent_name.clone()
+        };
+
         let title = match (app.context_tokens, app.model.context_len) {
             (Some(tokens), Some(context_len)) if context_len > 0 => {
                 let pct = tokens as f64 / context_len as f64 * 100.0;
                 format!(
                     " Gaius - {} - {} - {} ({:.0}%) ",
-                    app.model.id, app.agent_name, tokens, pct
+                    app.model.id, agent_label, tokens, pct
                 )
             }
             (Some(tokens), _) => {
-                format!(
-                    " Gaius - {} - {} - {} ",
-                    app.model.id, app.agent_name, tokens
-                )
+                format!(" Gaius - {} - {} - {} ", app.model.id, agent_label, tokens)
             }
             _ => {
-                format!(" Gaius - {} - {} ", app.model.id, app.agent_name)
+                format!(" Gaius - {} - {} ", app.model.id, agent_label)
             }
         };
 

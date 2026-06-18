@@ -236,6 +236,14 @@ impl ToolEngine {
         ToolName::ALL.iter().map(|tool| tool.genai_tool()).collect()
     }
 
+    pub fn build_tools_without_plan(&self) -> Vec<Tool> {
+        ToolName::ALL
+            .iter()
+            .filter(|tool| **tool != ToolName::Plan)
+            .map(|tool| tool.genai_tool())
+            .collect()
+    }
+
     pub fn execute(&self, name: &str, args: &Value) -> ToolResult {
         match ToolName::from_name(name) {
             Some(ToolName::ReadFile) => self.read_file_tool(args),

@@ -71,6 +71,7 @@ pub struct HarnessSnapshot {
     pub model: ModelDef,
     pub agent_name: String,
     pub streaming: bool,
+    pub plan_mode_on: bool,
 }
 
 pub struct Harness {
@@ -84,6 +85,7 @@ pub struct Harness {
     streaming: bool,
     canceled: Arc<AtomicBool>,
     last_plan_content: Option<String>,
+    plan_mode_on: bool,
 }
 
 impl Harness {
@@ -110,7 +112,7 @@ impl Harness {
         };
 
         let (mut history, token_usage) = session.load()?;
-        history.tools = Some(tool_engine.build_tools());
+        history.tools = Some(tool_engine.build_tools_without_plan());
         apply_agent_prompt(&mut history, &agent);
 
         Ok(Self {
@@ -124,6 +126,7 @@ impl Harness {
             streaming: true,
             canceled: Arc::new(AtomicBool::new(false)),
             last_plan_content: None,
+            plan_mode_on: false,
         })
     }
 
@@ -145,6 +148,37 @@ impl Harness {
 
     pub fn set_streaming(&mut self, streaming: bool) {
         self.streaming = streaming;
+    }
+
+    pub fn plan_mode(&self) -> bool {
+        self.plan_mode_on
+    }
+
+    pub fn set_plan_mode(&mut self, is_on: bool) {
+        self.plan_mode_on = is_on;
+        self.rebuild_agent();
+    }
+
+    fn rebuild_agent(&mut self) {
+        self.history.tools = if self.plan_mode_on {
+            Some(self.tool_engine.build_tools())
+        } else {
+            Some(self.tool_engine.build_tools_without_plan())
+        };
+
+        let prompt = if self.plan_mode_on {
+            format!("{}\n\n{}", self.agent.prompt, PlanHook::sys_prompt())
+                .trim()
+                .to_string()
+        } else {
+            self.agent.prompt.clone()
+        };
+
+        self.history.system = if prompt.is_empty() {
+            None
+        } else {
+            Some(prompt)
+        }
     }
 
     fn is_cancel(&self) -> bool {
@@ -217,6 +251,7 @@ impl Harness {
             model: self.model().clone(),
             agent_name: self.agent_name().to_string(),
             streaming: self.streaming(),
+            plan_mode_on: self.plan_mode_on,
         }
     }
 

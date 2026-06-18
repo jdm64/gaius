@@ -96,6 +96,7 @@ pub struct TuiApp {
     pub actor_busy: bool,
     pub queued_prompts: usize,
     pub question_answer_tx: Option<oneshot::Sender<String>>,
+    pub plan_mode_on: bool,
 }
 
 impl Default for TuiApp {
@@ -134,6 +135,7 @@ impl TuiApp {
             actor_busy: false,
             queued_prompts: 0,
             question_answer_tx: None,
+            plan_mode_on: false,
         }
     }
 
@@ -381,6 +383,7 @@ impl TuiApp {
     pub fn apply_snapshot(&mut self, snapshot: &HarnessSnapshot) {
         self.model = snapshot.model.clone();
         self.agent_name = snapshot.agent_name.clone();
+        self.plan_mode_on = snapshot.plan_mode_on;
     }
 
     pub fn harness_idle(&self) -> bool {

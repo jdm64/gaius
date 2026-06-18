@@ -9,6 +9,8 @@ const KEEP_OPTION: &str = "Keep Context";
 const REFINE_OPTION: &str = "Refine Plan";
 const HOOK_OPTIONS: [&str; 3] = [KEEP_OPTION, CLEAR_OPTION, REFINE_OPTION];
 const QUESTION_TITLE: &str = "Plan created:";
+
+const SYSTEM_PROMPT: &str = "Answer the user's request using the plan tool";
 const REFINE_PROMPT: &str = "Call the plan tool again making the following changes:";
 const IMPLEMENT_PROMPT: &str = "Implement the following plan";
 const IMPLEMENT_DETAILS_PROMPT: &str = "Implement the plan with the following changes:";
@@ -37,6 +39,10 @@ impl PlanHook {
             title: QUESTION_TITLE.to_string(),
             options: HOOK_OPTIONS.iter().map(|s| s.to_string()).collect(),
         }
+    }
+
+    pub fn sys_prompt() -> String {
+        SYSTEM_PROMPT.to_owned()
     }
 
     fn user_prompt(details: String) -> String {
@@ -76,5 +82,7 @@ impl PlanHook {
             }
             None => {}
         }
+
+        harness.set_plan_mode(false);
     }
 }

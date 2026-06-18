@@ -78,6 +78,9 @@ pub enum HarnessCommand {
     ToggleStreaming {
         reply_tx: oneshot::Sender<CommandResult>,
     },
+    TogglePlanMode {
+        reply_tx: oneshot::Sender<CommandResult>,
+    },
     ReplayHistory {
         reply_tx: oneshot::Sender<CommandResult>,
     },
@@ -139,6 +142,12 @@ impl HarnessActorHandle {
     pub async fn toggle_streaming(&self) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.send_command(HarnessCommand::ToggleStreaming { reply_tx }, Some(reply_rx))
+            .await
+    }
+
+    pub async fn toggle_plan_mode(&self) -> CommandResult {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.send_command(HarnessCommand::TogglePlanMode { reply_tx }, Some(reply_rx))
             .await
     }
 
@@ -271,6 +280,10 @@ async fn run_actor(
             }
             HarnessCommand::ToggleStreaming { reply_tx } => {
                 harness.set_streaming(!harness.streaming());
+                let _ = reply_tx.send(Ok(harness.snapshot()));
+            }
+            HarnessCommand::TogglePlanMode { reply_tx } => {
+                harness.set_plan_mode(!harness.plan_mode());
                 let _ = reply_tx.send(Ok(harness.snapshot()));
             }
             HarnessCommand::ReplayHistory { reply_tx } => {

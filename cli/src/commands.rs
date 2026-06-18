@@ -53,6 +53,10 @@ impl Commands {
                 name: "show-tokens",
                 description: "Toggle rendering of token info messages on/off",
             },
+            Command {
+                name: "plan",
+                description: "Toggle plan mode on/off",
+            },
         ]
     }
 
@@ -159,6 +163,22 @@ impl Commands {
             }
             "show-tokens" => {
                 app.toggle_token_info();
+                Input::clear_input(app);
+                InputMode::PromptInput
+            }
+            "plan" => {
+                if !app.harness_idle() {
+                    app.status =
+                        "Agent is busy; finish current turn before changing plan mode".to_string();
+                } else {
+                    match actor.toggle_plan_mode().await {
+                        Ok(snapshot) => {
+                            app.apply_snapshot(&snapshot);
+                            app.status = format!("Plan mode = {}", snapshot.plan_mode_on);
+                        }
+                        Err(err) => app.status = err,
+                    }
+                }
                 Input::clear_input(app);
                 InputMode::PromptInput
             }
