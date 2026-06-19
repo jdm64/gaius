@@ -10,7 +10,8 @@ const REFINE_OPTION: &str = "Refine Plan";
 const HOOK_OPTIONS: [&str; 3] = [KEEP_OPTION, CLEAR_OPTION, REFINE_OPTION];
 const QUESTION_TITLE: &str = "Plan created:";
 
-const SYSTEM_PROMPT: &str = "Answer the user's request using the plan tool";
+const SYSTEM_PROMPT: &str =
+    "You MUST use the plan tool before editing any files because the user switched to Plan mode.";
 const REFINE_PROMPT: &str = "Call the plan tool again making the following changes:";
 const IMPLEMENT_PROMPT: &str = "Implement the following plan";
 const IMPLEMENT_DETAILS_PROMPT: &str = "Implement the plan with the following changes:";
