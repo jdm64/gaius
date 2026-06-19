@@ -262,12 +262,11 @@ impl TuiApp {
             }
             HarnessActorEvent::AskUser {
                 title,
-                mut options,
+                options,
                 answer_tx,
             } => {
                 Input::clear_input(self);
                 Input::reset_history_scroll(self);
-                options.push("Other:".to_string());
                 self.question_answer_tx = Some(answer_tx);
                 self.mode = InputMode::Question {
                     title,

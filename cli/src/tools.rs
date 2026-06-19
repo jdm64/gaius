@@ -435,7 +435,7 @@ impl ToolEngine {
             Some(t) => t,
             None => return ToolResult::Error("Missing title".to_string()),
         };
-        let options: Vec<String> = args
+        let mut options: Vec<String> = args
             .get("options")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -444,6 +444,9 @@ impl ToolEngine {
                     .collect()
             })
             .unwrap_or_default();
+        if !options.iter().any(|o| o.eq_ignore_ascii_case("other")) {
+            options.push("Other:".to_string());
+        }
         ToolResult::Question(title.to_string(), options)
     }
 
