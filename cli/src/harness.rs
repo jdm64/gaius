@@ -511,17 +511,11 @@ impl Harness {
 
             self.call_tools(&tool_calls, &mut on_event);
 
-            PlanHook::run(self, &mut on_event);
+            let stop_requested = PlanHook::run(self, &mut on_event);
 
             self.save_history()?;
 
-            let no_user_prompt = self
-                .history
-                .messages
-                .last()
-                .is_none_or(|m| m.role != ChatRole::User);
-
-            if no_user_prompt && tool_calls.is_empty() {
+            if stop_requested || tool_calls.is_empty() {
                 if self.is_cancel() {
                     self.send_system_message("Request Cancelled".to_string(), &mut on_event);
                 }

@@ -5,9 +5,17 @@
 use crate::harness::{Harness, HarnessEvent};
 
 const CLEAR_OPTION: &str = "Clear Context";
+const CLEAR_STOP_OPTION: &str = "Clear Context & Stop";
 const KEEP_OPTION: &str = "Keep Context";
+const KEEP_STOP_OPTION: &str = "Keep Context & Stop";
 const REFINE_OPTION: &str = "Refine Plan";
-const HOOK_OPTIONS: [&str; 3] = [KEEP_OPTION, CLEAR_OPTION, REFINE_OPTION];
+const HOOK_OPTIONS: [&str; 5] = [
+    KEEP_OPTION,
+    KEEP_STOP_OPTION,
+    CLEAR_OPTION,
+    CLEAR_STOP_OPTION,
+    REFINE_OPTION,
+];
 const QUESTION_TITLE: &str = "Plan created:";
 
 const SYSTEM_PROMPT: &str =
@@ -18,7 +26,9 @@ const IMPLEMENT_DETAILS_PROMPT: &str = "Implement the plan with the following ch
 
 pub enum PlanHook {
     Clear(String),
+    ClearStop(String),
     Keep(String),
+    KeepStop(String),
     Refine(String),
 }
 
@@ -29,7 +39,9 @@ impl PlanHook {
 
         match option.trim() {
             CLEAR_OPTION => Some(Self::Clear(details.to_string())),
+            CLEAR_STOP_OPTION => Some(Self::ClearStop(details.to_string())),
             KEEP_OPTION => Some(Self::Keep(details.to_string())),
+            KEEP_STOP_OPTION => Some(Self::KeepStop(details.to_string())),
             REFINE_OPTION => Some(Self::Refine(details.to_string())),
             _ => None,
         }
@@ -54,36 +66,45 @@ impl PlanHook {
         }
     }
 
-    pub fn run<F>(harness: &mut Harness, mut on_event: F)
+    pub fn run<F>(harness: &mut Harness, mut on_event: F) -> bool
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         let Some(plan_text) = harness.plan_text().take() else {
-            return;
+            return false;
         };
 
         let Some(answer) = on_event(Self::ask_user()) else {
-            return;
+            return false;
         };
 
-        match Self::from_str(answer.as_str()) {
-            Some(Self::Clear(details)) => {
+        let mode = Self::from_str(answer.as_str());
+        let is_stop = matches!(mode, Some(Self::ClearStop(_)) | Some(Self::KeepStop(_)));
+        match mode {
+            Some(Self::Clear(details)) | Some(Self::ClearStop(details)) => {
                 harness.clear_context();
                 harness.send_user_message(Self::user_prompt(details), &mut on_event);
                 harness.send_plan_message(plan_text, &mut on_event);
             }
-            Some(Self::Keep(details)) => {
+            Some(Self::Keep(details)) | Some(Self::KeepStop(details)) => {
                 harness.send_user_message(Self::user_prompt(details), &mut on_event);
             }
             Some(Self::Refine(details)) => {
-                if !details.is_empty() {
+                if details.is_empty() {
+                    return true;
+                } else {
                     let prompt = format!("{} {}", REFINE_PROMPT, details);
                     harness.send_user_message(prompt, &mut on_event);
+                    return false;
                 }
             }
-            None => {}
+            None => {
+                return false;
+            }
         }
 
         harness.set_plan_mode(false);
+
+        is_stop
     }
 }
