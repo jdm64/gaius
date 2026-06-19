@@ -28,13 +28,12 @@ impl Render {
             .style(Style::default().bg(self.theme.inputbox))
             .padding(Padding::horizontal(1));
         if !app.status.is_empty() {
-            let title = format!(" {} ", app.status);
             if matches!(&app.mode, InputMode::Question { .. }) {
                 block = block
-                    .title_bottom(title)
+                    .title_bottom(" Waiting for user... ".to_string())
                     .title_alignment(HorizontalAlignment::Right);
             } else {
-                block = block.title(title);
+                block = block.title(format!(" {} ", app.status));
             }
         }
         let input = Paragraph::new(Text::from(lines))
