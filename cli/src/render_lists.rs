@@ -266,7 +266,7 @@ impl Render {
         let list = List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(spec.title)
+                .title(format!(" {} ", spec.title))
                 .padding(Padding::horizontal(1))
                 .style(spec.background),
         );
