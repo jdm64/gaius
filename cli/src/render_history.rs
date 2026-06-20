@@ -3,6 +3,7 @@
  */
 
 use crate::{
+    diff_view::{DiffLineKind, DiffView},
     render::Render,
     tools::ToolName,
     tui::{TuiApp, TuiMessage, wrapped_line_count},
@@ -10,7 +11,7 @@ use crate::{
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Padding, Paragraph, Wrap},
 };
@@ -172,7 +173,51 @@ impl Render {
                 let style = Style::default().fg(self.theme.header);
                 vec![Line::from(text.clone()).style(style).right_aligned()]
             }
+            TuiMessage::DiffView(diff) => self.render_diff_view(diff),
         }
+    }
+
+    fn render_diff_view(&self, diff: &DiffView) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        let header_style = Style::default().add_modifier(Modifier::BOLD);
+        let context_style = Style::default().add_modifier(Modifier::DIM);
+        let delete_style = Style::default().fg(Color::Red);
+        let insert_style = Style::default().fg(Color::Green);
+
+        lines.push(Line::from(vec![
+            Span::styled("diff ", header_style),
+            Span::styled(diff.file_path.clone(), header_style),
+        ]));
+
+        for hunk in &diff.hunks {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "@@ -{},{} +{},{} @@",
+                    hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines
+                ),
+                context_style,
+            )));
+
+            for diff_line in &hunk.lines {
+                let (prefix, style) = match diff_line.kind {
+                    DiffLineKind::Context => (" ", context_style),
+                    DiffLineKind::Delete => ("-", delete_style),
+                    DiffLineKind::Insert => ("+", insert_style),
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(prefix.to_string(), style),
+                    Span::styled(diff_line.text.clone(), style),
+                ]));
+                if diff_line.missing_newline {
+                    lines.push(Line::from(Span::styled(
+                        "\\ No newline at end of file",
+                        context_style,
+                    )));
+                }
+            }
+        }
+
+        lines
     }
 
     fn render_tool_results(

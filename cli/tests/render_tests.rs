@@ -1,4 +1,5 @@
 use gaius::config::Config;
+use gaius::diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView};
 use gaius::render::Render;
 use gaius::tui::{TuiApp, TuiMessage};
 use ratatui::{
@@ -139,6 +140,53 @@ fn draw_input_expands_height_for_wrapped_prompt() {
         terminal.get_cursor_position().unwrap(),
         Position { x: 5, y: 5 }
     );
+}
+
+#[test]
+fn render_diff_view_includes_headers_lines_and_missing_newline_marker() {
+    let render = Render::new();
+    let msg = TuiMessage::DiffView(DiffView {
+        file_path: "src/lib.rs".to_string(),
+        hunks: vec![DiffHunk {
+            old_start: 2,
+            old_lines: 2,
+            new_start: 2,
+            new_lines: 2,
+            lines: vec![
+                DiffLine {
+                    kind: DiffLineKind::Context,
+                    old_line: Some(2),
+                    new_line: Some(2),
+                    text: "same".to_string(),
+                    missing_newline: false,
+                },
+                DiffLine {
+                    kind: DiffLineKind::Delete,
+                    old_line: Some(3),
+                    new_line: None,
+                    text: "old".to_string(),
+                    missing_newline: false,
+                },
+                DiffLine {
+                    kind: DiffLineKind::Insert,
+                    old_line: None,
+                    new_line: Some(3),
+                    text: "new".to_string(),
+                    missing_newline: true,
+                },
+            ],
+        }],
+    });
+
+    let lines = render.render_message(&msg, false, true);
+    let texts = line_texts(&lines);
+
+    assert!(texts.contains(&"diff src/lib.rs".to_string()));
+    assert!(texts.contains(&"@@ -2,2 +2,2 @@".to_string()));
+    assert!(texts.contains(&" same".to_string()));
+    assert!(texts.contains(&"-old".to_string()));
+    assert!(texts.contains(&"+new".to_string()));
+    assert!(texts.contains(&"\\ No newline at end of file".to_string()));
 }
 
 #[test]

@@ -5,6 +5,7 @@
 use crate::{
     agents::AgentDefinition,
     config::Config,
+    diff_view::DiffView,
     models::ModelDef,
     plan_hook::PlanHook,
     render::Render,
@@ -51,6 +52,7 @@ pub enum HarnessEvent {
         result: String,
         error: bool,
     },
+    DiffView(DiffView),
     TokenUsage {
         prompt: Option<i32>,
         response: Option<i32>,
@@ -339,6 +341,7 @@ impl Harness {
                                 pending_tool_calls.remove(0);
                             }
                         }
+                        emit_diff_markers(next_msg, &mut on_event);
                         token_usage.emit_usage(next_index, &mut on_event);
                     }
 
@@ -365,6 +368,7 @@ impl Harness {
                             tr.call_id, tr.content
                         )));
                     }
+                    emit_diff_markers(message, &mut on_event);
                     token_usage.emit_usage(index, &mut on_event);
                 }
                 ChatRole::System => {
@@ -546,6 +550,9 @@ impl Harness {
                     }
                     self.send_tool_call_event(tc, text, false, on_event);
                 }
+                ToolResult::FileEdit { message, diff } => {
+                    self.send_diff_view_event(tc, message, diff, on_event);
+                }
                 ToolResult::Error(err) => {
                     self.send_tool_call_event(tc, err, true, on_event);
                 }
@@ -604,6 +611,28 @@ impl Harness {
         });
     }
 
+    fn send_diff_view_event<F>(
+        &mut self,
+        tc: &ToolCall,
+        result: String,
+        diff: DiffView,
+        on_event: &mut F,
+    ) where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        let marker = diff.to_part();
+        let mut message: ChatMessage = ToolResponse::new(&tc.call_id, result.clone()).into();
+        message.content.push(marker);
+        self.history.messages.push(message);
+        on_event(HarnessEvent::ToolCall {
+            name: tc.fn_name.to_string(),
+            arguments: tc.fn_arguments.to_string(),
+            result,
+            error: false,
+        });
+        on_event(HarnessEvent::DiffView(diff));
+    }
+
     fn save_history(&mut self) -> Result<(), Box<dyn Error>> {
         self.session.save(&self.history, &self.token_usage)?;
         Ok(())
@@ -615,6 +644,17 @@ fn has_plan_marker(message: &ChatMessage) -> bool {
         message.content.parts().first(),
         Some(ContentPart::Custom(CustomPart { data, .. })) if data == &json!("plan")
     )
+}
+
+fn emit_diff_markers<F>(message: &ChatMessage, on_event: &mut F)
+where
+    F: FnMut(HarnessEvent),
+{
+    for part in message.content.custom_parts() {
+        if let Some(diff) = DiffView::from_marker(&part.data) {
+            on_event(HarnessEvent::DiffView(diff));
+        }
+    }
 }
 
 fn apply_agent_prompt(history: &mut ChatRequest, agent: &AgentDefinition) {

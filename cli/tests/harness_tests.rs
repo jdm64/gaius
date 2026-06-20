@@ -1,9 +1,13 @@
 use gaius::{
     agents::AgentDefinition,
+    diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
     harness::{Harness, HarnessEvent},
     token_usage::{TokenUsageLedger, TokenUsageSpan},
 };
-use genai::chat::{ChatMessage, ContentPart, Usage};
+use genai::chat::{
+    ChatMessage, ContentPart, CustomPart, MessageContent, ToolCall, ToolResponse, Usage,
+};
+use serde_json::json;
 
 fn basic_agent() -> AgentDefinition {
     AgentDefinition {
@@ -75,6 +79,46 @@ fn replay_assistant_text_unchanged() {
 }
 
 #[test]
+fn replay_diff_marker_after_tool_call() {
+    let diff = sample_diff();
+    let messages = vec![
+        ChatMessage::from(vec![ToolCall {
+            call_id: "call-1".to_string(),
+            fn_name: "edit_file".to_string(),
+            fn_arguments: json!({"file_path":"src/lib.rs"}),
+            thought_signatures: None,
+        }]),
+        ChatMessage::tool(MessageContent::from_parts(vec![
+            ContentPart::ToolResponse(ToolResponse::new("call-1", "File edited successfully")),
+            ContentPart::Custom(CustomPart {
+                model_iden: None,
+                data: json!({
+                    "kind": "diff_view",
+                    "version": 1,
+                    "file_path": diff.file_path,
+                    "hunks": diff.hunks,
+                }),
+            }),
+        ])),
+    ];
+
+    let events = replay_events(messages);
+
+    assert_eq!(
+        events,
+        vec![
+            HarnessEvent::ToolCall {
+                name: "edit_file".to_string(),
+                arguments: json!({"file_path":"src/lib.rs"}).to_string(),
+                result: "File edited successfully".to_string(),
+                error: false,
+            },
+            HarnessEvent::DiffView(sample_diff()),
+        ]
+    );
+}
+
+#[test]
 fn token_usage_records_initial_prompt_as_baseline() {
     let mut ledger = TokenUsageLedger::default();
     let spans = ledger.record(
@@ -107,6 +151,34 @@ fn token_usage_records_initial_prompt_as_baseline() {
             response: Some(25),
         }
     );
+}
+
+fn sample_diff() -> DiffView {
+    DiffView {
+        file_path: "src/lib.rs".to_string(),
+        hunks: vec![DiffHunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![
+                DiffLine {
+                    kind: DiffLineKind::Delete,
+                    old_line: Some(1),
+                    new_line: None,
+                    text: "old".to_string(),
+                    missing_newline: false,
+                },
+                DiffLine {
+                    kind: DiffLineKind::Insert,
+                    old_line: None,
+                    new_line: Some(1),
+                    text: "new".to_string(),
+                    missing_newline: false,
+                },
+            ],
+        }],
+    }
 }
 
 #[test]

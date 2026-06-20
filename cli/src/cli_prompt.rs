@@ -4,6 +4,7 @@
 
 use crate::{
     config::Config,
+    diff_view::DiffLineKind,
     harness::{Harness, HarnessEvent},
     models::Models,
     token_usage::format_arrows,
@@ -109,6 +110,31 @@ impl CliPrompt {
                         println!("tool-error> {}", result);
                     } else {
                         println!("tool-result> {}", result);
+                    }
+                    None
+                }
+                HarnessEvent::DiffView(diff) => {
+                    if agent_started {
+                        println!();
+                        agent_started = false;
+                    }
+                    println!("diff> {}", diff.file_path);
+                    for hunk in diff.hunks {
+                        println!(
+                            "@@ -{},{} +{},{} @@",
+                            hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines
+                        );
+                        for line in hunk.lines {
+                            let prefix = match line.kind {
+                                DiffLineKind::Context => " ",
+                                DiffLineKind::Delete => "-",
+                                DiffLineKind::Insert => "+",
+                            };
+                            println!("{}{}", prefix, line.text);
+                            if line.missing_newline {
+                                println!("\\ No newline at end of file");
+                            }
+                        }
                     }
                     None
                 }

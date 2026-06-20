@@ -1,4 +1,5 @@
 use gaius::config::Config;
+use gaius::diff_view::DiffView;
 use gaius::tui::{TuiApp, TuiMessage, wrapped_line_count};
 
 #[test]
@@ -29,8 +30,12 @@ fn build_tui_app_messages_with_all_variants() {
         result: "sunny".to_string(),
         error: false,
     });
+    app.push_message(TuiMessage::DiffView(DiffView {
+        file_path: "src/main.rs".to_string(),
+        hunks: vec![],
+    }));
 
-    assert_eq!(app.messages.len(), 5);
+    assert_eq!(app.messages.len(), 6);
     match &app.messages[0] {
         TuiMessage::SystemMessage(t) => assert_eq!(t, "system: be useful"),
         _ => panic!("expected SystemMessage"),
@@ -63,5 +68,11 @@ fn build_tui_app_messages_with_all_variants() {
             assert_eq!(result, "sunny");
         }
         _ => panic!("expected ToolCall"),
+    }
+    match &app.messages[5] {
+        TuiMessage::DiffView(diff) => {
+            assert_eq!(diff.file_path, "src/main.rs");
+        }
+        _ => panic!("expected DiffView"),
     }
 }

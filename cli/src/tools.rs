@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use crate::diff_view::DiffView;
 use genai::chat::*;
 use glob::glob;
 use regex::Regex;
@@ -15,6 +16,7 @@ use std::process::Command;
 pub enum ToolResult {
     Error(String),
     Text(String),
+    FileEdit { message: String, diff: DiffView },
     Question(String, Vec<String>),
 }
 
@@ -360,8 +362,17 @@ impl ToolEngine {
         }
 
         let updated = content.replace(find, replace);
+        let relative_path = full_path
+            .strip_prefix(&cwd)
+            .unwrap_or(&full_path)
+            .to_string_lossy()
+            .into_owned();
+        let diff = DiffView::from_text(relative_path, &content, &updated);
         match std::fs::write(full_path, updated) {
-            Ok(()) => ToolResult::Text("File edited successfully".to_string()),
+            Ok(()) => ToolResult::FileEdit {
+                message: "File edited successfully".to_string(),
+                diff,
+            },
             Err(e) => ToolResult::Error(format!("Error writing file: {}", e)),
         }
     }

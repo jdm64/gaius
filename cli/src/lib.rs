@@ -6,6 +6,7 @@ pub mod agents;
 pub mod cli_prompt;
 pub mod commands;
 pub mod config;
+pub mod diff_view;
 pub mod harness;
 pub mod harness_actor;
 pub mod input;

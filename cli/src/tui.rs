@@ -6,6 +6,7 @@ use crate::{
     agents::Agents,
     commands::Commands,
     config::Config,
+    diff_view::DiffView,
     harness::{Harness, HarnessEvent, HarnessSnapshot},
     harness_actor::{HarnessActorEvent, HarnessActorHandle},
     input::{Input, InputMode},
@@ -46,6 +47,7 @@ pub enum TuiMessage {
         result: String,
         error: bool,
     },
+    DiffView(DiffView),
 }
 
 pub struct TerminalGuard {
@@ -420,6 +422,10 @@ impl TuiApp {
                 });
                 Input::reset_history_scroll(self);
             }
+            HarnessEvent::DiffView(diff) => {
+                self.push_message(TuiMessage::DiffView(diff));
+                Input::reset_history_scroll(self);
+            }
             HarnessEvent::TokenUsage {
                 prompt,
                 response,
@@ -507,6 +513,9 @@ impl TuiApp {
                     result,
                     error,
                 });
+            }
+            HarnessEvent::DiffView(diff) => {
+                self.push_message(TuiMessage::DiffView(diff));
             }
             HarnessEvent::TokenUsage {
                 prompt,
