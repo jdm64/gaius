@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use gaius::cli_prompt::CliPrompt;
 use gaius::config::Config;
 use gaius::harness::Harness;
 use gaius::models::Models;
@@ -87,10 +88,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let end_session: Option<String>;
 
     if let Some(prompt) = initial_prompt {
-        let first_model = Models::first_from_config(&config).await?;
-        harness.set_model(first_model.clone()).await?;
-        harness.run(Some(prompt)).await?;
-        end_session = harness.session_id();
+        end_session = CliPrompt::run(Some(prompt), config, &mut harness).await?;
     } else {
         // restore the last used model instead of what's in config
         if let Some(recent_model) = Models::first_from_recent(&config).await {

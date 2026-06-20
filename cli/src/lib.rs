@@ -3,6 +3,7 @@
  */
 
 pub mod agents;
+pub mod cli_prompt;
 pub mod commands;
 pub mod config;
 pub mod harness;

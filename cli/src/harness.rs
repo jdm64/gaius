@@ -9,9 +9,8 @@ use crate::{
     plan_hook::PlanHook,
     render::Render,
     session::Session,
-    token_usage::{TokenUsageLedger, format_arrows},
+    token_usage::TokenUsageLedger,
     tools::{ToolEngine, ToolResult},
-    util::prompt_input,
 };
 use futures::StreamExt;
 use genai::{
@@ -24,7 +23,6 @@ use genai::{
 use serde_json::json;
 use std::{
     error::Error,
-    io::{self, Write},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -375,115 +373,6 @@ impl Harness {
                 }
             }
         }
-    }
-
-    pub async fn run(&mut self, prompt: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(prompt) = prompt {
-            self.run_turn(prompt).await?;
-        } else {
-            loop {
-                let input = prompt_input("user> ")?;
-                if input.is_empty() {
-                    break;
-                }
-                self.run_turn(input).await?;
-            }
-        };
-
-        Ok(())
-    }
-
-    pub async fn run_turn(&mut self, prompt: String) -> Result<(), Box<dyn std::error::Error>> {
-        let mut agent_started = false;
-        self.run_turn_with_events(prompt, |event| match event {
-            HarnessEvent::UserPrompt(text) => {
-                println!("user> {}", text);
-                let _ = io::stdout().flush();
-                None
-            }
-            HarnessEvent::PlanMessage(text) => {
-                println!("plan> {}", text);
-                let _ = io::stdout().flush();
-                None
-            }
-            HarnessEvent::Thinking(text) => {
-                if !agent_started {
-                    print!("agent> ");
-                    agent_started = true;
-                }
-                print!("{}", text);
-                let _ = io::stdout().flush();
-                None
-            }
-            HarnessEvent::AgentMessage(text) => {
-                if !agent_started {
-                    print!("agent> ");
-                    agent_started = true;
-                }
-                print!("{}", text);
-                let _ = io::stdout().flush();
-                None
-            }
-            HarnessEvent::SystemMessage(text) => {
-                if !agent_started {
-                    print!("agent> ");
-                    agent_started = true;
-                }
-                print!("{}", text);
-                let _ = io::stdout().flush();
-                None
-            }
-            HarnessEvent::ToolCall {
-                name,
-                arguments,
-                result,
-                error,
-            } => {
-                if agent_started {
-                    println!();
-                    agent_started = false;
-                }
-                println!("tool-call> {} ({})", name, arguments);
-                if error {
-                    println!("tool-error> {}", result);
-                } else {
-                    println!("tool-result> {}", result);
-                }
-                None
-            }
-            HarnessEvent::TokenUsage {
-                prompt,
-                response,
-                total,
-            } => {
-                if agent_started {
-                    println!();
-                    agent_started = false;
-                }
-                let net = format_arrows(prompt, response);
-                let total_str = total.unwrap_or_default();
-                println!("tokens> {net} {total_str}");
-                None
-            }
-            HarnessEvent::AskUser { title, options } => {
-                if agent_started {
-                    println!();
-                    agent_started = false;
-                }
-                println!("question> {}", title);
-                for (index, option) in options.iter().enumerate() {
-                    println!("  {}) {}", index + 1, option);
-                }
-                prompt_input("answer> ").ok()
-            }
-        })
-        .await?;
-
-        if agent_started {
-            println!();
-        }
-
-        Ok(())
     }
 
     pub async fn run_turn_with_events<F>(
