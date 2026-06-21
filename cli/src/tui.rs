@@ -12,6 +12,7 @@ use crate::{
     input::{Input, InputMode},
     models::ModelDef,
     render::Render,
+    render_history::DisplayPrefs,
     token_usage::format_arrows,
     util::cache_dir,
 };
@@ -88,8 +89,7 @@ pub struct TuiApp {
     pub status: String,
     pub mode: InputMode,
     pub context_tokens: Option<i32>,
-    pub show_thinking: bool,
-    pub show_token_info: bool,
+    pub display_prefs: DisplayPrefs,
     pub prompt_history: Vec<String>,
     pub prompt_history_idx: Option<usize>,
     pub history_lines: Vec<Line<'static>>,
@@ -127,8 +127,11 @@ impl TuiApp {
             status: "".to_string(),
             mode: InputMode::PromptInput,
             context_tokens: None,
-            show_thinking: false,
-            show_token_info: true,
+            display_prefs: DisplayPrefs {
+                thinking: false,
+                token_info: true,
+                diff_view: true,
+            },
             prompt_history: Vec::new(),
             prompt_history_idx: None,
             history_lines: Vec::new(),
@@ -539,20 +542,17 @@ impl TuiApp {
     }
 
     pub fn toggle_thinking(&mut self) {
-        self.show_thinking = !self.show_thinking;
-        self.status = format!(
-            "Thinking display: {}",
-            if self.show_thinking { "on" } else { "off" }
-        );
+        self.status = self.display_prefs.toggle_thinking();
         self.mark_history_dirty();
     }
 
     pub fn toggle_token_info(&mut self) {
-        self.show_token_info = !self.show_token_info;
-        self.status = format!(
-            "Token info display: {}",
-            if self.show_token_info { "on" } else { "off" }
-        );
+        self.status = self.display_prefs.toggle_token_info();
+        self.mark_history_dirty();
+    }
+
+    pub fn toggle_diff_view(&mut self) {
+        self.status = self.display_prefs.toggle_diff_view();
         self.mark_history_dirty();
     }
 

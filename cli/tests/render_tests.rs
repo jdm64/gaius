@@ -1,6 +1,7 @@
 use gaius::config::Config;
 use gaius::diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView};
 use gaius::render::Render;
+use gaius::render_history::DisplayPrefs;
 use gaius::tui::{TuiApp, TuiMessage};
 use ratatui::{
     Terminal,
@@ -9,12 +10,20 @@ use ratatui::{
     text::{Line, Span},
 };
 
+fn default_prefs() -> DisplayPrefs {
+    DisplayPrefs {
+        thinking: false,
+        token_info: true,
+        diff_view: true,
+    }
+}
+
 #[test]
 fn markdown_heading_has_bold_style() {
     let render = Render::new();
     let md = "# Heading";
     let msg = TuiMessage::AgentMessage(md.to_string());
-    let lines = render.render_message(&msg, false, true);
+    let lines = render.render_message(&msg, &default_prefs());
     assert!(!lines.is_empty());
     // The heading style should be applied to the Line's style, not the span.
     let line = &lines[0];
@@ -38,7 +47,7 @@ fn markdown_list_has_style() {
     let render = Render::new();
     let md = "- item1\n- item2";
     let msg = TuiMessage::AgentMessage(md.to_string());
-    let lines = render.render_message(&msg, false, true);
+    let lines = render.render_message(&msg, &default_prefs());
     assert!(!lines.is_empty());
     // List items should have a style (maybe a marker).
     // Check lines contain the items; style might be default but marker could have style?
@@ -113,7 +122,10 @@ fn visible_history_lines_handles_empty_history() {
 #[test]
 fn visible_history_lines_pads_user_prompts_to_width() {
     let render = Render::new();
-    let lines = render.render_message(&TuiMessage::UserPrompt("hello".to_string()), false, true);
+    let lines = render.render_message(
+        &TuiMessage::UserPrompt("hello".to_string()),
+        &default_prefs(),
+    );
 
     let visible = render.visible_history_lines(&lines, 10, 0, 3);
 
@@ -178,7 +190,7 @@ fn render_diff_view_includes_headers_lines_and_missing_newline_marker() {
         }],
     });
 
-    let lines = render.render_message(&msg, false, true);
+    let lines = render.render_message(&msg, &default_prefs());
     let texts = line_texts(&lines);
 
     assert!(texts.contains(&"diff src/lib.rs".to_string()));

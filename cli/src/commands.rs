@@ -54,6 +54,10 @@ impl Commands {
                 description: "Toggle rendering of token info messages on/off",
             },
             Command {
+                name: "show-diff",
+                description: "Toggle rendering of diff messages on/off",
+            },
+            Command {
                 name: "plan",
                 description: "Toggle plan mode on/off",
             },
@@ -163,6 +167,11 @@ impl Commands {
             }
             "show-tokens" => {
                 app.toggle_token_info();
+                Input::clear_input(app);
+                InputMode::PromptInput
+            }
+            "show-diff" => {
+                app.toggle_diff_view();
                 Input::clear_input(app);
                 InputMode::PromptInput
             }

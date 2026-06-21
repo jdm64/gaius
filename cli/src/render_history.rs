@@ -20,6 +20,31 @@ use tui_markdown::{Options, from_str_with_options};
 
 const USER_PROMPT_BAR: &str = "\u{2503} ";
 
+pub struct DisplayPrefs {
+    pub thinking: bool,
+    pub token_info: bool,
+    pub diff_view: bool,
+}
+
+impl DisplayPrefs {
+    fn toggle(field: &mut bool, label: &str) -> String {
+        *field = !*field;
+        format!("{} display: {}", label, if *field { "on" } else { "off" })
+    }
+
+    pub fn toggle_thinking(&mut self) -> String {
+        Self::toggle(&mut self.thinking, "Thinking")
+    }
+
+    pub fn toggle_token_info(&mut self) -> String {
+        Self::toggle(&mut self.token_info, "Token info")
+    }
+
+    pub fn toggle_diff_view(&mut self) -> String {
+        Self::toggle(&mut self.diff_view, "Diff view")
+    }
+}
+
 impl Render {
     pub fn draw_history(&self, app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
         let text_width = area.width.saturating_sub(4).max(1);
@@ -74,15 +99,10 @@ impl Render {
         app.history_scroll = clamped_scroll;
     }
 
-    pub fn render_message(
-        &self,
-        msg: &TuiMessage,
-        show_thinking: bool,
-        show_token_info: bool,
-    ) -> Vec<Line<'static>> {
+    pub fn render_message(&self, msg: &TuiMessage, prefs: &DisplayPrefs) -> Vec<Line<'static>> {
         match msg {
             TuiMessage::Thinking(text) => {
-                if !show_thinking {
+                if !prefs.thinking {
                     return vec![
                         Line::from(format!("Thinking... {}", text.len()))
                             .style(Style::default().fg(self.theme.thinking)),
@@ -167,13 +187,18 @@ impl Render {
                 vec![Line::from(text.clone()).style(style)]
             }
             TuiMessage::TokenInfo(text) => {
-                if !show_token_info {
+                if !prefs.token_info {
                     return vec![];
                 }
                 let style = Style::default().fg(self.theme.header);
                 vec![Line::from(text.clone()).style(style).right_aligned()]
             }
-            TuiMessage::DiffView(diff) => self.render_diff_view(diff),
+            TuiMessage::DiffView(diff) => {
+                if !prefs.diff_view {
+                    return vec![];
+                }
+                self.render_diff_view(diff)
+            }
         }
     }
 
@@ -287,7 +312,7 @@ impl Render {
                 }
             }
 
-            lines.extend(self.render_message(message, app.show_thinking, app.show_token_info));
+            lines.extend(self.render_message(message, &app.display_prefs));
         }
 
         lines
