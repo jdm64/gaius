@@ -16,7 +16,7 @@ const HOOK_OPTIONS: [&str; 5] = [
     CLEAR_STOP_OPTION,
     REFINE_OPTION,
 ];
-const QUESTION_TITLE: &str = "Plan created:";
+const QUESTION_TITLE: &str = "How to proceed with the plan?";
 
 const SYSTEM_PROMPT: &str =
     "You MUST use the plan tool before editing any files because the user switched to Plan mode.";
