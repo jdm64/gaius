@@ -2,41 +2,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use crate::{dirs::Dirs, token_usage::TokenUsageLedger};
 use genai::chat::{ChatMessage, ChatRequest, ChatRole, MessageContent};
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
-use std::{
-    error::Error,
-    fs::File,
-    io::BufReader,
-    path::{Path, PathBuf},
-};
+use std::{error::Error, fs::File, io::BufReader, path::Path};
 use uuid::Uuid;
-
-use crate::{token_usage::TokenUsageLedger, util::data_dir};
-
-fn sessions_dir() -> Result<PathBuf, Box<dyn Error>> {
-    Ok(data_dir()?.join("sessions"))
-}
-
-fn session_file(session_id: &str) -> Result<PathBuf, Box<dyn Error>> {
-    validate_session_id(session_id)?;
-    let sessions_dir = sessions_dir()?;
-    std::fs::create_dir_all(&sessions_dir)?;
-    Ok(sessions_dir.join(format!("{}.mpk", session_id)))
-}
-
-fn validate_session_id(session_id: &str) -> Result<(), Box<dyn Error>> {
-    if session_id.is_empty() {
-        return Err("Session id cannot be empty".into());
-    }
-
-    if session_id.contains('/') || session_id.contains('\\') {
-        return Err("Session id cannot contain path separators".into());
-    }
-
-    Ok(())
-}
 
 pub struct SessionFile {
     _id: i32,
@@ -65,7 +36,7 @@ impl Session {
     }
 
     pub fn new_named(name: String) -> Result<Self, Box<dyn Error>> {
-        validate_session_id(name.as_str())?;
+        Dirs::validate_session_id(name.as_str())?;
         Ok(Self {
             id: Some(name),
             name: None,
@@ -126,7 +97,7 @@ impl Session {
             return Ok((ChatRequest::new(vec![]), TokenUsageLedger::default()));
         };
 
-        let path = session_file(session_id.as_str())?;
+        let path = Dirs::session_file(session_id.as_str())?;
         if path.is_file() {
             let data = Self::deserialize_session(path.as_path(), true)?;
             Ok((
@@ -144,7 +115,7 @@ impl Session {
         token_usage: &TokenUsageLedger,
     ) -> Result<(), Box<dyn Error>> {
         if let Some(session_id) = &self.id {
-            let path = session_file(session_id.as_str())?;
+            let path = Dirs::session_file(session_id.as_str())?;
             self.serialize_session(path.as_path(), history, token_usage)?;
         }
 
@@ -152,7 +123,7 @@ impl Session {
     }
 
     pub fn list() -> Vec<Session> {
-        let dir = match sessions_dir() {
+        let dir = match Dirs::sessions_dir() {
             Ok(d) => d,
             Err(_) => return Vec::new(),
         };
@@ -184,8 +155,8 @@ impl Session {
     }
 
     pub fn delete(session_id: &str) -> Result<(), Box<dyn Error>> {
-        validate_session_id(session_id)?;
-        let path = session_file(session_id)?;
+        Dirs::validate_session_id(session_id)?;
+        let path = Dirs::session_file(session_id)?;
         if path.is_file() {
             std::fs::remove_file(path)?;
         }
@@ -193,7 +164,7 @@ impl Session {
     }
 
     pub fn name(session_id: &str) -> Result<String, Box<dyn Error>> {
-        let path = session_file(session_id)?;
+        let path = Dirs::session_file(session_id)?;
         if path.is_file() {
             let data = Self::deserialize_session(path.as_path(), false)?;
             Ok(data.name)
@@ -208,7 +179,7 @@ impl Session {
         };
 
         let (history, token_usage) = self.load()?;
-        let path = session_file(session_id.as_str())?;
+        let path = Dirs::session_file(session_id.as_str())?;
         let tmp_path = path.with_extension("tmp");
 
         self.name = Some(new_name);

@@ -2,18 +2,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{
-    agents::Agents,
-    harness::validate_model,
-    util::{config_dir, prompt_input},
-};
+use crate::{agents::Agents, cli_prompt::CliPrompt, dirs::Dirs, harness::validate_model};
 use genai::{
     Client, ModelIden, ServiceTarget,
     adapter::AdapterKind,
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
 };
 use serde::{Deserialize, Serialize};
-use std::{error::Error, path::PathBuf};
+use std::error::Error;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,10 +88,6 @@ impl ConfiguredModel {
     }
 }
 
-pub fn config_file() -> Result<PathBuf, Box<dyn Error>> {
-    Ok(config_dir()?.join("config.toml"))
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self::new()
@@ -112,11 +104,11 @@ impl Config {
     }
 
     pub async fn load(&mut self) -> Result<(), Box<dyn Error>> {
-        let path = config_file()?;
+        let path = Dirs::config_file()?;
         if path.exists() {
             let contents = std::fs::read_to_string(&path)?;
             *self = toml::from_str(&contents)?;
-            self.agents = Agents::load(&config_dir()?)?;
+            self.agents = Agents::load(&Dirs::config_dir()?)?;
             return Ok(());
         }
 
@@ -125,7 +117,7 @@ impl Config {
             path.display()
         );
         loop {
-            let mut kind = prompt_input("Kind (blank for OpenAI compatable): ")?;
+            let mut kind = CliPrompt::get_input("Kind (blank for OpenAI compatable): ")?;
             kind = if kind.is_empty() {
                 "openai".to_string()
             } else {
@@ -140,9 +132,9 @@ impl Config {
                 }
             };
 
-            let url = prompt_input("Url: ")?;
-            let key = prompt_input("Key: ")?;
-            let model_id = prompt_input("Model: ")?;
+            let url = CliPrompt::get_input("Url: ")?;
+            let key = CliPrompt::get_input("Key: ")?;
+            let model_id = CliPrompt::get_input("Model: ")?;
 
             let name = match Url::parse(&url).map(|u| u.host_str().unwrap_or("default").to_string())
             {
@@ -182,7 +174,7 @@ impl Config {
                     let config = Config {
                         provider: vec![provider],
                         model: vec![model],
-                        agents: Agents::load(&config_dir()?)?,
+                        agents: Agents::load(&Dirs::config_dir()?)?,
                     };
                     if let Some(parent) = path.parent() {
                         std::fs::create_dir_all(parent)?;
@@ -233,7 +225,7 @@ impl Config {
     }
 
     fn save(&self) -> Result<(), Box<dyn Error>> {
-        let path = config_file()?;
+        let path = Dirs::config_file()?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }

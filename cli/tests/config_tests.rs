@@ -1,4 +1,7 @@
-use gaius::config::{Config, ProviderConfig, config_file};
+use gaius::{
+    config::{Config, ProviderConfig},
+    dirs::Dirs,
+};
 use std::{
     path::PathBuf,
     sync::{Mutex, OnceLock},
@@ -49,7 +52,7 @@ fn add_provider_persists_provider_to_config_file() {
             })
             .unwrap();
 
-        let contents = std::fs::read_to_string(config_file().unwrap()).unwrap();
+        let contents = std::fs::read_to_string(Dirs::config_file().unwrap()).unwrap();
         assert!(contents.contains("[[provider]]"));
         assert!(contents.contains("name = \"local\""));
         assert!(contents.contains("url = \"http://localhost:8080/v1\""));

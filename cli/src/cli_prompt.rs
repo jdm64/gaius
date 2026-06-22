@@ -8,7 +8,6 @@ use crate::{
     harness::{Harness, HarnessEvent},
     models::Models,
     token_usage::format_arrows,
-    util::prompt_input,
 };
 use std::{
     error::Error,
@@ -43,7 +42,7 @@ impl CliPrompt {
             Self::run_turn(prompt, harness).await?;
         } else {
             loop {
-                let input = prompt_input("user> ")?;
+                let input = Self::get_input("user> ")?;
                 if input.is_empty() {
                     break;
                 }
@@ -161,7 +160,7 @@ impl CliPrompt {
                     for (index, option) in options.iter().enumerate() {
                         println!("  {}) {}", index + 1, option);
                     }
-                    prompt_input("answer> ").ok()
+                    Self::get_input("answer> ").ok()
                 }
             })
             .await?;
@@ -171,5 +170,13 @@ impl CliPrompt {
         }
 
         Ok(())
+    }
+
+    pub fn get_input(label: &str) -> Result<String, Box<dyn Error>> {
+        print!("{}", label);
+        io::stdout().flush()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        Ok(input.trim().to_string())
     }
 }

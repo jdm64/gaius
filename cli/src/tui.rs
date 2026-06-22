@@ -7,6 +7,7 @@ use crate::{
     commands::Commands,
     config::Config,
     diff_view::DiffView,
+    dirs::Dirs,
     harness::{Harness, HarnessEvent, HarnessSnapshot},
     harness_actor::{HarnessActorEvent, HarnessActorHandle},
     input::{Input, InputMode},
@@ -14,7 +15,6 @@ use crate::{
     render::Render,
     render_history::DisplayPrefs,
     token_usage::format_arrows,
-    util::cache_dir,
 };
 use crossterm::{
     event::{
@@ -30,7 +30,6 @@ use std::{
     error::Error,
     fs,
     io::{self, Stdout},
-    path::PathBuf,
 };
 use tokio::sync::oneshot;
 
@@ -565,12 +564,8 @@ impl TuiApp {
         self.history_generation = self.history_generation.wrapping_add(1);
     }
 
-    pub fn prompt_history_file() -> Result<PathBuf, Box<dyn Error>> {
-        Ok(cache_dir()?.join("prompt_history.json"))
-    }
-
     pub fn load_prompt_history(&mut self) -> Result<(), Box<dyn Error>> {
-        let path = Self::prompt_history_file()?;
+        let path = Dirs::prompt_history_file()?;
         if path.exists() {
             let contents = fs::read_to_string(&path)?;
             self.prompt_history = serde_json::from_str(&contents).unwrap_or_default();
@@ -580,7 +575,7 @@ impl TuiApp {
     }
 
     pub fn save_prompt_history(&self) -> Result<(), Box<dyn Error>> {
-        let path = Self::prompt_history_file()?;
+        let path = Dirs::prompt_history_file()?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }

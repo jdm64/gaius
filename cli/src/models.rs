@@ -4,7 +4,7 @@
 
 use crate::{
     config::{Config, ConfiguredModel, ProviderConfig},
-    util::cache_dir,
+    dirs::Dirs,
 };
 use genai::Client;
 use serde::{Deserialize, Serialize};
@@ -73,7 +73,7 @@ impl ModelDef {
 
 impl CachedModelDef {
     fn load() -> Result<Option<Vec<ModelDef>>, Box<dyn Error>> {
-        let path = Self::path()?;
+        let path = Dirs::models_cache()?;
         if !path.is_file() {
             return Ok(None);
         }
@@ -84,7 +84,7 @@ impl CachedModelDef {
     }
 
     fn save(models: &[ModelDef]) -> Result<(), Box<dyn Error>> {
-        let path = Self::path()?;
+        let path = Dirs::models_cache()?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -92,10 +92,6 @@ impl CachedModelDef {
         let cache = Self::to_cache(models);
         std::fs::write(path, serde_json::to_string_pretty(&cache)?)?;
         Ok(())
-    }
-
-    fn path() -> Result<PathBuf, Box<dyn Error>> {
-        Ok(cache_dir()?.join("models_cache.json"))
     }
 
     pub fn to_cache(models: &[ModelDef]) -> ProviderModelsCache {
@@ -204,7 +200,7 @@ impl RecentModelDef {
     }
 
     fn path() -> Result<PathBuf, Box<dyn Error>> {
-        Ok(cache_dir()?.join("recent_models.json"))
+        Ok(Dirs::cache_dir()?.join("recent_models.json"))
     }
 
     pub fn join(recent: &[RecentModelDef], model: &RecentModelDef) -> Vec<RecentModelDef> {
