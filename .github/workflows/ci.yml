@@ -4,6 +4,9 @@ on:
   push:
     branches: [main, master]
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -35,3 +38,14 @@ jobs:
         with:
           name: gaius-linux-x86_64
           path: cli/target/release/gaius
+
+      - name: Upload to continuous release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: continuous
+          name: Continuous Release
+          make_latest: false
+          prerelease: true
+          files: cli/target/release/gaius
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
