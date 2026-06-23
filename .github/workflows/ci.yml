@@ -32,8 +32,8 @@ jobs:
       - name: Build release
         run: |
           cargo build --release
-          cargo test
-          cargo clippy
+          cargo test --release
+          cargo clippy --release
           mv target/release/gaius gaius-linux-x86_64
         working-directory: cli
 
