@@ -1,7 +1,6 @@
 ![GAIUS](logo.png)
 
 A LLM agent harness build in Rust, powered by `genai` for provider abstraction.
-The TUI uses `ratatui` the UI
 
 ## Features
 
@@ -10,8 +9,8 @@ The TUI uses `ratatui` the UI
 - **Session management**: Save, load, rename, and delete conversation sessions
 - **Agent system**: Support for custom agent definitions with specific prompts
 - **Model management**: Model discovery, caching, and selection with recent model tracking
-- **Built-in tools**: HTTP requests and shell command execution capabilities
-- **Markdown rendering**: Full markdown support in the terminal interface
+- **Built-in tools**: Basic set of tools for the llm to call
+- **Markdown rendering**: Markdown support in the terminal interface
 - **Token tracking**: Monitor token usage across conversations
 
 ## Installation
@@ -20,15 +19,6 @@ The TUI uses `ratatui` the UI
 
 - Rust 2024 edition or later
 - Cargo package manager
-
-### Key Dependencies
-
-- `ratatui` - TUI framework
-- `crossterm` - Terminal backend
-- `genai` - LLM provider abstraction
-- `tokio` - Async runtime
-- `serde` / `serde_json` - Serialization
-- `rmp-serde` - MessagePack serialization
 
 ## Usage
 
