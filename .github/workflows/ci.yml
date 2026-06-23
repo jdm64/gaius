@@ -30,14 +30,18 @@ jobs:
             ${{ runner.os }}-cargo-release-
 
       - name: Build release
-        run: cargo build --release
+        run: |
+          cargo build --release
+          cargo test
+          cargo clippy
+          mv target/release/gaius gaius-linux-x86_64
         working-directory: cli
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:
           name: gaius-linux-x86_64
-          path: cli/target/release/gaius
+          path: cli/gaius-linux-x86_64
 
       - name: Upload to continuous release
         uses: softprops/action-gh-release@v3
@@ -46,6 +50,6 @@ jobs:
           name: Continuous Release
           make_latest: false
           prerelease: true
-          files: cli/target/release/gaius
+          files: cli/gaius-linux-x86_64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
