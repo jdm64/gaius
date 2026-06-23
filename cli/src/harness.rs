@@ -10,7 +10,7 @@ use crate::{
     plan_hook::PlanHook,
     render::Render,
     session::Session,
-    token_usage::TokenUsageLedger,
+    token_usage::{SessionInfo, TokenUsageLedger},
     tools::{ToolEngine, ToolResult},
 };
 use futures::StreamExt;
@@ -224,7 +224,14 @@ impl Harness {
 
     pub fn clear_context(&mut self) {
         self.history.messages.clear();
-        self.token_usage = TokenUsageLedger::default();
+        self.token_usage.clear_context();
+    }
+
+    pub fn session_info(&self) -> SessionInfo {
+        SessionInfo {
+            id: self.session.id.clone(),
+            usage: self.token_usage.usage(),
+        }
     }
 
     pub fn history(&self) -> &ChatRequest {

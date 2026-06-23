@@ -9,6 +9,7 @@ use crate::{
     input::{Input, InputMode, PickList, ProviderInfoRow},
     models::{ModelPickerRow, Models, RecentModelDef},
     session::Session,
+    token_usage::SessionInfo,
     tui::{TuiApp, TuiMessage},
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
@@ -61,6 +62,10 @@ impl Commands {
                 name: "plan",
                 description: "Toggle plan mode on/off",
             },
+            Command {
+                name: "info",
+                description: "Show session info",
+            },
         ]
     }
 
@@ -92,6 +97,7 @@ impl Commands {
                 options: _,
                 selected: _,
             } => InputMode::PromptInput,
+            InputMode::SessionInfo { info } => Self::handle_session_info_mode(key, info),
             InputMode::Exit => InputMode::Exit,
         };
         Ok(())
@@ -144,6 +150,17 @@ impl Commands {
                     picker: PickList::all(agents),
                 }
             }
+            "info" => match actor.info().await {
+                Ok(info) => {
+                    Input::clear_input(app);
+                    InputMode::SessionInfo { info }
+                }
+                Err(e) => {
+                    app.status = format!("Error getting session info: {}", e);
+                    Input::clear_input(app);
+                    InputMode::PromptInput
+                }
+            },
             "streaming" => {
                 if !app.harness_idle() {
                     app.status =
@@ -390,6 +407,14 @@ impl Commands {
         }
 
         InputMode::SessionRename { picker }
+    }
+
+    fn handle_session_info_mode(key: event::KeyEvent, info: SessionInfo) -> InputMode {
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => InputMode::PromptInput,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => InputMode::Exit,
+            _ => InputMode::SessionInfo { info },
+        }
     }
 
     pub async fn handle_models_mode(

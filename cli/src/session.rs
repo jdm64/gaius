@@ -2,7 +2,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{dirs::Dirs, token_usage::TokenUsageLedger};
+use crate::{
+    dirs::Dirs,
+    token_usage::{TokenUsageLedger, TokenUsageSpan, UsageInfo},
+};
 use genai::chat::{ChatMessage, ChatRequest, ChatRole, MessageContent};
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
@@ -61,8 +64,11 @@ impl Session {
         let mut token_usage: Option<TokenUsageLedger> = None;
         if read_msgs {
             messages = Deserialize::deserialize(&mut des)?;
-            if version >= 2 {
-                token_usage = Deserialize::deserialize(&mut des)?;
+            if version >= 3 {
+                token_usage = Some(Deserialize::deserialize(&mut des)?);
+            } else if version == 2 {
+                let v2: TokenUsageLedgerV2 = Deserialize::deserialize(&mut des)?;
+                token_usage = Some(v2.into());
             }
         }
 
@@ -83,7 +89,7 @@ impl Session {
         let file = File::create(path)?;
         let mut ser = Serializer::new(file).with_struct_map();
 
-        2.serialize(&mut ser)?;
+        3.serialize(&mut ser)?;
         let name = self.name.clone().unwrap_or(Self::derived_name(history));
         name.serialize(&mut ser)?;
         history.messages.serialize(&mut ser)?;
@@ -214,5 +220,28 @@ impl Session {
                     .collect::<String>()
             })
             .unwrap_or("<unamed>".to_string())
+    }
+}
+
+#[derive(Deserialize)]
+struct TokenUsageLedgerV2 {
+    spans: Vec<TokenUsageSpan>,
+    last_prompt_tokens: Option<i32>,
+    last_prompt_index: Option<usize>,
+    last_total_tokens: Option<i32>,
+}
+
+impl From<TokenUsageLedgerV2> for TokenUsageLedger {
+    fn from(v2: TokenUsageLedgerV2) -> Self {
+        TokenUsageLedger {
+            spans: v2.spans,
+            last_prompt_tokens: v2.last_prompt_tokens,
+            last_prompt_index: v2.last_prompt_index,
+            usage: UsageInfo {
+                context_tokens: v2.last_total_tokens,
+                session_input: v2.last_prompt_tokens,
+                ..Default::default()
+            },
+        }
     }
 }

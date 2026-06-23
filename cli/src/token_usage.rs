@@ -22,11 +22,54 @@ pub fn format_arrows(prompt: Option<i32>, response: Option<i32>) -> String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UsageInfo {
+    pub context_turns: Option<i32>,
+    pub context_tokens: Option<i32>,
+    pub session_turns: Option<i32>,
+    pub session_input: Option<i32>,
+    pub session_output: Option<i32>,
+}
+
+impl UsageInfo {
+    pub fn add(&mut self, usage: &Usage) {
+        self.context_tokens =
+            Some(usage.prompt_tokens.unwrap_or(0) + usage.completion_tokens.unwrap_or(0));
+
+        if let Some(prompt_tokens) = usage.prompt_tokens {
+            self.session_input = Some(self.session_input.unwrap_or(0) + prompt_tokens);
+        }
+        if let Some(completion_tokens) = usage.completion_tokens {
+            self.session_output = Some(self.session_output.unwrap_or(0) + completion_tokens);
+        }
+
+        *self.context_turns.get_or_insert(0) += 1;
+        *self.session_turns.get_or_insert(0) += 1;
+    }
+
+    pub fn clear(&mut self) {
+        self.context_tokens = None;
+        self.context_turns = None;
+    }
+
+    pub fn reset(&mut self) {
+        self.clear();
+        self.session_input = None;
+        self.session_output = None;
+        self.session_turns = None;
+    }
+}
+
+pub struct SessionInfo {
+    pub id: Option<String>,
+    pub usage: UsageInfo,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TokenUsageLedger {
     pub spans: Vec<TokenUsageSpan>,
-    last_prompt_tokens: Option<i32>,
-    last_prompt_index: Option<usize>,
-    last_total_tokens: Option<i32>,
+    pub last_prompt_tokens: Option<i32>,
+    pub last_prompt_index: Option<usize>,
+    pub usage: UsageInfo,
 }
 
 impl TokenUsageLedger {
@@ -38,7 +81,7 @@ impl TokenUsageLedger {
             on_event(HarnessEvent::TokenUsage {
                 prompt: span.prompt,
                 response: span.response,
-                total: self.last_total_tokens,
+                total: self.usage.context_tokens,
             });
         }
     }
@@ -56,7 +99,7 @@ impl TokenUsageLedger {
             on_event(HarnessEvent::TokenUsage {
                 prompt: span.prompt,
                 response: span.response,
-                total: self.last_total_tokens,
+                total: self.usage.context_tokens,
             });
         }
     }
@@ -105,8 +148,7 @@ impl TokenUsageLedger {
         }
 
         self.spans.extend(added.iter().cloned());
-        self.last_total_tokens =
-            Some(usage.prompt_tokens.unwrap_or(0) + usage.completion_tokens.unwrap_or(0));
+        self.usage.add(usage);
 
         added
     }
@@ -120,7 +162,28 @@ impl TokenUsageLedger {
             .filter(move |span| span.end == message_index.saturating_add(1))
     }
 
+    pub fn usage(&self) -> UsageInfo {
+        self.usage.clone()
+    }
+
     pub fn total_tokens(&self) -> Option<i32> {
-        self.last_total_tokens
+        self.usage.context_tokens
+    }
+
+    /// Reset all fields except cumulative values (accumulated over entire session).
+    /// Total turns is reset, but cumulative_turns is preserved.
+    pub fn clear_context(&mut self) {
+        self.spans.clear();
+        self.last_prompt_tokens = None;
+        self.last_prompt_index = None;
+        self.usage.clear();
+    }
+
+    /// Reset all values including cumulative (fresh session).
+    pub fn new_context(&mut self) {
+        self.spans.clear();
+        self.last_prompt_tokens = None;
+        self.last_prompt_index = None;
+        self.usage.reset();
     }
 }

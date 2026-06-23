@@ -6,6 +6,7 @@ use crate::{
     agents::AgentDefinition,
     harness::{Harness, HarnessEvent, HarnessSnapshot},
     models::ModelDef,
+    token_usage::SessionInfo,
 };
 use std::sync::atomic::Ordering;
 use tokio::sync::{
@@ -34,6 +35,18 @@ impl CommandReply for () {
 
 impl CommandReply for Result<HarnessSnapshot, String> {
     type Output = HarnessSnapshot;
+
+    fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String> {
+        reply.map_err(|_| "Harness actor stopped".to_string())?
+    }
+
+    fn no_reply() -> Self::Output {
+        unreachable!("commands without a reply should use `()`")
+    }
+}
+
+impl CommandReply for Result<SessionInfo, String> {
+    type Output = SessionInfo;
 
     fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String> {
         reply.map_err(|_| "Harness actor stopped".to_string())?
@@ -85,6 +98,9 @@ pub enum HarnessCommand {
         reply_tx: oneshot::Sender<CommandResult>,
     },
     Cancel,
+    Info {
+        reply_tx: oneshot::Sender<Result<SessionInfo, String>>,
+    },
     Shutdown {
         reply_tx: oneshot::Sender<CommandResult>,
     },
@@ -159,6 +175,12 @@ impl HarnessActorHandle {
 
     pub async fn cancel(&self) -> Result<(), String> {
         self.send_command::<()>(HarnessCommand::Cancel, None).await
+    }
+
+    pub async fn info(&self) -> Result<SessionInfo, String> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.send_command(HarnessCommand::Info { reply_tx }, Some(reply_rx))
+            .await
     }
 
     pub async fn shutdown(&self) -> CommandResult {
@@ -294,6 +316,10 @@ async fn run_actor(
             }
             HarnessCommand::Cancel => {
                 harness.set_cancel(true);
+            }
+            HarnessCommand::Info { reply_tx } => {
+                let info = harness.session_info();
+                let _ = reply_tx.send(Ok(info));
             }
             HarnessCommand::Shutdown { reply_tx } => {
                 let _ = reply_tx.send(Ok(harness.snapshot()));

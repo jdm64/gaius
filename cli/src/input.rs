@@ -8,6 +8,7 @@ use crate::{
     harness_actor::HarnessActorHandle,
     models::ModelPickerRow,
     session::Session,
+    token_usage::SessionInfo,
     tui::TuiApp,
 };
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers};
@@ -123,6 +124,9 @@ pub enum InputMode {
         title: String,
         options: Vec<String>,
         selected: usize,
+    },
+    SessionInfo {
+        info: SessionInfo,
     },
 }
 

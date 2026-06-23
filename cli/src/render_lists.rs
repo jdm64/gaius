@@ -9,12 +9,14 @@ use crate::{
     input::{FileEntry, PickList, ProviderInfoRow},
     models::ModelPickerRow,
     session::Session,
+    token_usage::SessionInfo,
 };
 use ratatui::Frame;
 use ratatui::{
     layout::Rect,
     style::Style,
-    widgets::{Block, Borders, Clear, List, ListItem, Padding},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph},
 };
 
 struct PickListRenderSpec {
@@ -205,6 +207,61 @@ impl Render {
             ("Enter", "select"),
             ("Esc", "close"),
         ])
+    }
+
+    pub fn draw_session_info(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        info: &SessionInfo,
+    ) -> Option<Vec<(&'static str, &'static str)>> {
+        let id = info.id.as_deref().unwrap_or("No session");
+        let ctx_toks = info
+            .usage
+            .context_tokens
+            .map_or("N/A".to_string(), |t: i32| t.to_string());
+        let in_toks = info
+            .usage
+            .session_input
+            .map_or("N/A".to_string(), |t: i32| t.to_string());
+        let out_toks = info
+            .usage
+            .session_output
+            .map_or("N/A".to_string(), |t: i32| t.to_string());
+        let ses_turns = info
+            .usage
+            .session_turns
+            .map_or("N/A".to_string(), |t: i32| t.to_string());
+        let ctx_turns = info
+            .usage
+            .context_turns
+            .map_or("N/A".to_string(), |t: i32| t.to_string());
+
+        let lines = vec![
+            Line::from(vec![Span::raw("            ID: "), Span::raw(id)]),
+            Line::from(vec![Span::raw(" Context turns: "), Span::raw(ctx_turns)]),
+            Line::from(vec![Span::raw(" Session turns: "), Span::raw(ses_turns)]),
+            Line::from(vec![Span::raw("  Input tokens: "), Span::raw(in_toks)]),
+            Line::from(vec![Span::raw("Context tokens: "), Span::raw(ctx_toks)]),
+            Line::from(vec![Span::raw(" Output tokens: "), Span::raw(out_toks)]),
+        ];
+
+        let width = 55u16.min(area.width.saturating_sub(4).max(1));
+        let height = lines.len() as u16 + 2;
+        let x = area.x + 2;
+        let y = area.y.saturating_sub(height);
+        let rect = Rect::new(x, y, width, height);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Session Info ")
+            .padding(Padding::horizontal(1));
+
+        let paragraph = Paragraph::new(lines).block(block);
+        frame.render_widget(Clear, rect);
+        frame.render_widget(paragraph, rect);
+
+        Some(vec![("Esc|Enter", "close")])
     }
 
     fn draw_pick_list<'a, T, F>(

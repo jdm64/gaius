@@ -101,6 +101,7 @@ impl Render {
             InputMode::Agents { picker } => self.draw_agents(frame, chunks[1], picker),
             InputMode::Files { picker } => self.draw_files(frame, chunks[1], picker),
             InputMode::PromptInput | InputMode::Exit => None,
+            InputMode::SessionInfo { info } => self.draw_session_info(frame, chunks[1], info),
             InputMode::Question { .. } => Some(Self::question_help()),
         };
 
