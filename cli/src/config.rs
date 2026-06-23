@@ -2,10 +2,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{agents::Agents, cli_prompt::CliPrompt, dirs::Dirs, harness::validate_model};
+use crate::{agents::Agents, cli_prompt::CliPrompt, dirs::Dirs};
 use genai::{
     Client, ModelIden, ServiceTarget,
     adapter::AdapterKind,
+    chat::ChatRequest,
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
 };
 use serde::{Deserialize, Serialize};
@@ -256,4 +257,10 @@ impl Config {
     pub fn agents(&self) -> &Agents {
         &self.agents
     }
+}
+
+async fn validate_model(client: &Client, model: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let request = ChatRequest::from_user("Reply with ok.");
+    client.exec_chat(model, request, None).await?;
+    Ok(())
 }

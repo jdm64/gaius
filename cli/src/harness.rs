@@ -30,15 +30,6 @@ use std::{
     },
 };
 
-pub async fn validate_model(
-    client: &Client,
-    model: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let request = ChatRequest::from_user("Reply with ok.");
-    client.exec_chat(model, request, None).await?;
-    Ok(())
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum HarnessEvent {
     UserPrompt(String),
