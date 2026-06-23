@@ -43,6 +43,11 @@ jobs:
           name: gaius-linux-x86_64
           path: cli/gaius-linux-x86_64
 
+      - name: Force update tag
+        run: |
+          git tag -f continuous
+          git push origin continuous --force
+
       - name: Upload to continuous release
         uses: softprops/action-gh-release@v3
         with:
