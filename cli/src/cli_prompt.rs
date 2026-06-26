@@ -5,7 +5,7 @@
 use crate::{
     config::Config,
     diff_view::DiffLineKind,
-    harness::{Harness, HarnessEvent},
+    harness::{Harness, HarnessEvent, HarnessSnapshot},
     models::Models,
     token_usage::format_arrows,
 };
@@ -27,11 +27,11 @@ impl CliPrompt {
         prompt: Option<String>,
         config: Config,
         harness: &mut Harness,
-    ) -> Result<Option<String>, Box<dyn Error>> {
+    ) -> Result<HarnessSnapshot, Box<dyn Error>> {
         let first_model = Models::first_from_config(&config).await?;
         harness.set_model(first_model.clone()).await?;
         Self::run_inner(prompt, harness).await?;
-        Ok(harness.session_id())
+        Ok(harness.snapshot())
     }
 
     async fn run_inner(

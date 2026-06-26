@@ -85,21 +85,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else {
         Harness::new(agent, args.session_id)?
     };
-    let end_session: Option<String>;
 
+    let snapshot;
     if let Some(prompt) = initial_prompt {
-        end_session = CliPrompt::run(Some(prompt), config, &mut harness).await?;
+        snapshot = CliPrompt::run(Some(prompt), config, &mut harness).await?;
     } else {
         // restore the last used model instead of what's in config
         if let Some(recent_model) = Models::first_from_recent(&config).await {
             harness.set_model(recent_model).await?;
         }
 
-        let snapshot = TuiApp::new(config).run(harness).await?;
-        end_session = snapshot.session_id;
+        snapshot = TuiApp::new(config).run(harness).await?;
     }
 
-    if let Some(session_id) = end_session {
+    if snapshot.has_history
+        && let Some(session_id) = snapshot.session_id
+    {
         println!("To continue pass --session {}", session_id);
     }
 
