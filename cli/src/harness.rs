@@ -10,6 +10,7 @@ use crate::{
     plan_hook::PlanHook,
     render::Render,
     session::Session,
+    skills::{Skill, SkillRepo},
     token_usage::{SessionInfo, TokenUsageLedger},
     tools::{ToolEngine, ToolResult},
 };
@@ -29,6 +30,13 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
+use uuid::Uuid;
+
+#[derive(Clone, Debug)]
+pub enum UserRequest {
+    Prompt(String),
+    Skill(String),
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HarnessEvent {
@@ -95,7 +103,11 @@ impl Harness {
         session_id: Option<String>,
         create_session: bool,
     ) -> Result<Self, Box<dyn Error>> {
-        let tool_engine = ToolEngine {};
+        let skill_repo = SkillRepo::load().unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to load skills: {}", e);
+            SkillRepo::default()
+        });
+        let tool_engine = ToolEngine::new(skill_repo);
         let session = match session_id {
             Some(id) => Session::new_named(id)?,
             None if create_session => Session::new(),
@@ -163,6 +175,17 @@ impl Harness {
                 .to_string()
         } else {
             self.agent.prompt.clone()
+        };
+
+        // Append skills section to system prompt if available
+        let prompt = if let Some(skills_prompt) = self.tool_engine.skill_repo.sys_prompt() {
+            if prompt.is_empty() {
+                skills_prompt
+            } else {
+                format!("{}\n\n{}", prompt, skills_prompt)
+            }
+        } else {
+            prompt
         };
 
         self.history.system = if prompt.is_empty() {
@@ -240,6 +263,10 @@ impl Harness {
 
     pub fn token_usage(&self) -> &TokenUsageLedger {
         &self.token_usage
+    }
+
+    pub fn list_skills(&self) -> Vec<Skill> {
+        self.tool_engine.skill_repo.list()
     }
 
     pub fn snapshot(&self) -> HarnessSnapshot {
@@ -379,14 +406,49 @@ impl Harness {
 
     pub async fn run_turn_with_events<F>(
         &mut self,
-        prompt: String,
+        request: UserRequest,
         mut on_event: F,
     ) -> Result<(), Box<dyn std::error::Error>>
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         self.set_cancel(false);
-        self.send_user_message(prompt, &mut on_event);
+
+        match request {
+            UserRequest::Prompt(text) => self.send_user_message(text, &mut on_event),
+            UserRequest::Skill(name) => {
+                let skill_command = format!("/skill {}", name);
+                self.send_user_message(skill_command, &mut on_event);
+
+                let tc = ToolCall {
+                    call_id: Uuid::new_v4().to_string(),
+                    fn_name: "skill".to_string(),
+                    fn_arguments: json!({ "name": name }),
+                    thought_signatures: None,
+                };
+                let assistant_content = MessageContent::from_tool_calls(vec![tc.clone()]);
+                self.history
+                    .messages
+                    .push(ChatMessage::assistant(assistant_content.clone()));
+
+                if let Some(text) = assistant_content.joined_texts() {
+                    on_event(HarnessEvent::AgentMessage(text));
+                }
+
+                let result = self.tool_engine.load_skill(&name);
+                match result {
+                    ToolResult::Text(text) => {
+                        self.send_tool_call_event(&tc, text, false, &mut on_event)
+                    }
+                    ToolResult::Error(err) => {
+                        self.send_tool_call_event(&tc, err, true, &mut on_event)
+                    }
+                    _ => {
+                        return Err("Tool engine failed to run skill".into());
+                    }
+                }
+            }
+        }
 
         loop {
             if self.is_cancel() {

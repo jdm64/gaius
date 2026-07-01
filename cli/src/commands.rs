@@ -9,6 +9,7 @@ use crate::{
     input::{Input, InputMode, PickList, ProviderInfoRow},
     models::{ModelPickerRow, Models, RecentModelDef},
     session::Session,
+    skills::Skill,
     token_usage::SessionInfo,
     tui::{TuiApp, TuiMessage},
 };
@@ -41,6 +42,10 @@ impl Commands {
             Command {
                 name: "agents",
                 description: "List and select agents",
+            },
+            Command {
+                name: "skills",
+                description: "List available skills",
             },
             Command {
                 name: "streaming",
@@ -92,6 +97,7 @@ impl Commands {
             }
             InputMode::Agents { picker } => Self::handle_agents_mode(app, key, picker, actor).await,
             InputMode::Files { picker } => Input::handle_files_mode(app, key, picker).await,
+            InputMode::Skills { picker } => Self::handle_skills_mode(app, key, picker, actor).await,
             InputMode::Question {
                 title: _,
                 options: _,
@@ -148,6 +154,19 @@ impl Commands {
                 app.status = format!("Loaded {} agents", agents.len());
                 InputMode::Agents {
                     picker: PickList::all(agents),
+                }
+            }
+            "skills" => {
+                let skills = match actor.get_skills().await {
+                    Ok(skills) => skills,
+                    Err(err) => {
+                        app.status = format!("Error loading skills: {}", err);
+                        Vec::new()
+                    }
+                };
+                Input::clear_input(app);
+                InputMode::Skills {
+                    picker: PickList::all(skills),
                 }
             }
             "info" => match actor.info().await {
@@ -690,6 +709,51 @@ impl Commands {
 
     pub fn filtered_agent_indices(input: &str, agents: &[AgentDefinition]) -> Vec<usize> {
         Input::filter_agents(input, agents)
+    }
+
+    pub async fn handle_skills_mode(
+        app: &mut TuiApp,
+        key: event::KeyEvent,
+        mut picker: PickList<Skill>,
+        actor: &HarnessActorHandle,
+    ) -> InputMode {
+        Input::handle_input_cursor(app, key);
+        match key.code {
+            KeyCode::Esc => return InputMode::PromptInput,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return InputMode::Exit;
+            }
+            KeyCode::Up if !picker.is_empty() => {
+                picker.move_up();
+            }
+            KeyCode::Down if !picker.is_empty() => {
+                picker.move_down();
+            }
+            KeyCode::Enter if !picker.is_empty() => {
+                if let Some(skill) = picker.selected_row() {
+                    if !app.harness_idle() {
+                        app.status =
+                            "Agent is busy; finish current turn before running a skill".to_string();
+                        return InputMode::Skills { picker };
+                    }
+                    match actor.run_skill(skill.name.clone()).await {
+                        Ok(()) => {
+                            app.status = format!("Ran skill: {}", skill.name);
+                        }
+                        Err(err) => {
+                            app.status = format!("Error running skill: {}", err);
+                        }
+                    }
+                    Input::clear_input(app);
+                    return InputMode::PromptInput;
+                }
+            }
+            _ if input_changed_key(key) => {
+                picker.replace_filter(Input::filter_skills(&app.input, &picker.rows));
+            }
+            _ => {}
+        }
+        InputMode::Skills { picker }
     }
 }
 

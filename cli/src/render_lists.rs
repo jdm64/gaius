@@ -9,6 +9,7 @@ use crate::{
     input::{FileEntry, PickList, ProviderInfoRow},
     models::ModelPickerRow,
     session::Session,
+    skills::Skill,
     token_usage::SessionInfo,
 };
 use ratatui::Frame;
@@ -205,6 +206,38 @@ impl Render {
         Some(vec![
             ("Type", "filter"),
             ("Enter", "select"),
+            ("Esc", "close"),
+        ])
+    }
+
+    pub fn draw_skills(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        picker: &PickList<Skill>,
+    ) -> Option<Vec<(&'static str, &'static str)>> {
+        self.draw_pick_list(
+            frame,
+            area,
+            picker,
+            PickListRenderSpec {
+                title: "Skills",
+                max_width: 60,
+                empty_text: "No matching skills",
+                background: Style::default(),
+            },
+            |skill, _index| {
+                let label = if skill.description.is_empty() {
+                    skill.name.clone()
+                } else {
+                    format!("{} — {}", skill.name, skill.description)
+                };
+                ListItem::new(label)
+            },
+        );
+        Some(vec![
+            ("Type", "filter"),
+            ("Enter", "load skill"),
             ("Esc", "close"),
         ])
     }

@@ -18,6 +18,7 @@ pub mod render_history;
 pub mod render_input;
 pub mod render_lists;
 pub mod session;
+pub mod skills;
 pub mod token_usage;
 pub mod tools;
 pub mod tui;

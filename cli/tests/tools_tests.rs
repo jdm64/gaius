@@ -1,3 +1,4 @@
+use gaius::skills::SkillRepo;
 use gaius::tools::{ToolEngine, ToolName, ToolResult};
 use serde_json::json;
 use std::sync::{Mutex, OnceLock};
@@ -34,7 +35,7 @@ fn allows_glob_patterns_with_literal_characters() {
 
 #[test]
 fn plan_tool_returns_plan_text() {
-    let result = ToolEngine {}.execute(
+    let result = ToolEngine::new(SkillRepo::default()).execute(
         "plan",
         &json!({
             "content": "# Implement feature\n\nBackground information"
@@ -51,7 +52,7 @@ fn plan_tool_returns_plan_text() {
 
 #[test]
 fn plan_tool_renders_arbitrary_fields() {
-    let result = ToolEngine {}.execute(
+    let result = ToolEngine::new(SkillRepo::default()).execute(
         "plan",
         &json!({
             "content": "# Refactor auth\n\nRisks and considerations"
@@ -68,7 +69,8 @@ fn plan_tool_renders_arbitrary_fields() {
 
 #[test]
 fn plan_tool_requires_content() {
-    let result = ToolEngine {}.execute("plan", &json!({ "goal": "Refactor auth" }));
+    let result =
+        ToolEngine::new(SkillRepo::default()).execute("plan", &json!({ "goal": "Refactor auth" }));
 
     match result {
         ToolResult::Error(text) => {
@@ -88,7 +90,7 @@ fn edit_file_returns_compact_diff_view() {
     std::env::set_current_dir(&dir).unwrap();
     std::fs::write("sample.txt", "one\ntwo\nthree\nfour\nfive\n").unwrap();
 
-    let result = ToolEngine {}.execute(
+    let result = ToolEngine::new(SkillRepo::default()).execute(
         "edit_file",
         &json!({
             "file_path": "sample.txt",
@@ -121,4 +123,59 @@ fn edit_file_returns_compact_diff_view() {
 fn cwd_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[test]
+fn skill_tool_returns_body_for_existing_skill() {
+    use gaius::skills::Skill;
+
+    let mut repo = SkillRepo::default();
+    repo.insert(Skill {
+        name: "test-skill".to_string(),
+        description: "A test skill".to_string(),
+        body: "Skill instructions here".to_string(),
+    });
+
+    let result = ToolEngine::new(repo).execute(
+        "skill",
+        &json!({
+            "name": "test-skill"
+        }),
+    );
+
+    match result {
+        ToolResult::Text(text) => {
+            assert_eq!(text, "Skill instructions here");
+        }
+        other => panic!("Expected ToolResult::Text, got: {:?}", other),
+    }
+}
+
+#[test]
+fn skill_tool_returns_error_for_missing_skill() {
+    let result = ToolEngine::new(SkillRepo::default()).execute(
+        "skill",
+        &json!({
+            "name": "nonexistent"
+        }),
+    );
+
+    match result {
+        ToolResult::Error(text) => {
+            assert!(text.contains("not found"), "Error: {}", text);
+        }
+        other => panic!("Expected ToolResult::Error, got: {:?}", other),
+    }
+}
+
+#[test]
+fn skill_tool_requires_name() {
+    let result = ToolEngine::new(SkillRepo::default()).execute("skill", &json!({}));
+
+    match result {
+        ToolResult::Error(text) => {
+            assert_eq!(text, "Missing name");
+        }
+        other => panic!("Expected ToolResult::Error, got: {:?}", other),
+    }
 }

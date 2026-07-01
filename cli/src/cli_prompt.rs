@@ -5,7 +5,7 @@
 use crate::{
     config::Config,
     diff_view::DiffLineKind,
-    harness::{Harness, HarnessEvent, HarnessSnapshot},
+    harness::{Harness, HarnessEvent, HarnessSnapshot, UserRequest},
     models::Models,
     token_usage::format_arrows,
 };
@@ -56,7 +56,7 @@ impl CliPrompt {
     pub async fn run_turn(prompt: String, harness: &mut Harness) -> Result<(), Box<dyn Error>> {
         let mut agent_started = false;
         harness
-            .run_turn_with_events(prompt, |event| match event {
+            .run_turn_with_events(UserRequest::Prompt(prompt), |event| match event {
                 HarnessEvent::UserPrompt(text) => {
                     println!("user> {}", text);
                     let _ = io::stdout().flush();

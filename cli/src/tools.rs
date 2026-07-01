@@ -3,6 +3,7 @@
  */
 
 use crate::diff_view::DiffView;
+use crate::skills::SkillRepo;
 use genai::chat::*;
 use glob::glob;
 use regex::Regex;
@@ -30,10 +31,11 @@ pub enum ToolName {
     Grep,
     Question,
     Plan,
+    Skill,
 }
 
 impl ToolName {
-    pub const ALL: [ToolName; 8] = [
+    pub const ALL: [ToolName; 9] = [
         ToolName::ReadFile,
         ToolName::CreateFile,
         ToolName::EditFile,
@@ -42,6 +44,7 @@ impl ToolName {
         ToolName::Grep,
         ToolName::Question,
         ToolName::Plan,
+        ToolName::Skill,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -54,6 +57,7 @@ impl ToolName {
             ToolName::Grep => "grep",
             ToolName::Question => "question",
             ToolName::Plan => "plan",
+            ToolName::Skill => "skill",
         }
     }
 
@@ -74,6 +78,7 @@ impl ToolName {
             ToolName::Grep => &["path", "include", "pattern"],
             ToolName::Question => &["title"],
             ToolName::Plan => &[],
+            ToolName::Skill => &["name"],
         }
     }
 
@@ -218,13 +223,31 @@ impl ToolName {
                     },
                     "required": ["content"],
                 })),
+            ToolName::Skill => Tool::new(self.as_str())
+                .with_description("Invoke a skill by name to get its instructions")
+                .with_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Name of skill to invoke"
+                        }
+                    },
+                    "required": ["name"],
+                })),
         }
     }
 }
 
-pub struct ToolEngine {}
+pub struct ToolEngine {
+    pub skill_repo: SkillRepo,
+}
 
 impl ToolEngine {
+    pub fn new(skill_repo: SkillRepo) -> Self {
+        Self { skill_repo }
+    }
+
     pub fn build_tools(&self) -> Vec<Tool> {
         ToolName::ALL.iter().map(|tool| tool.genai_tool()).collect()
     }
@@ -247,8 +270,25 @@ impl ToolEngine {
             Some(ToolName::Grep) => self.grep_tool(args),
             Some(ToolName::Question) => self.question_tool(args),
             Some(ToolName::Plan) => self.plan_tool(args),
+            Some(ToolName::Skill) => self.skill_tool(args),
             None => ToolResult::Error(format!("Unknown tool call: {} ({})", name, args)),
         }
+    }
+
+    pub fn load_skill(&self, name: &str) -> ToolResult {
+        match self.skill_repo.find(name) {
+            Ok(body) => ToolResult::Text(body),
+            Err(e) => ToolResult::Error(e.to_string()),
+        }
+    }
+
+    fn skill_tool(&self, args: &Value) -> ToolResult {
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return ToolResult::Error("Missing name".to_string()),
+        };
+
+        self.load_skill(name)
     }
 
     fn read_file_tool(&self, args: &Value) -> ToolResult {

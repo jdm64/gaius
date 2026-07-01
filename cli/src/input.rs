@@ -8,6 +8,7 @@ use crate::{
     harness_actor::HarnessActorHandle,
     models::ModelPickerRow,
     session::Session,
+    skills::Skill,
     token_usage::SessionInfo,
     tui::TuiApp,
 };
@@ -119,6 +120,9 @@ pub enum InputMode {
     },
     Files {
         picker: PickList<FileEntry>,
+    },
+    Skills {
+        picker: PickList<Skill>,
     },
     Question {
         title: String,
@@ -353,6 +357,20 @@ impl Input {
             .enumerate()
             .filter_map(|(index, agent)| {
                 (query.is_empty() || agent.name.to_lowercase().contains(&query)).then_some(index)
+            })
+            .collect()
+    }
+
+    pub fn filter_skills(input: &str, skills: &[Skill]) -> Vec<usize> {
+        let query = input.trim().to_lowercase();
+        skills
+            .iter()
+            .enumerate()
+            .filter_map(|(index, skill)| {
+                (query.is_empty()
+                    || skill.name.to_lowercase().contains(&query)
+                    || skill.description.to_lowercase().contains(&query))
+                    .then_some(index)
             })
             .collect()
     }

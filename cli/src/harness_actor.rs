@@ -4,8 +4,9 @@
 
 use crate::{
     agents::AgentDefinition,
-    harness::{Harness, HarnessEvent, HarnessSnapshot},
+    harness::{Harness, HarnessEvent, HarnessSnapshot, UserRequest},
     models::ModelDef,
+    skills::Skill,
     token_usage::SessionInfo,
 };
 use std::sync::atomic::Ordering;
@@ -57,6 +58,18 @@ impl CommandReply for Result<SessionInfo, String> {
     }
 }
 
+impl CommandReply for Result<Vec<Skill>, String> {
+    type Output = Vec<Skill>;
+
+    fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String> {
+        reply.map_err(|_| "Harness actor stopped".to_string())?
+    }
+
+    fn no_reply() -> Self::Output {
+        unreachable!("commands without a reply should use `()`")
+    }
+}
+
 #[derive(Debug)]
 pub enum HarnessActorEvent {
     Harness(HarnessEvent),
@@ -73,6 +86,7 @@ pub enum HarnessActorEvent {
 
 pub enum HarnessCommand {
     RunPrompt(String),
+    RunSkill(String),
     SetModel {
         model: ModelDef,
         reply_tx: oneshot::Sender<CommandResult>,
@@ -101,6 +115,9 @@ pub enum HarnessCommand {
     Info {
         reply_tx: oneshot::Sender<Result<SessionInfo, String>>,
     },
+    GetSkills {
+        reply_tx: oneshot::Sender<Result<Vec<Skill>, String>>,
+    },
     Shutdown {
         reply_tx: oneshot::Sender<CommandResult>,
     },
@@ -122,6 +139,17 @@ impl HarnessActorHandle {
 
     pub async fn run_prompt(&self, prompt: String) -> Result<(), String> {
         self.send_command::<()>(HarnessCommand::RunPrompt(prompt), None)
+            .await
+    }
+
+    pub async fn run_skill(&self, name: String) -> Result<(), String> {
+        self.send_command::<()>(HarnessCommand::RunSkill(name), None)
+            .await
+    }
+
+    pub async fn get_skills(&self) -> Result<Vec<Skill>, String> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.send_command(HarnessCommand::GetSkills { reply_tx }, Some(reply_rx))
             .await
     }
 
@@ -210,6 +238,69 @@ impl HarnessActorHandle {
     }
 }
 
+async fn run_turn(
+    harness: &mut Harness,
+    command_rx: &mut mpsc::Receiver<HarnessCommand>,
+    event_tx: &mpsc::UnboundedSender<HarnessActorEvent>,
+    request: UserRequest,
+) -> Result<(), String> {
+    let _ = event_tx.send(HarnessActorEvent::TurnStarted);
+
+    let cancel_flag = harness.cancel_handle();
+    let on_event = {
+        let event_tx = event_tx.clone();
+        move |event: HarnessEvent| -> Option<String> {
+            match event {
+                HarnessEvent::AskUser { title, options } => {
+                    let (answer_tx, answer_rx) = oneshot::channel();
+                    let _ = event_tx.send(HarnessActorEvent::AskUser {
+                        title,
+                        options,
+                        answer_tx,
+                    });
+                    Some(futures::executor::block_on(answer_rx).unwrap_or_default())
+                }
+                event => {
+                    let _ = event_tx.send(HarnessActorEvent::Harness(event));
+                    None
+                }
+            }
+        }
+    };
+
+    let mut turn = Box::pin(harness.run_turn_with_events(request, on_event));
+    let result: Result<(), String> = loop {
+        tokio::select! {
+            result = &mut turn => {
+                break result.map_err(|err| err.to_string());
+            }
+            cmd = command_rx.recv() => {
+                match cmd {
+                    Some(HarnessCommand::Cancel) => {
+                        cancel_flag.store(true, Ordering::Relaxed);
+                    }
+                    Some(_) => {}
+                    None => break Err("Actor channel closed".into()),
+                }
+            }
+        }
+    };
+
+    drop(turn);
+
+    let current = harness.snapshot();
+    match &result {
+        Ok(()) => {
+            let _ = event_tx.send(HarnessActorEvent::TurnFinished(current));
+        }
+        Err(err) => {
+            let _ = event_tx.send(HarnessActorEvent::RequestFailed(err.clone(), current));
+        }
+    }
+
+    result
+}
+
 async fn run_actor(
     mut harness: Harness,
     mut command_rx: mpsc::Receiver<HarnessCommand>,
@@ -218,58 +309,26 @@ async fn run_actor(
     while let Some(command) = command_rx.recv().await {
         match command {
             HarnessCommand::RunPrompt(prompt) => {
-                let _ = event_tx.send(HarnessActorEvent::TurnStarted);
-                let cancel_flag = harness.cancel_handle();
-                let on_event = {
-                    let event_tx = event_tx.clone();
-                    move |event: HarnessEvent| -> Option<String> {
-                        match event {
-                            HarnessEvent::AskUser { title, options } => {
-                                let (answer_tx, answer_rx) = oneshot::channel();
-                                let _ = event_tx.send(HarnessActorEvent::AskUser {
-                                    title,
-                                    options,
-                                    answer_tx,
-                                });
-                                Some(futures::executor::block_on(answer_rx).unwrap_or_default())
-                            }
-                            event => {
-                                let _ = event_tx.send(HarnessActorEvent::Harness(event));
-                                None
-                            }
-                        }
-                    }
-                };
-
-                let mut turn = Box::pin(harness.run_turn_with_events(prompt, on_event));
-                let result: Result<(), String> = loop {
-                    tokio::select! {
-                        result = &mut turn => {
-                            break result.map_err(|err| err.to_string());
-                        }
-                        cmd = command_rx.recv() => {
-                            match cmd {
-                                Some(HarnessCommand::Cancel) => {
-                                    cancel_flag.store(true, Ordering::Relaxed);
-                                }
-                                Some(_) => {}
-                                None => break Err("Actor channel closed".into()),
-                            }
-                        }
-                    }
-                };
-
-                drop(turn);
-
-                let current = harness.snapshot();
-                match result {
-                    Ok(()) => {
-                        let _ = event_tx.send(HarnessActorEvent::TurnFinished(current));
-                    }
-                    Err(err) => {
-                        let _ = event_tx.send(HarnessActorEvent::RequestFailed(err, current));
-                    }
-                }
+                let _ = run_turn(
+                    &mut harness,
+                    &mut command_rx,
+                    &event_tx,
+                    UserRequest::Prompt(prompt),
+                )
+                .await;
+            }
+            HarnessCommand::RunSkill(name) => {
+                let _ = run_turn(
+                    &mut harness,
+                    &mut command_rx,
+                    &event_tx,
+                    UserRequest::Skill(name),
+                )
+                .await;
+            }
+            HarnessCommand::GetSkills { reply_tx } => {
+                let skills = harness.list_skills();
+                let _ = reply_tx.send(Ok(skills));
             }
             HarnessCommand::SetModel { model, reply_tx } => {
                 let result = harness
