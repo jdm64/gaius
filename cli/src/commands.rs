@@ -48,6 +48,14 @@ impl Commands {
                 description: "List available skills",
             },
             Command {
+                name: "plan",
+                description: "Toggle plan mode on/off",
+            },
+            Command {
+                name: "info",
+                description: "Show session info",
+            },
+            Command {
                 name: "streaming",
                 description: "Toggle streaming mode on/off",
             },
@@ -62,14 +70,6 @@ impl Commands {
             Command {
                 name: "show-diff",
                 description: "Toggle rendering of diff messages on/off",
-            },
-            Command {
-                name: "plan",
-                description: "Toggle plan mode on/off",
-            },
-            Command {
-                name: "info",
-                description: "Show session info",
             },
         ]
     }

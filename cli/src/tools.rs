@@ -106,22 +106,6 @@ impl ToolName {
                     },
                     "required": ["file_path"]
                 })),
-            ToolName::CreateFile => Tool::new(self.as_str())
-                .with_description("Create a new file with the provided contents")
-                .with_schema(json!({
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "The path to the file to create"
-                        },
-                        "contents": {
-                            "type": "string",
-                            "description": "The contents to write to the new file"
-                        }
-                    },
-                    "required": ["file_path", "contents"]
-                })),
             ToolName::EditFile => Tool::new(self.as_str())
                 .with_description("Modify an existing file by replacing exactly one string match")
                 .with_schema(json!({
@@ -141,6 +125,22 @@ impl ToolName {
                         }
                     },
                     "required": ["file_path", "find", "replace"]
+                })),
+            ToolName::CreateFile => Tool::new(self.as_str())
+                .with_description("Create a new file with the provided contents")
+                .with_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "The path to the file to create"
+                        },
+                        "contents": {
+                            "type": "string",
+                            "description": "The contents to write to the new file"
+                        }
+                    },
+                    "required": ["file_path", "contents"]
                 })),
             ToolName::Bash => Tool::new(self.as_str())
                 .with_description("Execute a bash command")
@@ -194,6 +194,18 @@ impl ToolName {
                     },
                     "required": ["pattern", "path"]
                 })),
+            ToolName::Skill => Tool::new(self.as_str())
+                .with_description("Invoke a skill by name to get its instructions")
+                .with_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Name of skill to invoke"
+                        }
+                    },
+                    "required": ["name"],
+                })),
             ToolName::Question => Tool::new(self.as_str())
                 .with_description("Ask the user a question with optional choices")
                 .with_schema(json!({
@@ -222,18 +234,6 @@ impl ToolName {
                         }
                     },
                     "required": ["content"],
-                })),
-            ToolName::Skill => Tool::new(self.as_str())
-                .with_description("Invoke a skill by name to get its instructions")
-                .with_schema(json!({
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Name of skill to invoke"
-                        }
-                    },
-                    "required": ["name"],
                 })),
         }
     }
