@@ -118,6 +118,9 @@ pub enum HarnessCommand {
     GetSkills {
         reply_tx: oneshot::Sender<Result<Vec<Skill>, String>>,
     },
+    ReloadSkills {
+        reply_tx: oneshot::Sender<Result<Vec<Skill>, String>>,
+    },
     Shutdown {
         reply_tx: oneshot::Sender<CommandResult>,
     },
@@ -150,6 +153,12 @@ impl HarnessActorHandle {
     pub async fn get_skills(&self) -> Result<Vec<Skill>, String> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.send_command(HarnessCommand::GetSkills { reply_tx }, Some(reply_rx))
+            .await
+    }
+
+    pub async fn reload_skills(&self) -> Result<Vec<Skill>, String> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.send_command(HarnessCommand::ReloadSkills { reply_tx }, Some(reply_rx))
             .await
     }
 
@@ -328,6 +337,10 @@ async fn run_actor(
             }
             HarnessCommand::GetSkills { reply_tx } => {
                 let skills = harness.list_skills();
+                let _ = reply_tx.send(Ok(skills));
+            }
+            HarnessCommand::ReloadSkills { reply_tx } => {
+                let skills = harness.reload_skills();
                 let _ = reply_tx.send(Ok(skills));
             }
             HarnessCommand::SetModel { model, reply_tx } => {

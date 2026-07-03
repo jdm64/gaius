@@ -238,6 +238,7 @@ impl Render {
         Some(vec![
             ("Type", "filter"),
             ("Enter", "load skill"),
+            ("Ctrl+R", "reload"),
             ("Esc", "close"),
         ])
     }

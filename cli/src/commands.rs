@@ -748,6 +748,18 @@ impl Commands {
                     return InputMode::PromptInput;
                 }
             }
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let skills = match actor.reload_skills().await {
+                    Ok(skills) => skills,
+                    Err(err) => {
+                        app.status = format!("Error reloading skills: {}", err);
+                        Vec::new()
+                    }
+                };
+                let filtered = Input::filter_skills(&app.input, &skills);
+                picker.replace_rows(skills, filtered);
+                app.status = format!("Reloaded {} skills", picker.rows.len());
+            }
             _ if input_changed_key(key) => {
                 picker.replace_filter(Input::filter_skills(&app.input, &picker.rows));
             }

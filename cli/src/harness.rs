@@ -269,6 +269,14 @@ impl Harness {
         self.tool_engine.skill_repo.list()
     }
 
+    pub fn reload_skills(&mut self) -> Vec<Skill> {
+        if let Ok(new_repo) = SkillRepo::load() {
+            self.tool_engine.skill_repo = new_repo;
+            self.rebuild_agent();
+        }
+        self.list_skills()
+    }
+
     pub fn snapshot(&self) -> HarnessSnapshot {
         HarnessSnapshot {
             session_id: self.session_id(),
