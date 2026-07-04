@@ -14,12 +14,13 @@ use crate::{
     models::ModelDef,
     render::Render,
     render_history::DisplayPrefs,
+    selection::Selection,
     token_usage::format_arrows,
 };
 use crossterm::{
     event::{
         DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent,
-        KeyEventKind, KeyModifiers, MouseEventKind,
+        KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -92,6 +93,7 @@ pub struct TuiApp {
     pub prompt_history: Vec<String>,
     pub prompt_history_idx: Option<usize>,
     pub history_lines: Vec<Line<'static>>,
+    pub selection: Selection,
     pub history_generation: u64,
     pub rendered_history_generation: u64,
     pub actor_busy: bool,
@@ -134,6 +136,7 @@ impl TuiApp {
             prompt_history: Vec::new(),
             prompt_history_idx: None,
             history_lines: Vec::new(),
+            selection: Selection::default(),
             history_generation: 0,
             rendered_history_generation: u64::MAX,
             actor_busy: false,
@@ -202,8 +205,25 @@ impl TuiApp {
             Event::Key(key) if key.kind == KeyEventKind::Press => key,
             Event::Mouse(mouse) => {
                 match mouse.kind {
-                    MouseEventKind::ScrollUp => Input::scroll_history_up(self, 3),
-                    MouseEventKind::ScrollDown => Input::scroll_history_down(self, 3),
+                    MouseEventKind::ScrollUp => {
+                        self.selection.selection = None;
+                        Input::scroll_history_up(self, 3);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        self.selection.selection = None;
+                        Input::scroll_history_down(self, 3);
+                    }
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        self.selection.mouse_down(mouse);
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) => {
+                        self.selection.mouse_drag(mouse);
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        if let Some(status) = self.selection.mouse_up(mouse) {
+                            self.status = status;
+                        }
+                    }
                     _ => {}
                 }
                 return Ok(());

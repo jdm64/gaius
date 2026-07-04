@@ -2,11 +2,13 @@ use gaius::config::Config;
 use gaius::diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView};
 use gaius::render::Render;
 use gaius::render_history::DisplayPrefs;
+use gaius::selection::{HistoryPoint, HistorySelection, Selection};
 use gaius::tui::{TuiApp, TuiMessage};
 use ratatui::{
     Terminal,
     backend::TestBackend,
     layout::Position,
+    style::Color,
     text::{Line, Span},
 };
 
@@ -136,6 +138,105 @@ fn visible_history_lines_pads_user_prompts_to_width() {
     assert_eq!(visible[0].spans[0].content.as_ref(), "\u{2503} ");
     assert_eq!(visible[1].spans[0].content.as_ref(), "\u{2503} ");
     assert_eq!(visible[2].spans[0].content.as_ref(), "\u{2503} ");
+}
+
+#[test]
+fn selected_history_text_returns_single_line_partial_selection() {
+    let selection = Selection {
+        lines: vec![Line::from("abcdef")],
+        selection: Some(HistorySelection {
+            anchor: HistoryPoint { row: 0, col: 1 },
+            focus: HistoryPoint { row: 0, col: 4 },
+            active: false,
+        }),
+        ..Default::default()
+    };
+
+    assert_eq!(selection.selected_text(), Some("bcd".to_string()));
+}
+
+#[test]
+fn selected_history_text_returns_multi_line_selection_with_clipped_edges() {
+    let selection = Selection {
+        lines: vec![
+            Line::from("abcdef"),
+            Line::from("ghijkl"),
+            Line::from("mnopqr"),
+        ],
+        selection: Some(HistorySelection {
+            anchor: HistoryPoint { row: 0, col: 2 },
+            focus: HistoryPoint { row: 2, col: 3 },
+            active: false,
+        }),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        selection.selected_text(),
+        Some("cdef\nghijkl\nmno".to_string())
+    );
+}
+
+#[test]
+fn selected_history_text_normalizes_reversed_drag_direction() {
+    let selection = Selection {
+        lines: vec![Line::from("abcdef"), Line::from("ghijkl")],
+        selection: Some(HistorySelection {
+            anchor: HistoryPoint { row: 1, col: 2 },
+            focus: HistoryPoint { row: 0, col: 3 },
+            active: false,
+        }),
+        ..Default::default()
+    };
+
+    assert_eq!(selection.selected_text(), Some("def\ngh".to_string()));
+}
+
+#[test]
+fn selected_history_text_returns_none_for_empty_selection() {
+    let selection = Selection {
+        lines: vec![Line::from("abcdef")],
+        selection: Some(HistorySelection {
+            anchor: HistoryPoint { row: 0, col: 2 },
+            focus: HistoryPoint { row: 0, col: 2 },
+            active: false,
+        }),
+        ..Default::default()
+    };
+
+    assert_eq!(selection.selected_text(), None);
+}
+
+#[test]
+fn draw_history_applies_selection_highlight_to_selected_cells() {
+    let render = Render::new();
+    let mut app = TuiApp::new(Config::new());
+    app.push_message(TuiMessage::AgentMessage("abcdef".to_string()));
+    app.selection.selection = Some(HistorySelection {
+        anchor: HistoryPoint { row: 1, col: 1 },
+        focus: HistoryPoint { row: 1, col: 4 },
+        active: true,
+    });
+    let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
+
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
+
+    let selected = terminal
+        .backend()
+        .buffer()
+        .cell(Position { x: 2, y: 2 })
+        .unwrap();
+    let unselected = terminal
+        .backend()
+        .buffer()
+        .cell(Position { x: 1, y: 2 })
+        .unwrap();
+
+    assert_eq!(selected.symbol(), "b");
+    assert_eq!(selected.bg, Color::Magenta);
+    assert_eq!(selected.fg, Color::Black);
+    assert_eq!(unselected.symbol(), "a");
+    assert_ne!(unselected.bg, Color::Magenta);
 }
 
 #[test]

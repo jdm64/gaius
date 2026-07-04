@@ -17,6 +17,7 @@ pub mod render;
 pub mod render_history;
 pub mod render_input;
 pub mod render_lists;
+pub mod selection;
 pub mod session;
 pub mod skills;
 pub mod token_usage;

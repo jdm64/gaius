@@ -64,6 +64,10 @@ impl Render {
             text_height as usize,
         );
 
+        let lines =
+            app.selection
+                .highlight(lines, area, text_width, text_height, self.theme.selected);
+
         let agent_label = if app.plan_mode_on {
             format!("{}/plan", app.agent_name)
         } else {
