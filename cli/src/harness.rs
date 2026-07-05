@@ -363,13 +363,14 @@ impl Harness {
                         let (next_index, next_msg) = messages.next().unwrap();
                         let responses: Vec<&genai::chat::ToolResponse> =
                             next_msg.content.tool_responses();
+                        let tool_error = is_tool_error(next_msg);
                         for resp in responses {
                             if let Some((name, args)) = pending_tool_calls.first() {
                                 on_event(HarnessEvent::ToolCall {
                                     name: (*name).clone(),
                                     arguments: (*args).clone(),
                                     result: resp.content.clone(),
-                                    error: false,
+                                    error: tool_error,
                                 });
                                 pending_tool_calls.remove(0);
                             }
@@ -668,9 +669,12 @@ impl Harness {
     ) where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
-        self.history
-            .messages
-            .push(ToolResponse::new(&tc.call_id, result.clone()).into());
+        let mut message: ChatMessage = ToolResponse::new(&tc.call_id, result.clone()).into();
+        message.content.push(ContentPart::Custom(CustomPart {
+            model_iden: None,
+            data: json!({ "tool_error": error }),
+        }));
+        self.history.messages.push(message);
         on_event(HarnessEvent::ToolCall {
             name: tc.fn_name.to_string(),
             arguments: tc.fn_arguments.to_string(),
@@ -705,6 +709,16 @@ impl Harness {
         self.session.save(&self.history, &self.token_usage)?;
         Ok(())
     }
+}
+
+fn is_tool_error(message: &ChatMessage) -> bool {
+    message.content.custom_parts().iter().any(|part| {
+        part.data
+            .as_object()
+            .is_some_and(|obj: &serde_json::Map<String, serde_json::Value>| {
+                obj.get("tool_error") == Some(&json!(true))
+            })
+    })
 }
 
 fn has_plan_marker(message: &ChatMessage) -> bool {

@@ -119,6 +119,64 @@ fn replay_diff_marker_after_tool_call() {
 }
 
 #[test]
+fn replay_tool_error_marker_sets_error_flag() {
+    let messages = vec![
+        ChatMessage::from(vec![ToolCall {
+            call_id: "call-1".to_string(),
+            fn_name: "search".to_string(),
+            fn_arguments: json!({"query": "rust"}),
+            thought_signatures: None,
+        }]),
+        ChatMessage::tool(MessageContent::from_parts(vec![
+            ContentPart::ToolResponse(ToolResponse::new("call-1", "something failed")),
+            ContentPart::Custom(CustomPart {
+                model_iden: None,
+                data: json!({ "tool_error": true }),
+            }),
+        ])),
+    ];
+
+    let events = replay_events(messages);
+
+    assert_eq!(
+        events,
+        vec![HarnessEvent::ToolCall {
+            name: "search".to_string(),
+            arguments: json!({"query":"rust"}).to_string(),
+            result: "something failed".to_string(),
+            error: true,
+        },]
+    );
+}
+
+#[test]
+fn replay_tool_error_marker_absent_defaults_false() {
+    let messages = vec![
+        ChatMessage::from(vec![ToolCall {
+            call_id: "call-1".to_string(),
+            fn_name: "search".to_string(),
+            fn_arguments: json!({"query": "rust"}),
+            thought_signatures: None,
+        }]),
+        ChatMessage::tool(MessageContent::from_parts(vec![ContentPart::ToolResponse(
+            ToolResponse::new("call-1", "ok"),
+        )])),
+    ];
+
+    let events = replay_events(messages);
+
+    assert_eq!(
+        events,
+        vec![HarnessEvent::ToolCall {
+            name: "search".to_string(),
+            arguments: json!({"query":"rust"}).to_string(),
+            result: "ok".to_string(),
+            error: false,
+        },]
+    );
+}
+
+#[test]
 fn token_usage_records_initial_prompt_as_baseline() {
     let mut ledger = TokenUsageLedger::default();
     let spans = ledger.record(
