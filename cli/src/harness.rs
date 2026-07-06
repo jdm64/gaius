@@ -15,6 +15,8 @@ use crate::{
     tools::{ToolEngine, ToolResult},
 };
 use futures::StreamExt;
+use genai::Error as GenaiError;
+use genai::webc::Error as WebcError;
 use genai::{
     Client,
     chat::{
@@ -22,6 +24,7 @@ use genai::{
         MessageContent, ToolCall, ToolResponse,
     },
 };
+use reqwest::StatusCode;
 use serde_json::json;
 use std::{
     error::Error,
@@ -29,7 +32,9 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
+use tokio::time;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
@@ -493,6 +498,40 @@ impl Harness {
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
+        let max_retries = 4;
+        let mut delay = 3u64;
+
+        for attempt in 0..=max_retries {
+            match self.try_send_request_streaming(on_event).await {
+                Ok(tool_calls) => return Ok(tool_calls),
+                Err(err) => {
+                    let is_rate_limit = is_rate_limit_error(err.as_ref());
+                    if !is_rate_limit || attempt >= max_retries {
+                        return Err(err);
+                    }
+                    // fall through to retry below
+                }
+            }
+
+            let message = format!(
+                "Rate limit hit. Retrying in {delay}s (attempt {}/{max_retries})...",
+                attempt + 1
+            );
+            on_event(HarnessEvent::SystemMessage(message));
+            time::sleep(Duration::from_secs(delay)).await;
+            delay *= 3;
+        }
+
+        Err(format!("Rate limit exceeded after {} retries", max_retries,).into())
+    }
+
+    async fn try_send_request_streaming<F>(
+        &mut self,
+        on_event: &mut F,
+    ) -> Result<Vec<ToolCall>, Box<dyn std::error::Error>>
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
         let prompt_message_end = self.history.messages.len();
         let chat_options = ChatOptions::default()
             .with_capture_content(true)
@@ -709,6 +748,28 @@ impl Harness {
         self.session.save(&self.history, &self.token_usage)?;
         Ok(())
     }
+}
+
+pub fn is_rate_limit_error(err: &(dyn Error + 'static)) -> bool {
+    let Some(genai_err) = err.downcast_ref::<GenaiError>() else {
+        return false;
+    };
+    match genai_err {
+        GenaiError::HttpError { status, .. } => *status == StatusCode::TOO_MANY_REQUESTS,
+        GenaiError::WebAdapterCall { webc_error, .. }
+        | GenaiError::WebModelCall { webc_error, .. } => is_webc_rate_limit(webc_error),
+        GenaiError::WebStream {
+            error: webc_error, ..
+        } => is_rate_limit_error(webc_error.as_ref()),
+        _ => false,
+    }
+}
+
+pub fn is_webc_rate_limit(webc_err: &WebcError) -> bool {
+    matches!(
+        webc_err,
+        WebcError::ResponseFailedStatus { status, .. } if *status == StatusCode::TOO_MANY_REQUESTS
+    )
 }
 
 fn is_tool_error(message: &ChatMessage) -> bool {

@@ -1,12 +1,17 @@
 use gaius::{
     agents::AgentDefinition,
     diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
-    harness::{Harness, HarnessEvent},
+    harness::{Harness, HarnessEvent, is_rate_limit_error, is_webc_rate_limit},
     token_usage::{TokenUsageLedger, TokenUsageSpan},
 };
+use genai::Error as GenaiError;
+use genai::ModelIden;
+use genai::adapter::AdapterKind;
 use genai::chat::{
     ChatMessage, ContentPart, CustomPart, MessageContent, ToolCall, ToolResponse, Usage,
 };
+use genai::webc::Error as WebcError;
+use reqwest::{StatusCode, header::HeaderMap};
 use serde_json::json;
 
 fn basic_agent() -> AgentDefinition {
@@ -280,4 +285,94 @@ fn token_usage_records_prompt_delta_for_message_range() {
             response: Some(50),
         }
     );
+}
+
+fn webc_429() -> WebcError {
+    WebcError::ResponseFailedStatus {
+        status: StatusCode::TOO_MANY_REQUESTS,
+        body: String::new(),
+        headers: Box::new(HeaderMap::new()),
+    }
+}
+
+#[test]
+fn webc_rate_limit_true_for_429() {
+    assert!(is_webc_rate_limit(&webc_429()));
+}
+
+#[test]
+fn webc_rate_limit_false_for_other_status() {
+    let err = WebcError::ResponseFailedStatus {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        body: String::new(),
+        headers: Box::new(HeaderMap::new()),
+    };
+    assert!(!is_webc_rate_limit(&err));
+}
+
+#[test]
+fn webc_rate_limit_false_for_non_http_error() {
+    let err = WebcError::ResponseFailedNotJson {
+        content_type: "text/plain".to_string(),
+        body: String::new(),
+    };
+    assert!(!is_webc_rate_limit(&err));
+}
+
+#[test]
+fn genai_rate_limit_true_for_http_429() {
+    let err: GenaiError = GenaiError::HttpError {
+        status: StatusCode::TOO_MANY_REQUESTS,
+        canonical_reason: "Too Many Requests".to_string(),
+        body: String::new(),
+    };
+    assert!(is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_false_for_http_500() {
+    let err: GenaiError = GenaiError::HttpError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        canonical_reason: "Internal Server Error".to_string(),
+        body: String::new(),
+    };
+    assert!(!is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_true_for_web_adapter_call_429() {
+    let err: GenaiError = GenaiError::WebAdapterCall {
+        adapter_kind: AdapterKind::OpenAI,
+        webc_error: webc_429(),
+    };
+    assert!(is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_true_for_web_model_call_429() {
+    let err: GenaiError = GenaiError::WebModelCall {
+        model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o"),
+        webc_error: webc_429(),
+    };
+    assert!(is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_true_for_web_stream_429() {
+    let err: GenaiError = GenaiError::WebStream {
+        model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o"),
+        cause: "stream error".to_string(),
+        error: Box::new(GenaiError::HttpError {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            canonical_reason: "Too Many Requests".to_string(),
+            body: String::new(),
+        }),
+    };
+    assert!(is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_false_for_non_genai_error() {
+    let err = std::io::Error::new(std::io::ErrorKind::Other, "not a genai error");
+    assert!(!is_rate_limit_error(&err));
 }
