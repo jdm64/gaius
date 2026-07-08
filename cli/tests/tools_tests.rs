@@ -33,14 +33,16 @@ fn allows_glob_patterns_with_literal_characters() {
     }
 }
 
-#[test]
-fn plan_tool_returns_plan_text() {
-    let result = ToolEngine::new(SkillRepo::default()).execute(
-        "plan",
-        &json!({
-            "content": "# Implement feature\n\nBackground information"
-        }),
-    );
+#[tokio::test]
+async fn plan_tool_returns_plan_text() {
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute(
+            "plan",
+            &json!({
+                "content": "# Implement feature\n\nBackground information"
+            }),
+        )
+        .await;
 
     match result {
         ToolResult::Text(text) => {
@@ -50,14 +52,16 @@ fn plan_tool_returns_plan_text() {
     }
 }
 
-#[test]
-fn plan_tool_renders_arbitrary_fields() {
-    let result = ToolEngine::new(SkillRepo::default()).execute(
-        "plan",
-        &json!({
-            "content": "# Refactor auth\n\nRisks and considerations"
-        }),
-    );
+#[tokio::test]
+async fn plan_tool_renders_arbitrary_fields() {
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute(
+            "plan",
+            &json!({
+                "content": "# Refactor auth\n\nRisks and considerations"
+            }),
+        )
+        .await;
 
     match result {
         ToolResult::Text(text) => {
@@ -67,10 +71,11 @@ fn plan_tool_renders_arbitrary_fields() {
     }
 }
 
-#[test]
-fn plan_tool_requires_content() {
-    let result =
-        ToolEngine::new(SkillRepo::default()).execute("plan", &json!({ "goal": "Refactor auth" }));
+#[tokio::test]
+async fn plan_tool_requires_content() {
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute("plan", &json!({ "goal": "Refactor auth" }))
+        .await;
 
     match result {
         ToolResult::Error(text) => {
@@ -80,8 +85,8 @@ fn plan_tool_requires_content() {
     }
 }
 
-#[test]
-fn edit_file_returns_compact_diff_view() {
+#[tokio::test]
+async fn edit_file_returns_compact_diff_view() {
     let _guard = cwd_lock().lock().unwrap();
     let original_dir = std::env::current_dir().unwrap();
     let dir = std::env::temp_dir().join(format!("gaius-edit-file-test-{}", std::process::id()));
@@ -90,14 +95,16 @@ fn edit_file_returns_compact_diff_view() {
     std::env::set_current_dir(&dir).unwrap();
     std::fs::write("sample.txt", "one\ntwo\nthree\nfour\nfive\n").unwrap();
 
-    let result = ToolEngine::new(SkillRepo::default()).execute(
-        "edit_file",
-        &json!({
-            "file_path": "sample.txt",
-            "find": "three\n",
-            "replace": "THREE\n"
-        }),
-    );
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute(
+            "edit_file",
+            &json!({
+                "file_path": "sample.txt",
+                "find": "three\n",
+                "replace": "THREE\n"
+            }),
+        )
+        .await;
 
     std::env::set_current_dir(original_dir).unwrap();
     let updated = std::fs::read_to_string(dir.join("sample.txt")).unwrap();
@@ -125,8 +132,8 @@ fn cwd_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
-#[test]
-fn skill_tool_returns_body_for_existing_skill() {
+#[tokio::test]
+async fn skill_tool_returns_body_for_existing_skill() {
     use gaius::skills::Skill;
 
     let mut repo = SkillRepo::default();
@@ -136,12 +143,14 @@ fn skill_tool_returns_body_for_existing_skill() {
         body: "Skill instructions here".to_string(),
     });
 
-    let result = ToolEngine::new(repo).execute(
-        "skill",
-        &json!({
-            "name": "test-skill"
-        }),
-    );
+    let result = ToolEngine::new(repo)
+        .execute(
+            "skill",
+            &json!({
+                "name": "test-skill"
+            }),
+        )
+        .await;
 
     match result {
         ToolResult::Text(text) => {
@@ -151,14 +160,16 @@ fn skill_tool_returns_body_for_existing_skill() {
     }
 }
 
-#[test]
-fn skill_tool_returns_error_for_missing_skill() {
-    let result = ToolEngine::new(SkillRepo::default()).execute(
-        "skill",
-        &json!({
-            "name": "nonexistent"
-        }),
-    );
+#[tokio::test]
+async fn skill_tool_returns_error_for_missing_skill() {
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute(
+            "skill",
+            &json!({
+                "name": "nonexistent"
+            }),
+        )
+        .await;
 
     match result {
         ToolResult::Error(text) => {
@@ -168,14 +179,146 @@ fn skill_tool_returns_error_for_missing_skill() {
     }
 }
 
-#[test]
-fn skill_tool_requires_name() {
-    let result = ToolEngine::new(SkillRepo::default()).execute("skill", &json!({}));
+#[tokio::test]
+async fn skill_tool_requires_name() {
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute("skill", &json!({}))
+        .await;
 
     match result {
         ToolResult::Error(text) => {
             assert_eq!(text, "Missing name");
         }
         other => panic!("Expected ToolResult::Error, got: {:?}", other),
+    }
+}
+
+/// Spawn a minimal HTTP server that responds once with the given status line,
+/// content type, and body. Returns the URL the `webfetch` tool should fetch.
+fn spawn_test_server(
+    status_line: &'static str,
+    content_type: &'static str,
+    body: &'static str,
+) -> String {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 4096];
+            let mut received = Vec::new();
+            // Read until we have received the full request headers.
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        received.extend_from_slice(&buf[..n]);
+                        if received.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    format!("http://{addr}/")
+}
+
+#[tokio::test]
+async fn webfetch_returns_cleaned_html_text() {
+    let url = spawn_test_server(
+        "200 OK",
+        "text/html; charset=utf-8",
+        "<html><head><title>ignored</title></head>\
+         <body><h1>Hello</h1><p>World &amp; friends</p>\
+         <script>alert('leak')</script>\
+         <style>.x{display:none}</style></body></html>",
+    );
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute("webfetch", &json!({ "url": url }))
+        .await;
+
+    match result {
+        ToolResult::Text(text) => {
+            assert!(text.contains("Hello"), "missing heading: {text}");
+            assert!(
+                text.contains("World & friends"),
+                "entity not decoded / missing text: {text}"
+            );
+            assert!(!text.contains('<'), "tags not stripped: {text}");
+            assert!(!text.contains("alert"), "script content leaked: {text}");
+            assert!(
+                !text.contains("display:none"),
+                "style content leaked: {text}"
+            );
+        }
+        other => panic!("Expected ToolResult::Text, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn webfetch_returns_raw_text_for_non_html() {
+    let url = spawn_test_server("200 OK", "application/json", "{\"hello\":\"world\"}");
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute("webfetch", &json!({ "url": url }))
+        .await;
+
+    match result {
+        ToolResult::Text(text) => {
+            assert_eq!(text, "{\"hello\":\"world\"}");
+        }
+        other => panic!("Expected ToolResult::Text, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn webfetch_returns_error_on_non_success() {
+    let url = spawn_test_server("404 Not Found", "text/plain", "not found");
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute("webfetch", &json!({ "url": url }))
+        .await;
+
+    match result {
+        ToolResult::Error(text) => {
+            assert!(text.contains("404"), "expected status in error: {text}");
+        }
+        other => panic!("Expected ToolResult::Error, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn webfetch_requires_url() {
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute("webfetch", &json!({}))
+        .await;
+
+    match result {
+        ToolResult::Error(text) => {
+            assert_eq!(text, "Missing url");
+        }
+        other => panic!("Expected ToolResult::Error, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn webfetch_rejects_unsupported_scheme() {
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute("webfetch", &json!({ "url": "file:///etc/passwd" }))
+        .await;
+
+    match result {
+        ToolResult::Error(text) => {
+            assert!(text.contains("scheme"), "expected scheme error: {text}");
+        }
+        other => panic!("Expected ToolResult::Error, got: {other:?}"),
     }
 }

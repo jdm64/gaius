@@ -12,6 +12,8 @@ use serde_json::json;
 use std::io::ErrorKind;
 use std::io::Write;
 use std::process::Command;
+use std::time::Duration;
+use url::Url;
 
 #[derive(Debug)]
 pub enum ToolResult {
@@ -32,10 +34,11 @@ pub enum ToolName {
     Question,
     Plan,
     Skill,
+    WebFetch,
 }
 
 impl ToolName {
-    pub const ALL: [ToolName; 9] = [
+    pub const ALL: [ToolName; 10] = [
         ToolName::ReadFile,
         ToolName::CreateFile,
         ToolName::EditFile,
@@ -45,6 +48,7 @@ impl ToolName {
         ToolName::Question,
         ToolName::Plan,
         ToolName::Skill,
+        ToolName::WebFetch,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -58,6 +62,7 @@ impl ToolName {
             ToolName::Question => "question",
             ToolName::Plan => "plan",
             ToolName::Skill => "skill",
+            ToolName::WebFetch => "webfetch",
         }
     }
 
@@ -79,6 +84,7 @@ impl ToolName {
             ToolName::Question => &["title"],
             ToolName::Plan => &[],
             ToolName::Skill => &["name"],
+            ToolName::WebFetch => &["url"],
         }
     }
 
@@ -235,6 +241,18 @@ impl ToolName {
                     },
                     "required": ["content"],
                 })),
+            ToolName::WebFetch => Tool::new(self.as_str())
+                .with_description("Fetch a URL and return its content as cleaned Markdown text")
+                .with_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The fully-qualified http(s) URL to fetch"
+                        },
+                    },
+                    "required": ["url"]
+                })),
         }
     }
 }
@@ -260,7 +278,7 @@ impl ToolEngine {
             .collect()
     }
 
-    pub fn execute(&self, name: &str, args: &Value) -> ToolResult {
+    pub async fn execute(&self, name: &str, args: &Value) -> ToolResult {
         match ToolName::from_name(name) {
             Some(ToolName::ReadFile) => self.read_file_tool(args),
             Some(ToolName::CreateFile) => self.create_file_tool(args),
@@ -271,6 +289,7 @@ impl ToolEngine {
             Some(ToolName::Question) => self.question_tool(args),
             Some(ToolName::Plan) => self.plan_tool(args),
             Some(ToolName::Skill) => self.skill_tool(args),
+            Some(ToolName::WebFetch) => Self::webfetch_tool(args).await,
             None => ToolResult::Error(format!("Unknown tool call: {} ({})", name, args)),
         }
     }
@@ -438,6 +457,81 @@ impl ToolEngine {
                 }
             }
             Err(e) => ToolResult::Error(format!("Error executing command: {}", e)),
+        }
+    }
+
+    async fn webfetch_tool(args: &Value) -> ToolResult {
+        let url_str = match args.get("url").and_then(|v| v.as_str()) {
+            Some(u) => u,
+            None => return ToolResult::Error("Missing url".to_string()),
+        };
+
+        let parsed = match Url::parse(url_str) {
+            Ok(u) => u,
+            Err(e) => return ToolResult::Error(format!("Invalid url: {e}")),
+        };
+
+        match parsed.scheme() {
+            "http" | "https" => {}
+            other => return ToolResult::Error(format!("Unsupported url scheme: {other}")),
+        }
+
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("gaius-webfetch/0.1")
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => return ToolResult::Error(format!("Failed to build http client: {e}")),
+        };
+
+        let resp = match client.get(parsed).send().await {
+            Ok(r) => r,
+            Err(e) => return ToolResult::Error(format!("Request failed: {e}")),
+        };
+
+        let status = resp.status();
+        if !status.is_success() {
+            return ToolResult::Error(format!("Request returned non-success status: {status}"));
+        }
+
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        let bytes = match resp.bytes().await {
+            Ok(b) => b,
+            Err(e) => return ToolResult::Error(format!("Failed to read response body: {e}")),
+        };
+
+        let text = match String::from_utf8(bytes.to_vec()) {
+            Ok(t) => t,
+            Err(e) => return ToolResult::Error(format!("Response body is not valid UTF-8: {e}")),
+        };
+
+        const MAX_CHARS: usize = 50_000;
+        let truncate = |s: String| -> String {
+            if s.chars().count() > MAX_CHARS {
+                let end = s
+                    .char_indices()
+                    .nth(MAX_CHARS)
+                    .map(|(i, _)| i)
+                    .unwrap_or(s.len());
+                format!("[truncated to first {} chars]\n{}", MAX_CHARS, &s[..end])
+            } else {
+                s
+            }
+        };
+
+        if content_type.to_ascii_lowercase().contains("text/html") {
+            let cleaned = html2md::rewrite_html(&text, false);
+            ToolResult::Text(truncate(cleaned))
+        } else {
+            // Non-HTML responses (JSON, plain text, XML, etc.) are returned as-is.
+            ToolResult::Text(truncate(text))
         }
     }
 

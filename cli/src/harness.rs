@@ -476,7 +476,7 @@ impl Harness {
                 self.send_request_waiting(&mut on_event).await?
             };
 
-            self.call_tools(&tool_calls, &mut on_event);
+            self.call_tools(&tool_calls, &mut on_event).await;
 
             let stop_requested = PlanHook::run(self, &mut on_event);
 
@@ -636,7 +636,7 @@ impl Harness {
         Ok(response.content.into_tool_calls())
     }
 
-    fn call_tools<F>(&mut self, tool_calls: &[ToolCall], on_event: &mut F)
+    async fn call_tools<F>(&mut self, tool_calls: &[ToolCall], on_event: &mut F)
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
@@ -644,7 +644,10 @@ impl Harness {
             if self.is_cancel() {
                 return;
             }
-            let result = self.tool_engine.execute(&tc.fn_name, &tc.fn_arguments);
+            let result = self
+                .tool_engine
+                .execute(&tc.fn_name, &tc.fn_arguments)
+                .await;
             match result {
                 ToolResult::Question(title, options) => {
                     let answer =
