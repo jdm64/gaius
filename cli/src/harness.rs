@@ -29,7 +29,7 @@ use serde_json::json;
 use std::{
     error::Error,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -86,6 +86,7 @@ pub struct Harness {
     agent: AgentDefinition,
     session: Session,
     token_usage: TokenUsageLedger,
+    live_info: Arc<Mutex<SessionInfo>>,
     streaming: bool,
     canceled: Arc<AtomicBool>,
     last_plan_content: Option<String>,
@@ -123,6 +124,11 @@ impl Harness {
         history.tools = Some(tool_engine.build_tools_without_plan());
         apply_agent_prompt(&mut history, &agent);
 
+        let live_info = Arc::new(Mutex::new(SessionInfo {
+            id: session.id.clone(),
+            usage: token_usage.usage(),
+        }));
+
         Ok(Self {
             history,
             client: Client::default(),
@@ -135,6 +141,7 @@ impl Harness {
             canceled: Arc::new(AtomicBool::new(false)),
             last_plan_content: None,
             plan_mode_on: false,
+            live_info,
         })
     }
 
@@ -242,6 +249,7 @@ impl Harness {
         self.token_usage = token_usage;
         self.history.tools = Some(self.tool_engine.build_tools());
         self.last_plan_content = None;
+        self.update_session_info();
         apply_agent_prompt(&mut self.history, &self.agent);
         Ok(())
     }
@@ -253,13 +261,18 @@ impl Harness {
     pub fn clear_context(&mut self) {
         self.history.messages.clear();
         self.token_usage.clear_context();
+        self.update_session_info();
     }
 
-    pub fn session_info(&self) -> SessionInfo {
-        SessionInfo {
+    pub fn session_info(&self) -> Arc<Mutex<SessionInfo>> {
+        Arc::clone(&self.live_info)
+    }
+
+    fn update_session_info(&self) {
+        *self.live_info.lock().unwrap() = SessionInfo {
             id: self.session.id.clone(),
             usage: self.token_usage.usage(),
-        }
+        };
     }
 
     pub fn history(&self) -> &ChatRequest {
@@ -303,6 +316,7 @@ impl Harness {
         F: FnMut(HarnessEvent),
     {
         Self::replay_messages(&self.history.messages, &self.token_usage, on_event);
+        self.update_session_info();
     }
 
     pub fn replay_messages<F>(
@@ -427,6 +441,7 @@ impl Harness {
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         self.set_cancel(false);
+        self.update_session_info();
 
         match request {
             UserRequest::Prompt(text) => self.send_user_message(text, &mut on_event),
@@ -749,6 +764,7 @@ impl Harness {
 
     fn save_history(&mut self) -> Result<(), Box<dyn Error>> {
         self.session.save(&self.history, &self.token_usage)?;
+        self.update_session_info();
         Ok(())
     }
 }

@@ -59,6 +59,7 @@ impl UsageInfo {
     }
 }
 
+#[derive(Clone)]
 pub struct SessionInfo {
     pub id: Option<String>,
     pub usage: UsageInfo,

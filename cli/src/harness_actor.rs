@@ -255,7 +255,9 @@ async fn run_turn(
 ) -> Result<(), String> {
     let _ = event_tx.send(HarnessActorEvent::TurnStarted);
 
+    let info_ref = harness.session_info();
     let cancel_flag = harness.cancel_handle();
+
     let on_event = {
         let event_tx = event_tx.clone();
         move |event: HarnessEvent| -> Option<String> {
@@ -287,6 +289,9 @@ async fn run_turn(
                 match cmd {
                     Some(HarnessCommand::Cancel) => {
                         cancel_flag.store(true, Ordering::Relaxed);
+                    }
+                    Some(HarnessCommand::Info { reply_tx }) => {
+                        let _ = reply_tx.send(Ok(info_ref.lock().unwrap().clone()));
                     }
                     Some(_) => {}
                     None => break Err("Actor channel closed".into()),
@@ -391,7 +396,7 @@ async fn run_actor(
             }
             HarnessCommand::Info { reply_tx } => {
                 let info = harness.session_info();
-                let _ = reply_tx.send(Ok(info));
+                let _ = reply_tx.send(Ok(info.lock().unwrap().clone()));
             }
             HarnessCommand::Shutdown { reply_tx } => {
                 let _ = reply_tx.send(Ok(harness.snapshot()));
