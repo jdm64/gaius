@@ -5,7 +5,7 @@
 use genai::chat::Usage;
 use serde::{Deserialize, Serialize};
 
-use crate::harness::HarnessEvent;
+use crate::{harness::HarnessEvent, models::TokenPrice};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TokenUsageSpan {
@@ -28,10 +28,13 @@ pub struct UsageInfo {
     pub session_turns: Option<i32>,
     pub session_input: Option<i32>,
     pub session_output: Option<i32>,
+    pub cost_in: Option<f64>,
+    pub cost_read: Option<f64>,
+    pub cost_out: Option<f64>,
 }
 
 impl UsageInfo {
-    pub fn add(&mut self, usage: &Usage) {
+    pub fn add(&mut self, usage: &Usage, pricing: Option<&TokenPrice>) {
         self.context_tokens =
             Some(usage.prompt_tokens.unwrap_or(0) + usage.completion_tokens.unwrap_or(0));
 
@@ -42,8 +45,44 @@ impl UsageInfo {
             self.session_output = Some(self.session_output.unwrap_or(0) + completion_tokens);
         }
 
+        if let Some(pricing) = pricing {
+            let cached = usage
+                .prompt_tokens_details
+                .as_ref()
+                .and_then(|d| d.cached_tokens)
+                .unwrap_or(0);
+            let prompt = usage.prompt_tokens.unwrap_or(0);
+            let completion = usage.completion_tokens.unwrap_or(0);
+            let non_cached = prompt.saturating_sub(cached);
+
+            if let Some(price_in) = pricing.price_in {
+                self.cost_in =
+                    Some(self.cost_in.unwrap_or(0.0) + (non_cached as f64 * price_in));
+            }
+            if let Some(price_read) = pricing.price_read {
+                self.cost_read =
+                    Some(self.cost_read.unwrap_or(0.0) + (cached as f64 * price_read));
+            }
+            if let Some(price_out) = pricing.price_out {
+                self.cost_out =
+                    Some(self.cost_out.unwrap_or(0.0) + (completion as f64 * price_out));
+            }
+        }
+
         *self.context_turns.get_or_insert(0) += 1;
         *self.session_turns.get_or_insert(0) += 1;
+    }
+
+    pub fn total_cost(&self) -> Option<f64> {
+        let in_cost = self.cost_in.unwrap_or(0.0);
+        let read_cost = self.cost_read.unwrap_or(0.0);
+        let out_cost = self.cost_out.unwrap_or(0.0);
+        let total = in_cost + read_cost + out_cost;
+        if total > 0.0 {
+            Some(total)
+        } else {
+            None
+        }
     }
 
     pub fn clear(&mut self) {
@@ -83,6 +122,7 @@ impl TokenUsageLedger {
                 prompt: span.prompt,
                 response: span.response,
                 total: self.usage.context_tokens,
+                cost: self.usage.total_cost(),
             });
         }
     }
@@ -92,15 +132,17 @@ impl TokenUsageLedger {
         prompt_index: usize,
         response_index: usize,
         usage: &Usage,
+        pricing: Option<&TokenPrice>,
         on_event: &mut F,
     ) where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
-        for span in self.record(prompt_index, response_index, usage) {
+        for span in self.record(prompt_index, response_index, usage, pricing) {
             on_event(HarnessEvent::TokenUsage {
                 prompt: span.prompt,
                 response: span.response,
                 total: self.usage.context_tokens,
+                cost: self.usage.total_cost(),
             });
         }
     }
@@ -110,6 +152,7 @@ impl TokenUsageLedger {
         prompt_index: usize,
         response_index: usize,
         usage: &Usage,
+        pricing: Option<&TokenPrice>,
     ) -> Vec<TokenUsageSpan> {
         let mut added = Vec::new();
 
@@ -149,7 +192,7 @@ impl TokenUsageLedger {
         }
 
         self.spans.extend(added.iter().cloned());
-        self.usage.add(usage);
+        self.usage.add(usage, pricing);
 
         added
     }

@@ -61,6 +61,7 @@ pub enum HarnessEvent {
         prompt: Option<i32>,
         response: Option<i32>,
         total: Option<i32>,
+        cost: Option<f64>,
     },
     AskUser {
         title: String,
@@ -76,6 +77,7 @@ pub struct HarnessSnapshot {
     pub agent_name: String,
     pub streaming: bool,
     pub plan_mode_on: bool,
+    pub total_cost: Option<f64>,
 }
 
 pub struct Harness {
@@ -303,6 +305,7 @@ impl Harness {
             agent_name: self.agent_name().to_string(),
             streaming: self.streaming(),
             plan_mode_on: self.plan_mode_on,
+            total_cost: self.token_usage.usage().total_cost(),
         }
     }
 
@@ -610,6 +613,7 @@ impl Harness {
                 prompt_message_end,
                 assistant_message_index,
                 usage,
+                self.model.pricing.as_ref(),
                 on_event,
             );
         }
@@ -649,6 +653,7 @@ impl Harness {
             prompt_message_end,
             assistant_message_index,
             &response.usage,
+            self.model.pricing.as_ref(),
             on_event,
         );
 

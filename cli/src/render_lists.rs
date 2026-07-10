@@ -271,6 +271,23 @@ impl Render {
             .context_turns
             .map_or("N/A".to_string(), |t: i32| t.to_string());
 
+        let cost_in = info
+            .usage
+            .cost_in
+            .map_or("N/A".to_string(), |c| format!("${:.6}", c));
+        let cost_read = info
+            .usage
+            .cost_read
+            .map_or("N/A".to_string(), |c| format!("${:.6}", c));
+        let cost_out = info
+            .usage
+            .cost_out
+            .map_or("N/A".to_string(), |c| format!("${:.6}", c));
+        let total_cost = info
+            .usage
+            .total_cost()
+            .map_or("N/A".to_string(), |c| format!("${:.6}", c));
+
         let lines = vec![
             Line::from(vec![Span::raw("            ID: "), Span::raw(id)]),
             Line::from(vec![Span::raw(" Context turns: "), Span::raw(ctx_turns)]),
@@ -278,6 +295,10 @@ impl Render {
             Line::from(vec![Span::raw("  Input tokens: "), Span::raw(in_toks)]),
             Line::from(vec![Span::raw("Context tokens: "), Span::raw(ctx_toks)]),
             Line::from(vec![Span::raw(" Output tokens: "), Span::raw(out_toks)]),
+            Line::from(vec![Span::raw("    Input cost: "), Span::raw(cost_in)]),
+            Line::from(vec![Span::raw("   Cached cost: "), Span::raw(cost_read)]),
+            Line::from(vec![Span::raw("   Output cost: "), Span::raw(cost_out)]),
+            Line::from(vec![Span::raw("    Total cost: "), Span::raw(total_cost)]),
         ];
 
         let width = 55u16.min(area.width.saturating_sub(4).max(1));

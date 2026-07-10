@@ -141,6 +141,7 @@ impl CliPrompt {
                     prompt,
                     response,
                     total,
+                    cost: _,
                 } => {
                     if agent_started {
                         println!();

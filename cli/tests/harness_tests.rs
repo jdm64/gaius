@@ -193,6 +193,7 @@ fn token_usage_records_initial_prompt_as_baseline() {
             total_tokens: Some(125),
             ..Usage::default()
         },
+        None,
     );
 
     assert_eq!(spans.len(), 2);
@@ -255,6 +256,7 @@ fn token_usage_records_prompt_delta_for_message_range() {
             completion_tokens: Some(25),
             ..Usage::default()
         },
+        None,
     );
 
     let spans = ledger.record(
@@ -265,6 +267,7 @@ fn token_usage_records_prompt_delta_for_message_range() {
             completion_tokens: Some(50),
             ..Usage::default()
         },
+        None,
     );
 
     assert_eq!(

@@ -89,6 +89,7 @@ pub struct TuiApp {
     pub status: String,
     pub mode: InputMode,
     pub context_tokens: Option<i32>,
+    pub total_cost: Option<f64>,
     pub display_prefs: DisplayPrefs,
     pub prompt_history: Vec<String>,
     pub prompt_history_idx: Option<usize>,
@@ -113,11 +114,7 @@ impl TuiApp {
         let agents = config.agents().clone();
         Self {
             config,
-            model: ModelDef {
-                provider: String::new(),
-                id: String::new(),
-                context_len: None,
-            },
+            model: ModelDef::default(),
             agent_name: String::new(),
             agents,
             input: String::new(),
@@ -128,6 +125,7 @@ impl TuiApp {
             status: "".to_string(),
             mode: InputMode::PromptInput,
             context_tokens: None,
+            total_cost: None,
             display_prefs: DisplayPrefs {
                 thinking: false,
                 token_info: true,
@@ -407,6 +405,7 @@ impl TuiApp {
         self.model = snapshot.model.clone();
         self.agent_name = snapshot.agent_name.clone();
         self.plan_mode_on = snapshot.plan_mode_on;
+        self.total_cost = snapshot.total_cost;
     }
 
     pub fn harness_idle(&self) -> bool {
@@ -452,10 +451,12 @@ impl TuiApp {
                 prompt,
                 response,
                 total,
+                cost,
             } => {
                 let info = format_arrows(prompt, response);
                 self.append_token_info(info);
                 self.context_tokens = total;
+                self.total_cost = cost;
             }
             HarnessEvent::AskUser { .. } => {}
         }
@@ -543,10 +544,12 @@ impl TuiApp {
                 prompt,
                 response,
                 total,
+                cost,
             } => {
                 let info = format_arrows(prompt, response);
                 self.append_token_info(info);
                 self.context_tokens = total;
+                self.total_cost = cost;
             }
             HarnessEvent::AskUser {
                 title: _,

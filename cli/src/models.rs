@@ -14,17 +14,31 @@ use url::Url;
 
 pub const RECENT_MODELS_LIMIT: usize = 8;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TokenPrice {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_in: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_read: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_out: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct ModelDef {
     pub provider: String,
     pub id: String,
     pub context_len: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<TokenPrice>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CachedModelDef {
     pub id: String,
     pub context_len: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<TokenPrice>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +49,7 @@ pub struct RecentModelDef {
 
 type ProviderModelsCache = BTreeMap<String, Vec<CachedModelDef>>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ModelPickerRow {
     Header(String),
     Separator,
@@ -103,6 +117,7 @@ impl CachedModelDef {
                 .push(CachedModelDef {
                     id: model.id.clone(),
                     context_len: model.context_len,
+                    pricing: model.pricing.clone(),
                 });
         }
 
@@ -122,6 +137,7 @@ impl CachedModelDef {
                     provider: provider.clone(),
                     id: cached.id,
                     context_len: cached.context_len,
+                    pricing: cached.pricing,
                 })
             })
             .collect()
@@ -161,6 +177,7 @@ impl RecentModelDef {
                         provider: recent.provider.clone(),
                         id: recent.id.clone(),
                         context_len: None,
+                        pricing: None,
                     })
             })
             .collect()
@@ -436,6 +453,7 @@ impl ProviderConfig {
                                 provider: self.name.clone(),
                                 id: id.to_string(),
                                 context_len: None,
+                                pricing: None,
                             })
                         } else {
                             let id = item
@@ -449,10 +467,37 @@ impl ProviderConfig {
                                 .and_then(Value::as_i64)
                                 .map(|n| n as i32);
 
+                            let pricing = item.get("pricing").and_then(|p| {
+                                let price_in = p
+                                    .get("prompt")
+                                    .and_then(Value::as_str)
+                                    .and_then(|s| s.parse::<f64>().ok());
+                                let price_out = p
+                                    .get("completion")
+                                    .and_then(Value::as_str)
+                                    .and_then(|s| s.parse::<f64>().ok());
+                                let price_read = p
+                                    .get("input_cache_read")
+                                    .and_then(Value::as_str)
+                                    .and_then(|s| s.parse::<f64>().ok());
+
+                                if price_in.is_some() || price_out.is_some() || price_read.is_some()
+                                {
+                                    Some(TokenPrice {
+                                        price_in,
+                                        price_read,
+                                        price_out,
+                                    })
+                                } else {
+                                    None
+                                }
+                            });
+
                             Some(ModelDef {
                                 provider: self.name.clone(),
                                 id,
                                 context_len,
+                                pricing,
                             })
                         }
                     })

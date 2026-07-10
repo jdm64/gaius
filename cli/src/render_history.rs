@@ -74,21 +74,23 @@ impl Render {
             app.agent_name.clone()
         };
 
-        let title = match (app.context_tokens, app.model.context_len) {
-            (Some(tokens), Some(context_len)) if context_len > 0 => {
-                let pct = tokens as f64 / context_len as f64 * 100.0;
-                format!(
-                    " Gaius - {} - {} - {} ({:.0}%) ",
-                    app.model.id, agent_label, tokens, pct
-                )
-            }
-            (Some(tokens), _) => {
-                format!(" Gaius - {} - {} - {} ", app.model.id, agent_label, tokens)
-            }
-            _ => {
-                format!(" Gaius - {} - {} ", app.model.id, agent_label)
-            }
-        };
+        let parts: Vec<String> = [
+            Some(format!("Gaius - {} - {}", app.model.id, agent_label)),
+            app.context_tokens
+                .map(|tokens| match app.model.context_len {
+                    Some(context_len) if context_len > 0 => {
+                        let pct = tokens as f64 / context_len as f64 * 100.0;
+                        format!(" - {} {:.0}%", tokens, pct)
+                    }
+                    _ => format!(" - {}", tokens),
+                }),
+            app.total_cost.map(|cost| format!(" ${:.3}", cost)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        let title = format!(" {} ", parts.join(""));
 
         let history = Paragraph::new(Text::from(lines))
             .block(

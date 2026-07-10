@@ -7,6 +7,7 @@ fn model(provider: &str, id: &str) -> ModelDef {
         provider: provider.to_string(),
         id: id.to_string(),
         context_len: None,
+        pricing: None,
     }
 }
 
@@ -72,12 +73,14 @@ fn extracts_openai_compatible_models() {
             ModelDef {
                 provider: String::new(),
                 id: "model-a".into(),
-                context_len: None
+                context_len: None,
+                pricing: None,
             },
             ModelDef {
                 provider: String::new(),
                 id: "model-b".into(),
-                context_len: None
+                context_len: None,
+                pricing: None,
             },
         ]
     );
@@ -99,12 +102,14 @@ fn extracts_model_arrays() {
             ModelDef {
                 provider: String::new(),
                 id: "model-a".into(),
-                context_len: None
+                context_len: None,
+                pricing: None,
             },
             ModelDef {
                 provider: String::new(),
                 id: "model-b".into(),
-                context_len: None
+                context_len: None,
+                pricing: None,
             },
         ]
     );
@@ -202,6 +207,7 @@ fn recent_models_load_with_cache_enriches_known_models() {
             provider: "provider".to_string(),
             id: "model-b".to_string(),
             context_len: Some(128_000),
+            pricing: None,
         },
     ];
 
@@ -214,6 +220,7 @@ fn recent_models_load_with_cache_enriches_known_models() {
                 provider: "provider".to_string(),
                 id: "model-b".to_string(),
                 context_len: Some(128_000),
+                pricing: None,
             },
             model("provider", "stale-model"),
         ]
@@ -226,6 +233,7 @@ fn model_picker_rows_deduplicate_recent_models_by_identity() {
         provider: "provider".to_string(),
         id: "model-a".to_string(),
         context_len: Some(128_000),
+        pricing: None,
     }];
     let recent = vec![model("provider", "model-a")];
 
