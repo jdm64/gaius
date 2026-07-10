@@ -552,8 +552,7 @@ impl Harness {
             .with_capture_content(true)
             .with_capture_tool_calls(true)
             .with_capture_reasoning_content(true)
-            .with_capture_usage(true)
-            .with_extra_headers(vec![("X-Stream-Options", "include_usage=true")]);
+            .with_capture_usage(true);
         let mut response = self
             .client
             .exec_chat_stream(&self.model.id, self.history.clone(), Some(&chat_options))
@@ -626,9 +625,14 @@ impl Harness {
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         let prompt_message_end = self.history.messages.len();
+        let chat_options = ChatOptions::default()
+            .with_capture_content(true)
+            .with_capture_tool_calls(true)
+            .with_capture_reasoning_content(true)
+            .with_capture_usage(true);
         let response = self
             .client
-            .exec_chat(&self.model.id, self.history.clone(), None)
+            .exec_chat(&self.model.id, self.history.clone(), Some(&chat_options))
             .await?;
 
         let full_text = response.content.texts().join("");
