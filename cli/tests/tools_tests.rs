@@ -100,8 +100,8 @@ async fn edit_file_returns_compact_diff_view() {
             "edit_file",
             &json!({
                 "file_path": "sample.txt",
-                "find": "three\n",
-                "replace": "THREE\n"
+                "old_string": "three\n",
+                "new_string": "THREE\n"
             }),
         )
         .await;

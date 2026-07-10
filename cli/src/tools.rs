@@ -121,16 +121,16 @@ impl ToolName {
                             "type": "string",
                             "description": "The path to the file to edit"
                         },
-                        "find": {
+                        "old_string": {
                             "type": "string",
-                            "description": "The exact string to find"
+                            "description": "The exact string to find and replace"
                         },
-                        "replace": {
+                        "new_string": {
                             "type": "string",
                             "description": "The string to replace the match with"
                         }
                     },
-                    "required": ["file_path", "find", "replace"]
+                    "required": ["file_path", "old_string", "new_string"]
                 })),
             ToolName::CreateFile => Tool::new(self.as_str())
                 .with_description("Create a new file with the provided contents")
@@ -393,15 +393,23 @@ impl ToolEngine {
     fn edit_file_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::Error("Missing file_path".to_string()),
+            None => return ToolResult::Error("Missing file_path parameter".to_string()),
         };
-        let find = match args.get("find").and_then(|v| v.as_str()) {
+        let find = match args.get("old_string").and_then(|v| v.as_str()) {
             Some(f) => f,
-            None => return ToolResult::Error("Missing find".to_string()),
+            None => {
+                return ToolResult::Error(
+                    "Missing old_string parameter (the exact text to find in the file)".to_string(),
+                );
+            }
         };
-        let replace = match args.get("replace").and_then(|v| v.as_str()) {
+        let replace = match args.get("new_string").and_then(|v| v.as_str()) {
             Some(r) => r,
-            None => return ToolResult::Error("Missing replace".to_string()),
+            None => {
+                return ToolResult::Error(
+                    "Missing new_string parameter (the replacement text)".to_string(),
+                );
+            }
         };
         let cwd = match std::env::current_dir() {
             Ok(c) => c,
@@ -414,10 +422,18 @@ impl ToolEngine {
         };
         let match_count = content.matches(find).count();
         if match_count == 0 {
-            return ToolResult::Error("find string not found".to_string());
+            return ToolResult::Error(
+                "old_string not found in file. Make sure the old_string parameter \
+                exactly matches text in the file, including whitespace and indentation."
+                    .to_string(),
+            );
         }
         if match_count > 1 {
-            return ToolResult::Error(format!("find string matched {} times", match_count));
+            return ToolResult::Error(format!(
+                "old_string matched {} times. The old_string parameter must match exactly once in \
+                 the file. Include more surrounding context to make it unique.",
+                match_count
+            ));
         }
 
         let updated = content.replace(find, replace);
