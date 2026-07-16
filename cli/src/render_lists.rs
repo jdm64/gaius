@@ -301,7 +301,7 @@ impl Render {
             Line::from(vec![Span::raw("    Total cost: "), Span::raw(total_cost)]),
         ];
 
-        let width = 55u16.min(area.width.saturating_sub(4).max(1));
+        let width = 56u16.min(area.width.saturating_sub(4).max(1));
         let height = lines.len() as u16 + 2;
         let x = area.x + 2;
         let y = area.y.saturating_sub(height);
