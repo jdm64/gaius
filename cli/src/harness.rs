@@ -32,7 +32,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::time;
 use uuid::Uuid;
@@ -67,6 +67,7 @@ pub enum HarnessEvent {
         title: String,
         options: Vec<String>,
     },
+    TurnDuration(u64),
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +79,7 @@ pub struct HarnessSnapshot {
     pub streaming: bool,
     pub plan_mode_on: bool,
     pub total_cost: Option<f64>,
+    pub turn_duration: Option<u64>,
 }
 
 pub struct Harness {
@@ -93,6 +95,7 @@ pub struct Harness {
     canceled: Arc<AtomicBool>,
     last_plan_content: Option<String>,
     plan_mode_on: bool,
+    turn_start: Option<u64>,
 }
 
 impl Harness {
@@ -144,6 +147,7 @@ impl Harness {
             last_plan_content: None,
             plan_mode_on: false,
             live_info,
+            turn_start: None,
         })
     }
 
@@ -306,6 +310,7 @@ impl Harness {
             streaming: self.streaming(),
             plan_mode_on: self.plan_mode_on,
             total_cost: self.token_usage.usage().total_cost(),
+            turn_duration: self.turn_start.map(|t| time_now().saturating_sub(t)),
         }
     }
 
@@ -435,7 +440,25 @@ impl Harness {
         }
     }
 
-    pub async fn run_turn_with_events<F>(
+    pub async fn run_turn<F>(
+        &mut self,
+        request: UserRequest,
+        mut on_event: F,
+    ) -> Result<(), Box<dyn std::error::Error>>
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        let start = time_now();
+        self.turn_start = Some(start);
+        let result = self.run_turn_with_events(request, &mut on_event).await;
+        self.turn_start = None;
+        let duration = time_now().saturating_sub(start);
+        on_event(HarnessEvent::TurnDuration(duration));
+
+        result
+    }
+
+    async fn run_turn_with_events<F>(
         &mut self,
         request: UserRequest,
         mut on_event: F,
@@ -835,4 +858,11 @@ fn apply_agent_prompt(history: &mut ChatRequest, agent: &AgentDefinition) {
     } else {
         Some(agent.prompt.clone())
     };
+}
+
+fn time_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
 }

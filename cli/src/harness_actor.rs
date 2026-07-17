@@ -279,7 +279,7 @@ async fn run_turn(
         }
     };
 
-    let mut turn = Box::pin(harness.run_turn_with_events(request, on_event));
+    let mut turn = Box::pin(harness.run_turn(request, on_event));
     let result: Result<(), String> = loop {
         tokio::select! {
             result = &mut turn => {

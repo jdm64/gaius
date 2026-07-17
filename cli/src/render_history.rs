@@ -4,7 +4,7 @@
 
 use crate::{
     diff_view::{DiffLineKind, DiffView},
-    render::Render,
+    render::{Render, format_duration},
     tools::ToolName,
     tui::{TuiApp, TuiMessage, wrapped_line_count},
 };
@@ -196,7 +196,7 @@ impl Render {
                 if !prefs.token_info {
                     return vec![];
                 }
-                let style = Style::default().fg(self.theme.header);
+                let style = Style::default().fg(self.theme.header).dim();
                 vec![Line::from(text.clone()).style(style).right_aligned()]
             }
             TuiMessage::DiffView(diff) => {
@@ -204,6 +204,11 @@ impl Render {
                     return vec![];
                 }
                 self.render_diff_view(diff)
+            }
+            TuiMessage::TurnDuration(duration_ms) => {
+                let text = format_duration(*duration_ms);
+                let style = Style::default().fg(self.theme.header).dim();
+                vec![Line::from(text).style(style)]
             }
         }
     }
@@ -312,7 +317,10 @@ impl Render {
             if index > 0 {
                 let previous = &app.messages[index - 1];
                 if std::mem::discriminant(previous) != std::mem::discriminant(message)
-                    && !matches!(message, TuiMessage::TokenInfo(_))
+                    && !matches!(
+                        message,
+                        TuiMessage::TokenInfo(_) | TuiMessage::TurnDuration(_)
+                    )
                 {
                     lines.push(Line::from(""));
                 }

@@ -2,7 +2,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{input::InputMode, render::Render, tui::TuiApp};
+use crate::{
+    input::InputMode,
+    render::{Render, format_duration},
+    tui::TuiApp,
+};
 use ratatui::{
     Frame,
     layout::{HorizontalAlignment, Rect},
@@ -36,6 +40,11 @@ impl Render {
                 block = block.title(format!(" {} ", app.status));
             }
         }
+
+        if let Some(durr) = app.last_turn_duration {
+            block = block.title_bottom(Line::from(format_duration(durr)).right_aligned());
+        }
+
         let input = Paragraph::new(Text::from(lines))
             .block(block)
             .wrap(Wrap { trim: false });

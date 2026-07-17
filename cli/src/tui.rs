@@ -49,6 +49,7 @@ pub enum TuiMessage {
         error: bool,
     },
     DiffView(DiffView),
+    TurnDuration(u64),
 }
 
 pub struct TerminalGuard {
@@ -101,6 +102,7 @@ pub struct TuiApp {
     pub queued_prompts: usize,
     pub question_answer_tx: Option<oneshot::Sender<String>>,
     pub plan_mode_on: bool,
+    pub last_turn_duration: Option<u64>,
 }
 
 impl Default for TuiApp {
@@ -141,6 +143,7 @@ impl TuiApp {
             queued_prompts: 0,
             question_answer_tx: None,
             plan_mode_on: false,
+            last_turn_duration: None,
         }
     }
 
@@ -406,6 +409,7 @@ impl TuiApp {
         self.agent_name = snapshot.agent_name.clone();
         self.plan_mode_on = snapshot.plan_mode_on;
         self.total_cost = snapshot.total_cost;
+        self.last_turn_duration = snapshot.turn_duration;
     }
 
     pub fn harness_idle(&self) -> bool {
@@ -459,6 +463,9 @@ impl TuiApp {
                 self.total_cost = cost;
             }
             HarnessEvent::AskUser { .. } => {}
+            HarnessEvent::TurnDuration(duration_ms) => {
+                self.push_message(TuiMessage::TurnDuration(duration_ms));
+            }
         }
     }
 
@@ -555,6 +562,9 @@ impl TuiApp {
                 title: _,
                 options: _,
             } => {}
+            HarnessEvent::TurnDuration(duration_ms) => {
+                self.push_message(TuiMessage::TurnDuration(duration_ms));
+            }
         });
     }
 
