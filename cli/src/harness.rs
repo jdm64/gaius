@@ -70,7 +70,7 @@ pub enum HarnessEvent {
     TurnDuration(u64),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct HarnessSnapshot {
     pub session_id: Option<String>,
     pub has_history: bool,

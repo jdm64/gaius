@@ -227,7 +227,7 @@ impl Input {
                 return Ok(Self::mode_for_input(app));
             }
             KeyCode::Tab => {
-                let agent = app.agents.next_agent(app.agent_name.as_str());
+                let agent = app.agents.next_agent(app.snapshot.agent_name.as_str());
                 let next_agent = agent.cloned();
                 if let Some(agent) = next_agent {
                     if !app.harness_idle() {
@@ -237,8 +237,8 @@ impl Input {
                         let name = agent.name.clone();
                         match actor.set_agent(agent).await {
                             Ok(snapshot) => {
-                                app.apply_snapshot(&snapshot);
-                                app.agent_name = name;
+                                app.save_snapshot(&snapshot);
+                                app.snapshot.agent_name = name;
                             }
                             Err(err) => app.status = err,
                         }
@@ -370,7 +370,7 @@ impl Input {
                 (query.is_empty()
                     || skill.name.to_lowercase().contains(&query)
                     || skill.description.to_lowercase().contains(&query))
-                    .then_some(index)
+                .then_some(index)
             })
             .collect()
     }

@@ -122,7 +122,7 @@ impl Commands {
                 } else {
                     match actor.new_session().await {
                         Ok(snapshot) => {
-                            app.apply_snapshot(&snapshot);
+                            app.save_snapshot(&snapshot);
                             app.clear_messages();
                             Input::reset_history_scroll(app);
                             app.status = "New session created".to_string();
@@ -187,7 +187,7 @@ impl Commands {
                 } else {
                     match actor.toggle_streaming().await {
                         Ok(snapshot) => {
-                            app.apply_snapshot(&snapshot);
+                            app.save_snapshot(&snapshot);
                             app.status = format!("Streaming = {}", snapshot.streaming);
                         }
                         Err(err) => app.status = err,
@@ -218,7 +218,7 @@ impl Commands {
                 } else {
                     match actor.toggle_plan_mode().await {
                         Ok(snapshot) => {
-                            app.apply_snapshot(&snapshot);
+                            app.save_snapshot(&snapshot);
                             app.status = format!("Plan mode = {}", snapshot.plan_mode_on);
                         }
                         Err(err) => app.status = err,
@@ -303,13 +303,13 @@ impl Commands {
                     } else {
                         match actor.load_session(session_id.clone()).await {
                             Ok(snapshot) => {
-                                app.apply_snapshot(&snapshot);
+                                app.save_snapshot(&snapshot);
                                 app.clear_messages();
                                 Input::reset_history_scroll(app);
                                 app.status = format!("Loaded session: {}", session.display_name());
                                 app.context_tokens = None;
                                 match actor.replay_history().await {
-                                    Ok(snapshot) => app.apply_snapshot(&snapshot),
+                                    Ok(snapshot) => app.save_snapshot(&snapshot),
                                     Err(err) => app.status = err,
                                 }
                                 return InputMode::PromptInput;
@@ -484,8 +484,8 @@ impl Commands {
 
                 match actor.set_model(selected_model.clone()).await {
                     Ok(snapshot) => {
-                        app.apply_snapshot(&snapshot);
-                        app.model = selected_model.clone();
+                        app.save_snapshot(&snapshot);
+                        app.snapshot.model = selected_model.clone();
                         let _ = RecentModelDef::add(selected_model);
                         Input::clear_input(app);
                         app.status = format!("Selected model: {}", selected_model.label());
@@ -689,8 +689,8 @@ impl Commands {
                 }
                 match actor.set_agent(selected_agent.clone()).await {
                     Ok(snapshot) => {
-                        app.apply_snapshot(&snapshot);
-                        app.agent_name = selected_agent.name.clone();
+                        app.save_snapshot(&snapshot);
+                        app.snapshot.agent_name = selected_agent.name.clone();
                         Input::clear_input(app);
                         app.status = format!("Selected agent: {}", selected_agent.name);
                         return InputMode::PromptInput;

@@ -41,7 +41,7 @@ impl Render {
             }
         }
 
-        if let Some(durr) = app.last_turn_duration {
+        if let Some(durr) = app.snapshot.turn_duration {
             block = block.title_bottom(Line::from(format_duration(durr)).right_aligned());
         }
 

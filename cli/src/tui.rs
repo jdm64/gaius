@@ -11,7 +11,6 @@ use crate::{
     harness::{Harness, HarnessEvent, HarnessSnapshot},
     harness_actor::{HarnessActorEvent, HarnessActorHandle},
     input::{Input, InputMode},
-    models::ModelDef,
     render::Render,
     render_history::DisplayPrefs,
     selection::Selection,
@@ -79,8 +78,7 @@ impl Drop for TerminalGuard {
 
 pub struct TuiApp {
     pub config: Config,
-    pub model: ModelDef,
-    pub agent_name: String,
+    pub snapshot: HarnessSnapshot,
     pub agents: Agents,
     pub input: String,
     pub input_cursor: usize,
@@ -90,7 +88,6 @@ pub struct TuiApp {
     pub status: String,
     pub mode: InputMode,
     pub context_tokens: Option<i32>,
-    pub total_cost: Option<f64>,
     pub display_prefs: DisplayPrefs,
     pub prompt_history: Vec<String>,
     pub prompt_history_idx: Option<usize>,
@@ -101,8 +98,6 @@ pub struct TuiApp {
     pub actor_busy: bool,
     pub queued_prompts: usize,
     pub question_answer_tx: Option<oneshot::Sender<String>>,
-    pub plan_mode_on: bool,
-    pub last_turn_duration: Option<u64>,
 }
 
 impl Default for TuiApp {
@@ -116,8 +111,7 @@ impl TuiApp {
         let agents = config.agents().clone();
         Self {
             config,
-            model: ModelDef::default(),
-            agent_name: String::new(),
+            snapshot: HarnessSnapshot::default(),
             agents,
             input: String::new(),
             input_cursor: 0,
@@ -127,7 +121,6 @@ impl TuiApp {
             status: "".to_string(),
             mode: InputMode::PromptInput,
             context_tokens: None,
-            total_cost: None,
             display_prefs: DisplayPrefs {
                 thinking: false,
                 token_info: true,
@@ -142,8 +135,6 @@ impl TuiApp {
             actor_busy: false,
             queued_prompts: 0,
             question_answer_tx: None,
-            plan_mode_on: false,
-            last_turn_duration: None,
         }
     }
 
@@ -155,7 +146,7 @@ impl TuiApp {
         }
         let mut latest_snapshot = harness.snapshot();
         let mut actor = HarnessActorHandle::new(harness);
-        self.apply_snapshot(&latest_snapshot);
+        self.save_snapshot(&latest_snapshot);
 
         let mut guard = TerminalGuard::enter()?;
         let mut terminal_events = EventStream::new();
@@ -259,7 +250,7 @@ impl TuiApp {
         prompt: String,
         actor: &HarnessActorHandle,
     ) -> Result<(), Box<dyn Error>> {
-        self.agents.mark_recent(&self.agent_name);
+        self.agents.mark_recent(&self.snapshot.agent_name);
         Input::update_prompt_history(self, prompt.clone());
         Input::clear_input(self);
         Input::reset_history_scroll(self);
@@ -308,7 +299,7 @@ impl TuiApp {
             }
             HarnessActorEvent::TurnFinished(snapshot) => {
                 self.actor_busy = false;
-                self.apply_snapshot(&snapshot);
+                self.save_snapshot(&snapshot);
                 self.status = if self.queued_prompts > 0 {
                     format!("Queued prompt ({} pending)", self.queued_prompts)
                 } else {
@@ -318,7 +309,7 @@ impl TuiApp {
             }
             HarnessActorEvent::RequestFailed(err, snapshot) => {
                 self.actor_busy = false;
-                self.apply_snapshot(&snapshot);
+                self.save_snapshot(&snapshot);
                 self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
                 Input::reset_history_scroll(self);
                 self.status = "Agent request failed".to_string();
@@ -404,12 +395,8 @@ impl TuiApp {
         }
     }
 
-    pub fn apply_snapshot(&mut self, snapshot: &HarnessSnapshot) {
-        self.model = snapshot.model.clone();
-        self.agent_name = snapshot.agent_name.clone();
-        self.plan_mode_on = snapshot.plan_mode_on;
-        self.total_cost = snapshot.total_cost;
-        self.last_turn_duration = snapshot.turn_duration;
+    pub fn save_snapshot(&mut self, snapshot: &HarnessSnapshot) {
+        self.snapshot = snapshot.clone();
     }
 
     pub fn harness_idle(&self) -> bool {
@@ -460,7 +447,7 @@ impl TuiApp {
                 let info = format_arrows(prompt, response);
                 self.append_token_info(info);
                 self.context_tokens = total;
-                self.total_cost = cost;
+                self.snapshot.total_cost = cost;
             }
             HarnessEvent::AskUser { .. } => {}
             HarnessEvent::TurnDuration(duration_ms) => {
@@ -556,7 +543,7 @@ impl TuiApp {
                 let info = format_arrows(prompt, response);
                 self.append_token_info(info);
                 self.context_tokens = total;
-                self.total_cost = cost;
+                self.snapshot.total_cost = cost;
             }
             HarnessEvent::AskUser {
                 title: _,

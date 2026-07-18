@@ -68,23 +68,24 @@ impl Render {
             app.selection
                 .highlight(lines, area, text_width, text_height, self.theme.selected);
 
-        let agent_label = if app.plan_mode_on {
-            format!("{}/plan", app.agent_name)
+        let snapshot = &app.snapshot;
+        let agent_label = if snapshot.plan_mode_on {
+            format!("{}/plan", snapshot.agent_name)
         } else {
-            app.agent_name.clone()
+            snapshot.agent_name.clone()
         };
 
         let parts: Vec<String> = [
-            Some(format!("Gaius - {} - {}", app.model.id, agent_label)),
+            Some(format!("Gaius - {} - {}", snapshot.model.id, agent_label)),
             app.context_tokens
-                .map(|tokens| match app.model.context_len {
+                .map(|tokens| match snapshot.model.context_len {
                     Some(context_len) if context_len > 0 => {
                         let pct = tokens as f64 / context_len as f64 * 100.0;
                         format!(" - {} {:.0}%", tokens, pct)
                     }
                     _ => format!(" - {}", tokens),
                 }),
-            app.total_cost.map(|cost| format!(" ${:.3}", cost)),
+            snapshot.total_cost.map(|cost| format!(" ${:.3}", cost)),
         ]
         .into_iter()
         .flatten()
