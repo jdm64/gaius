@@ -379,3 +379,88 @@ fn genai_rate_limit_false_for_non_genai_error() {
     let err = std::io::Error::new(std::io::ErrorKind::Other, "not a genai error");
     assert!(!is_rate_limit_error(&err));
 }
+
+#[test]
+fn genai_rate_limit_true_for_http_400_with_nested_429() {
+    let body = serde_json::json!({
+        "error": {
+            "message": "Provider returned error",
+            "code": 400,
+            "metadata": {
+                "previous_errors": [
+                    {"code": 429, "message": "Rate limit exceeded"}
+                ]
+            }
+        }
+    });
+    let err: GenaiError = GenaiError::HttpError {
+        status: StatusCode::BAD_REQUEST,
+        canonical_reason: "Bad Request".to_string(),
+        body: body.to_string(),
+    };
+    assert!(is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_false_for_http_400_with_nested_400() {
+    let body = serde_json::json!({
+        "error": {
+            "message": "Bad request",
+            "code": 400,
+            "metadata": {
+                "previous_errors": [
+                    {"code": 400, "message": "Invalid parameter"}
+                ]
+            }
+        }
+    });
+    let err: GenaiError = GenaiError::HttpError {
+        status: StatusCode::BAD_REQUEST,
+        canonical_reason: "Bad Request".to_string(),
+        body: body.to_string(),
+    };
+    assert!(!is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_false_for_http_400_without_previous_errors() {
+    let body = serde_json::json!({
+        "error": {
+            "message": "Bad request",
+            "code": 400
+        }
+    });
+    let err: GenaiError = GenaiError::HttpError {
+        status: StatusCode::BAD_REQUEST,
+        canonical_reason: "Bad Request".to_string(),
+        body: body.to_string(),
+    };
+    assert!(!is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_false_for_http_400_with_malformed_body() {
+    let err: GenaiError = GenaiError::HttpError {
+        status: StatusCode::BAD_REQUEST,
+        canonical_reason: "Bad Request".to_string(),
+        body: "not json".to_string(),
+    };
+    assert!(!is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_false_for_http_400_with_empty_previous_errors() {
+    let body = serde_json::json!({
+        "error": {
+            "metadata": {
+                "previous_errors": []
+            }
+        }
+    });
+    let err: GenaiError = GenaiError::HttpError {
+        status: StatusCode::BAD_REQUEST,
+        canonical_reason: "Bad Request".to_string(),
+        body: body.to_string(),
+    };
+    assert!(!is_rate_limit_error(&err));
+}
