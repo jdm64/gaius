@@ -27,6 +27,13 @@ impl HistoryPoint {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RowWrapInfo {
+    pub index: usize,
+    pub prefix: usize,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct HistorySelection {
     pub anchor: HistoryPoint,
     pub focus: HistoryPoint,
@@ -76,6 +83,7 @@ impl HistoryViewport {
 #[derive(Default)]
 pub struct Selection {
     pub lines: Vec<Line<'static>>,
+    pub row_info: Vec<RowWrapInfo>,
     pub viewport: HistoryViewport,
     pub selection: Option<HistorySelection>,
 }
@@ -84,6 +92,7 @@ impl Selection {
     pub fn highlight(
         &mut self,
         lines: Vec<Line<'static>>,
+        row_info: Vec<RowWrapInfo>,
         area: Rect,
         text_width: u16,
         text_height: u16,
@@ -94,6 +103,7 @@ impl Selection {
         self.viewport.width = text_width;
         self.viewport.height = text_height;
         self.lines = lines.clone();
+        self.row_info = row_info;
 
         let Some(selection) = self.selection.as_ref() else {
             return lines;
@@ -167,30 +177,49 @@ impl Selection {
             return None;
         }
 
-        let last_row = (end.row as usize).min(self.lines.len().saturating_sub(1));
-        let mut selected = Vec::new();
+        let last_row = (end.row as usize)
+            .min(self.lines.len().saturating_sub(1))
+            .min(self.row_info.len().saturating_sub(1));
+        let mut result = String::new();
+        let mut prev_index: Option<usize> = None;
 
         for row in start.row as usize..=last_row {
-            let text = line_plain_text(&self.lines[row]);
-            let line_len = text.chars().count();
+            let info = &self.row_info[row];
+            let line_len = info.content.chars().count();
+            let prefix = info.prefix;
+
             let from = if row == start.row as usize {
-                (start.col as usize).min(line_len)
+                let adjusted = (start.col as usize).saturating_sub(prefix);
+                adjusted.min(line_len)
             } else {
                 0
             };
+
             let to = if row == end.row as usize {
-                (end.col as usize).min(line_len)
+                let adjusted = (end.col as usize).saturating_sub(prefix);
+                adjusted.min(line_len)
             } else {
                 line_len
             };
 
-            if from <= to {
-                selected.push(char_slice(&text, from, to));
+            if prev_index != Some(info.index) {
+                if prev_index.is_some() {
+                    result.push('\n');
+                }
+                prev_index = Some(info.index);
+            }
+
+            if from < to {
+                let piece = char_slice(&info.content, from, to);
+                result.push_str(&piece);
             }
         }
 
-        let text = selected.join("\n");
-        if text.is_empty() { None } else { Some(text) }
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
     }
 
     fn get_point(&self, mouse: MouseEvent) -> Option<HistoryPoint> {
@@ -277,13 +306,6 @@ fn highlight_spans(
     }
 
     result
-}
-
-fn line_plain_text(line: &Line<'_>) -> String {
-    line.spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect()
 }
 
 fn char_slice(text: &str, from: usize, to: usize) -> String {

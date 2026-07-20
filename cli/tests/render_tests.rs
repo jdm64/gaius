@@ -2,7 +2,7 @@ use gaius::config::Config;
 use gaius::diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView};
 use gaius::render::Render;
 use gaius::render_history::DisplayPrefs;
-use gaius::selection::{HistoryPoint, HistorySelection, Selection};
+use gaius::selection::{HistoryPoint, HistorySelection, RowWrapInfo, Selection};
 use gaius::tui::{TuiApp, TuiMessage};
 use ratatui::{
     Terminal,
@@ -85,7 +85,7 @@ fn visible_history_lines_returns_bottom_window() {
             owned
         })
         .collect();
-    let visible = render.visible_history_lines(&lines, 20, 2, 2);
+    let (visible, _row_infos) = render.visible_history_lines(&lines, 20, 2, 2);
 
     assert_eq!(line_texts(&visible), vec!["three", "four"]);
 }
@@ -108,7 +108,7 @@ fn visible_history_lines_slices_wrapped_lines() {
             owned
         })
         .collect();
-    let visible = render.visible_history_lines(&lines, 2, 1, 3);
+    let (visible, _row_infos) = render.visible_history_lines(&lines, 2, 1, 3);
 
     assert_eq!(line_texts(&visible), vec!["cd", "ef", "gh"]);
 }
@@ -116,7 +116,7 @@ fn visible_history_lines_slices_wrapped_lines() {
 #[test]
 fn visible_history_lines_handles_empty_history() {
     let render = Render::new();
-    let visible = render.visible_history_lines(&[], 20, 0, 5);
+    let (visible, _row_infos) = render.visible_history_lines(&[], 20, 0, 5);
 
     assert!(visible.is_empty());
 }
@@ -129,7 +129,7 @@ fn visible_history_lines_pads_user_prompts_to_width() {
         &default_prefs(),
     );
 
-    let visible = render.visible_history_lines(&lines, 10, 0, 3);
+    let (visible, _row_infos) = render.visible_history_lines(&lines, 10, 0, 3);
 
     assert_eq!(visible.len(), 3);
     assert_eq!(visible[0].width(), 10);
@@ -144,6 +144,11 @@ fn visible_history_lines_pads_user_prompts_to_width() {
 fn selected_history_text_returns_single_line_partial_selection() {
     let selection = Selection {
         lines: vec![Line::from("abcdef")],
+        row_info: vec![RowWrapInfo {
+            index: 0,
+            prefix: 0,
+            content: "abcdef".to_string(),
+        }],
         selection: Some(HistorySelection {
             anchor: HistoryPoint { row: 0, col: 1 },
             focus: HistoryPoint { row: 0, col: 4 },
@@ -163,6 +168,23 @@ fn selected_history_text_returns_multi_line_selection_with_clipped_edges() {
             Line::from("ghijkl"),
             Line::from("mnopqr"),
         ],
+        row_info: vec![
+            RowWrapInfo {
+                index: 0,
+                prefix: 0,
+                content: "abcdef".to_string(),
+            },
+            RowWrapInfo {
+                index: 1,
+                prefix: 0,
+                content: "ghijkl".to_string(),
+            },
+            RowWrapInfo {
+                index: 2,
+                prefix: 0,
+                content: "mnopqr".to_string(),
+            },
+        ],
         selection: Some(HistorySelection {
             anchor: HistoryPoint { row: 0, col: 2 },
             focus: HistoryPoint { row: 2, col: 3 },
@@ -181,6 +203,18 @@ fn selected_history_text_returns_multi_line_selection_with_clipped_edges() {
 fn selected_history_text_normalizes_reversed_drag_direction() {
     let selection = Selection {
         lines: vec![Line::from("abcdef"), Line::from("ghijkl")],
+        row_info: vec![
+            RowWrapInfo {
+                index: 0,
+                prefix: 0,
+                content: "abcdef".to_string(),
+            },
+            RowWrapInfo {
+                index: 1,
+                prefix: 0,
+                content: "ghijkl".to_string(),
+            },
+        ],
         selection: Some(HistorySelection {
             anchor: HistoryPoint { row: 1, col: 2 },
             focus: HistoryPoint { row: 0, col: 3 },

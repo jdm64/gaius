@@ -5,6 +5,7 @@
 use crate::{
     diff_view::{DiffLineKind, DiffView},
     render::{Render, format_duration},
+    selection::RowWrapInfo,
     tools::ToolName,
     tui::{TuiApp, TuiMessage, wrapped_line_count},
 };
@@ -64,9 +65,14 @@ impl Render {
             text_height as usize,
         );
 
-        let lines =
-            app.selection
-                .highlight(lines, area, text_width, text_height, self.theme.selected);
+        let lines = app.selection.highlight(
+            lines.0,
+            lines.1,
+            area,
+            text_width,
+            text_height,
+            self.theme.selected,
+        );
 
         let snapshot = &app.snapshot;
         let agent_label = if snapshot.plan_mode_on {
@@ -339,36 +345,57 @@ impl Render {
         width: u16,
         start: usize,
         height: usize,
-    ) -> Vec<Line<'static>> {
+    ) -> (Vec<Line<'static>>, Vec<RowWrapInfo>) {
         let mut visible = Vec::with_capacity(height);
+        let mut row_infos = Vec::with_capacity(height);
         let mut wrapped_index = 0usize;
         let end = start.saturating_add(height);
 
-        for line in lines {
+        for (index, line) in lines.iter().enumerate() {
             if Self::is_user_prompt_line(line) {
                 let content_line = Self::strip_user_prompt_prefix(line);
                 for wrapped in Self::wrap_line(&content_line, width - 3) {
-                    let line = self.format_user_prompt_line(wrapped, width);
-                    if Self::push_visible_line(&mut visible, line, &mut wrapped_index, start, end) {
-                        return visible;
-                    }
-                }
-            } else {
-                for wrapped in Self::wrap_line(line, width) {
+                    let row_info = RowWrapInfo {
+                        index,
+                        prefix: 2,
+                        content: Self::line_plain_text(&wrapped),
+                    };
+                    let formatted = self.format_user_prompt_line(wrapped, width);
                     if Self::push_visible_line(
                         &mut visible,
-                        wrapped,
+                        &mut row_infos,
+                        formatted,
+                        row_info,
                         &mut wrapped_index,
                         start,
                         end,
                     ) {
-                        return visible;
+                        return (visible, row_infos);
+                    }
+                }
+            } else {
+                for wrapped in Self::wrap_line(line, width) {
+                    let row_info = RowWrapInfo {
+                        index,
+                        prefix: 0,
+                        content: Self::line_plain_text(&wrapped),
+                    };
+                    if Self::push_visible_line(
+                        &mut visible,
+                        &mut row_infos,
+                        wrapped,
+                        row_info,
+                        &mut wrapped_index,
+                        start,
+                        end,
+                    ) {
+                        return (visible, row_infos);
                     }
                 }
             }
         }
 
-        visible
+        (visible, row_infos)
     }
 
     fn owned_line(line: Line<'_>) -> Line<'static> {
@@ -422,13 +449,16 @@ impl Render {
 
     fn push_visible_line(
         visible: &mut Vec<Line<'static>>,
+        row_infos: &mut Vec<RowWrapInfo>,
         line: Line<'static>,
+        row_info: RowWrapInfo,
         wrapped_index: &mut usize,
         start: usize,
         end: usize,
     ) -> bool {
         if *wrapped_index >= start && *wrapped_index < end {
             visible.push(line);
+            row_infos.push(row_info);
         }
         *wrapped_index += 1;
         *wrapped_index >= end
@@ -467,5 +497,12 @@ impl Render {
             })
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    fn line_plain_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
     }
 }
