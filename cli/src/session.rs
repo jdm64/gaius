@@ -13,7 +13,7 @@ use std::{error::Error, fs::File, io::BufReader, path::Path};
 use uuid::Uuid;
 
 pub struct SessionFile {
-    _id: i32,
+    _ver: i32,
     name: String,
     messages: Option<Vec<ChatMessage>>,
     token_usage: Option<TokenUsageLedger>,
@@ -73,7 +73,7 @@ impl Session {
         }
 
         Ok(SessionFile {
-            _id: version,
+            _ver: version,
             name,
             messages,
             token_usage,

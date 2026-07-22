@@ -6,8 +6,10 @@ use crate::{
     agents::AgentDefinition,
     config::Config,
     diff_view::DiffView,
+    history_replay,
     models::ModelDef,
     plan_hook::PlanHook,
+    rate_limit::is_rate_limit_error,
     render::Render,
     session::Session,
     skills::{Skill, SkillRepo},
@@ -15,16 +17,13 @@ use crate::{
     tools::{ToolEngine, ToolResult},
 };
 use futures::StreamExt;
-use genai::Error as GenaiError;
-use genai::webc::Error as WebcError;
 use genai::{
     Client,
     chat::{
-        ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, ContentPart, CustomPart,
+        ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ContentPart, CustomPart,
         MessageContent, ToolCall, ToolResponse,
     },
 };
-use reqwest::StatusCode;
 use serde_json::json;
 use std::{
     error::Error,
@@ -323,121 +322,8 @@ impl Harness {
     where
         F: FnMut(HarnessEvent),
     {
-        Self::replay_messages(&self.history.messages, &self.token_usage, on_event);
+        history_replay::replay_messages(&self.history.messages, &self.token_usage, on_event);
         self.update_session_info();
-    }
-
-    pub fn replay_messages<F>(
-        history: &[ChatMessage],
-        token_usage: &TokenUsageLedger,
-        mut on_event: F,
-    ) where
-        F: FnMut(HarnessEvent),
-    {
-        let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
-        let mut messages = history.iter().enumerate().peekable();
-
-        while let Some((index, message)) = messages.next() {
-            match message.role {
-                ChatRole::User => {
-                    pending_tool_calls.clear();
-                    let text = message.content.texts().join("");
-                    if !text.is_empty() {
-                        if has_plan_marker(message) {
-                            on_event(HarnessEvent::PlanMessage(text));
-                        } else {
-                            on_event(HarnessEvent::UserPrompt(text));
-                        }
-                    }
-                    token_usage.emit_usage(index, &mut on_event);
-                }
-                ChatRole::Assistant => {
-                    let text = message.content.texts().join("");
-
-                    // Emit any stored thinking/reasoning content first
-                    for part in message.content.parts() {
-                        match part {
-                            ContentPart::ThoughtSignature(text)
-                            | ContentPart::ReasoningContent(text)
-                                if !text.is_empty() =>
-                            {
-                                on_event(HarnessEvent::Thinking(text.clone()));
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    // Collect pending tool calls from this assistant turn
-                    for tc in message.content.tool_calls() {
-                        pending_tool_calls.push((tc.fn_name.clone(), tc.fn_arguments.to_string()));
-                    }
-
-                    if !text.is_empty() {
-                        on_event(HarnessEvent::AgentMessage(text));
-                    }
-                    token_usage.emit_usage(index, &mut on_event);
-
-                    // Match consecutive Tool-role response messages to the pending
-                    // tool calls in order.
-                    loop {
-                        let is_tool = match messages.peek() {
-                            Some((_, m)) => m.role == ChatRole::Tool,
-                            None => false,
-                        };
-                        if !is_tool {
-                            break;
-                        }
-                        let (next_index, next_msg) = messages.next().unwrap();
-                        let responses: Vec<&genai::chat::ToolResponse> =
-                            next_msg.content.tool_responses();
-                        let tool_error = is_tool_error(next_msg);
-                        for resp in responses {
-                            if let Some((name, args)) = pending_tool_calls.first() {
-                                on_event(HarnessEvent::ToolCall {
-                                    name: (*name).clone(),
-                                    arguments: (*args).clone(),
-                                    result: resp.content.clone(),
-                                    error: tool_error,
-                                });
-                                pending_tool_calls.remove(0);
-                            }
-                        }
-                        emit_diff_markers(next_msg, &mut on_event);
-                        token_usage.emit_usage(next_index, &mut on_event);
-                    }
-
-                    // Any remaining unmatched calls — emit with empty result so
-                    // the UI always renders something.
-                    for (name, args) in pending_tool_calls.drain(..) {
-                        on_event(HarnessEvent::ToolCall {
-                            name,
-                            arguments: args,
-                            result: String::new(),
-                            error: false,
-                        });
-                    }
-                }
-                ChatRole::Tool => {
-                    // Unmatched tool response — display inline as agent text.
-                    let text = message.content.texts().join("");
-                    if !text.is_empty() {
-                        on_event(HarnessEvent::AgentMessage(text));
-                    }
-                    for tr in message.content.tool_responses() {
-                        on_event(HarnessEvent::AgentMessage(format!(
-                            "[tool {}]: {}",
-                            tr.call_id, tr.content
-                        )));
-                    }
-                    emit_diff_markers(message, &mut on_event);
-                    token_usage.emit_usage(index, &mut on_event);
-                }
-                ChatRole::System => {
-                    pending_tool_calls.clear();
-                    token_usage.emit_usage(index, &mut on_event);
-                }
-            }
-        }
     }
 
     pub async fn run_turn<F>(
@@ -798,76 +684,6 @@ impl Harness {
         self.session.save(&self.history, &self.token_usage)?;
         self.update_session_info();
         Ok(())
-    }
-}
-
-pub fn is_rate_limit_error(err: &(dyn Error + 'static)) -> bool {
-    let Some(genai_err) = err.downcast_ref::<GenaiError>() else {
-        return false;
-    };
-    match genai_err {
-        GenaiError::HttpError { status, body, .. } => {
-            *status == StatusCode::TOO_MANY_REQUESTS
-                || (status.is_client_error() && body_has_nested_rate_limit(body))
-        }
-        GenaiError::WebAdapterCall { webc_error, .. }
-        | GenaiError::WebModelCall { webc_error, .. } => is_webc_rate_limit(webc_error),
-        GenaiError::WebStream {
-            error: webc_error, ..
-        } => is_rate_limit_error(webc_error.as_ref()),
-        _ => false,
-    }
-}
-
-fn body_has_nested_rate_limit(body: &str) -> bool {
-    let Ok(val) = serde_json::from_str::<serde_json::Value>(body) else {
-        return false;
-    };
-    val.get("error")
-        .and_then(|e| e.get("metadata"))
-        .and_then(|m| m.get("previous_errors"))
-        .and_then(|pe| pe.as_array())
-        .is_some_and(|errors| {
-            errors.iter().any(|pe| {
-                pe.get("code")
-                    .and_then(|c| c.as_i64())
-                    .is_some_and(|code| code == 429)
-            })
-        })
-}
-
-pub fn is_webc_rate_limit(webc_err: &WebcError) -> bool {
-    matches!(
-        webc_err,
-        WebcError::ResponseFailedStatus { status, .. } if *status == StatusCode::TOO_MANY_REQUESTS
-    )
-}
-
-fn is_tool_error(message: &ChatMessage) -> bool {
-    message.content.custom_parts().iter().any(|part| {
-        part.data
-            .as_object()
-            .is_some_and(|obj: &serde_json::Map<String, serde_json::Value>| {
-                obj.get("tool_error") == Some(&json!(true))
-            })
-    })
-}
-
-fn has_plan_marker(message: &ChatMessage) -> bool {
-    matches!(
-        message.content.parts().first(),
-        Some(ContentPart::Custom(CustomPart { data, .. })) if data == &json!("plan")
-    )
-}
-
-fn emit_diff_markers<F>(message: &ChatMessage, on_event: &mut F)
-where
-    F: FnMut(HarnessEvent),
-{
-    for part in message.content.custom_parts() {
-        if let Some(diff) = DiffView::from_marker(&part.data) {
-            on_event(HarnessEvent::DiffView(diff));
-        }
     }
 }
 

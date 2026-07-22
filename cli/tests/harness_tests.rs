@@ -1,7 +1,9 @@
 use gaius::{
     agents::AgentDefinition,
     diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
-    harness::{Harness, HarnessEvent, is_rate_limit_error, is_webc_rate_limit},
+    harness::{Harness, HarnessEvent},
+    history_replay,
+    rate_limit::{is_rate_limit_error, is_webc_rate_limit},
     token_usage::{TokenUsageLedger, TokenUsageSpan},
 };
 use genai::Error as GenaiError;
@@ -24,7 +26,7 @@ fn basic_agent() -> AgentDefinition {
 fn replay_events(messages: Vec<ChatMessage>) -> Vec<HarnessEvent> {
     let mut events = Vec::new();
     let usage = TokenUsageLedger::default();
-    Harness::replay_messages(&messages, &usage, |event| events.push(event));
+    history_replay::replay_messages(&messages, &usage, |event| events.push(event));
     events
 }
 
