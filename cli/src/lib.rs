@@ -3,6 +3,7 @@
  */
 
 pub mod agents;
+pub mod cancel_handle;
 pub mod cli_prompt;
 pub mod commands;
 pub mod config;

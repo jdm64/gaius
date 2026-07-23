@@ -9,7 +9,6 @@ use crate::{
     skills::Skill,
     token_usage::SessionInfo,
 };
-use std::sync::atomic::Ordering;
 use tokio::sync::{
     mpsc,
     oneshot::{self, error::RecvError},
@@ -288,7 +287,7 @@ async fn run_turn(
             cmd = command_rx.recv() => {
                 match cmd {
                     Some(HarnessCommand::Cancel) => {
-                        cancel_flag.store(true, Ordering::Relaxed);
+                        cancel_flag.cancel();
                     }
                     Some(HarnessCommand::Info { reply_tx }) => {
                         let _ = reply_tx.send(Ok(info_ref.lock().unwrap().clone()));

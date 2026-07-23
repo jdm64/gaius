@@ -4,6 +4,7 @@
 
 use crate::{
     agents::AgentDefinition,
+    cancel_handle::CancelHandle,
     config::Config,
     diff_view::DiffView,
     history_replay,
@@ -21,16 +22,13 @@ use genai::{
     Client,
     chat::{
         ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ContentPart, CustomPart,
-        MessageContent, ToolCall, ToolResponse,
+        MessageContent, StreamEnd, ToolCall, ToolResponse,
     },
 };
 use serde_json::json;
 use std::{
     error::Error,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::time;
@@ -91,7 +89,7 @@ pub struct Harness {
     token_usage: TokenUsageLedger,
     live_info: Arc<Mutex<SessionInfo>>,
     streaming: bool,
-    canceled: Arc<AtomicBool>,
+    cancel: CancelHandle,
     last_plan_content: Option<String>,
     plan_mode_on: bool,
     turn_start: Option<u64>,
@@ -142,7 +140,7 @@ impl Harness {
             session,
             token_usage,
             streaming: true,
-            canceled: Arc::new(AtomicBool::new(false)),
+            cancel: CancelHandle::new(),
             last_plan_content: None,
             plan_mode_on: false,
             live_info,
@@ -213,15 +211,19 @@ impl Harness {
     }
 
     fn is_cancel(&self) -> bool {
-        self.canceled.load(Ordering::Relaxed)
+        self.cancel.is_cancel()
     }
 
     pub fn set_cancel(&self, val: bool) {
-        self.canceled.store(val, Ordering::Relaxed);
+        if val {
+            self.cancel.cancel();
+        } else {
+            self.cancel.reset();
+        }
     }
 
-    pub fn cancel_handle(&self) -> Arc<AtomicBool> {
-        self.canceled.clone()
+    pub fn cancel_handle(&self) -> CancelHandle {
+        self.cancel.clone()
     }
 
     pub async fn set_model(&mut self, model: ModelDef) -> Result<(), Box<dyn Error>> {
@@ -472,32 +474,24 @@ impl Harness {
 
         let mut stream_end = None;
         let mut emitted_text = false;
-        while let Some(event) = response.stream.next().await {
-            match event? {
-                ChatStreamEvent::Chunk(chunk) => {
-                    if !chunk.content.is_empty() {
-                        emitted_text = true;
-                        on_event(HarnessEvent::AgentMessage(chunk.content));
+        loop {
+            tokio::select! {
+                event = response.stream.next() => {
+                    match event {
+                        Some(Ok(event)) => {
+                            emitted_text |= Self::handle_stream_event(
+                                event, on_event, &mut stream_end,
+                            );
+                        }
+                        Some(Err(err)) => return Err(err.into()),
+                        None => break,
                     }
                 }
-                ChatStreamEvent::ReasoningChunk(chunk) => {
-                    if !chunk.content.is_empty() {
-                        on_event(HarnessEvent::Thinking(chunk.content));
+                _ = self.cancel.notified() => {
+                    if self.is_cancel() {
+                        return Ok(vec![]);
                     }
                 }
-                ChatStreamEvent::ThoughtSignatureChunk(chunk) => {
-                    if !chunk.content.is_empty() {
-                        on_event(HarnessEvent::Thinking(chunk.content));
-                    }
-                }
-                ChatStreamEvent::End(end) => {
-                    stream_end = Some(end);
-                }
-                ChatStreamEvent::Start | ChatStreamEvent::ToolCallChunk(_) => {}
-            }
-
-            if self.is_cancel() {
-                return Ok(vec![]);
             }
         }
 
@@ -528,6 +522,43 @@ impl Harness {
         }
 
         Ok(content.into_tool_calls())
+    }
+
+    fn handle_stream_event<F>(
+        event: ChatStreamEvent,
+        on_event: &mut F,
+        stream_end: &mut Option<StreamEnd>,
+    ) -> bool
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        match event {
+            ChatStreamEvent::Chunk(chunk) => {
+                if !chunk.content.is_empty() {
+                    on_event(HarnessEvent::AgentMessage(chunk.content));
+                    true
+                } else {
+                    false
+                }
+            }
+            ChatStreamEvent::ReasoningChunk(chunk) => {
+                if !chunk.content.is_empty() {
+                    on_event(HarnessEvent::Thinking(chunk.content));
+                }
+                false
+            }
+            ChatStreamEvent::ThoughtSignatureChunk(chunk) => {
+                if !chunk.content.is_empty() {
+                    on_event(HarnessEvent::Thinking(chunk.content));
+                }
+                false
+            }
+            ChatStreamEvent::End(end) => {
+                *stream_end = Some(end);
+                false
+            }
+            ChatStreamEvent::Start | ChatStreamEvent::ToolCallChunk(_) => false,
+        }
     }
 
     async fn send_request_waiting<F>(
