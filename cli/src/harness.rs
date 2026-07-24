@@ -122,16 +122,13 @@ impl Harness {
             None => Session::new_empty(),
         };
 
-        let (mut history, token_usage) = session.load()?;
-        history.tools = Some(tool_engine.build_tools_without_plan());
-        apply_agent_prompt(&mut history, &agent);
-
+        let (history, token_usage) = session.load()?;
         let live_info = Arc::new(Mutex::new(SessionInfo {
             id: session.id.clone(),
             usage: token_usage.usage(),
         }));
 
-        Ok(Self {
+        let mut harness = Self {
             history,
             client: Client::default(),
             tool_engine,
@@ -145,7 +142,11 @@ impl Harness {
             plan_mode_on: false,
             live_info,
             turn_start: None,
-        })
+        };
+
+        harness.rebuild_agent();
+
+        Ok(harness)
     }
 
     pub fn session_id(&self) -> Option<String> {
@@ -237,8 +238,8 @@ impl Harness {
     }
 
     pub fn set_agent(&mut self, agent: AgentDefinition) {
-        apply_agent_prompt(&mut self.history, &agent);
         self.agent = agent;
+        self.rebuild_agent();
     }
 
     pub fn new_session(&mut self) -> Result<(), Box<dyn Error>> {
@@ -257,7 +258,7 @@ impl Harness {
         self.history.tools = Some(self.tool_engine.build_tools());
         self.last_plan_content = None;
         self.update_session_info();
-        apply_agent_prompt(&mut self.history, &self.agent);
+        self.rebuild_agent();
         Ok(())
     }
 
@@ -716,15 +717,6 @@ impl Harness {
         self.update_session_info();
         Ok(())
     }
-}
-
-fn apply_agent_prompt(history: &mut ChatRequest, agent: &AgentDefinition) {
-    let prompt = agent.prompt.trim();
-    history.system = if prompt.is_empty() {
-        None
-    } else {
-        Some(agent.prompt.clone())
-    };
 }
 
 fn time_now() -> u64 {
