@@ -5,17 +5,10 @@
 use crate::harness::{Harness, HarnessEvent};
 
 const CLEAR_OPTION: &str = "Clear Context";
-const CLEAR_STOP_OPTION: &str = "Clear Context & Stop";
 const KEEP_OPTION: &str = "Keep Context";
-const KEEP_STOP_OPTION: &str = "Keep Context & Stop";
 const REFINE_OPTION: &str = "Refine Plan";
-const HOOK_OPTIONS: [&str; 5] = [
-    KEEP_OPTION,
-    KEEP_STOP_OPTION,
-    CLEAR_OPTION,
-    CLEAR_STOP_OPTION,
-    REFINE_OPTION,
-];
+const STOP_OPTION: &str = "Stop";
+const HOOK_OPTIONS: [&str; 4] = [KEEP_OPTION, CLEAR_OPTION, REFINE_OPTION, STOP_OPTION];
 const QUESTION_TITLE: &str = "How to proceed with the plan?";
 
 const SYSTEM_PROMPT: &str =
@@ -26,10 +19,9 @@ const IMPLEMENT_DETAILS_PROMPT: &str = "Implement the plan with the following ch
 
 pub enum PlanHook {
     Clear(String),
-    ClearStop(String),
     Keep(String),
-    KeepStop(String),
     Refine(String),
+    Stop,
 }
 
 impl PlanHook {
@@ -39,10 +31,9 @@ impl PlanHook {
 
         match option.trim() {
             CLEAR_OPTION => Some(Self::Clear(details.to_string())),
-            CLEAR_STOP_OPTION => Some(Self::ClearStop(details.to_string())),
             KEEP_OPTION => Some(Self::Keep(details.to_string())),
-            KEEP_STOP_OPTION => Some(Self::KeepStop(details.to_string())),
             REFINE_OPTION => Some(Self::Refine(details.to_string())),
+            STOP_OPTION => Some(Self::Stop),
             _ => None,
         }
     }
@@ -79,32 +70,30 @@ impl PlanHook {
         };
 
         let mode = Self::from_str(answer.as_str());
-        let is_stop = matches!(mode, Some(Self::ClearStop(_)) | Some(Self::KeepStop(_)));
         match mode {
-            Some(Self::Clear(details)) | Some(Self::ClearStop(details)) => {
+            Some(Self::Clear(details)) => {
                 harness.clear_context();
                 harness.send_user_message(Self::user_prompt(details), &mut on_event);
                 harness.send_plan_message(plan_text, &mut on_event);
             }
-            Some(Self::Keep(details)) | Some(Self::KeepStop(details)) => {
+            Some(Self::Keep(details)) => {
                 harness.send_user_message(Self::user_prompt(details), &mut on_event);
             }
             Some(Self::Refine(details)) => {
-                if details.is_empty() {
-                    return true;
-                } else {
+                let has_details = !details.is_empty();
+                if has_details {
                     let prompt = format!("{} {}", REFINE_PROMPT, details);
                     harness.send_user_message(prompt, &mut on_event);
-                    return false;
                 }
+                return !has_details; // no details, stop and let user explain
             }
-            None => {
-                return false;
+            None | Some(Self::Stop) => {
+                return true;
             }
         }
 
         harness.set_plan_mode(false);
 
-        is_stop
+        false
     }
 }
