@@ -9,7 +9,13 @@ use crate::{
 use genai::chat::{ChatMessage, ChatRequest, ChatRole, MessageContent};
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fs::File, io::BufReader, path::Path};
+use std::{
+    env::current_dir,
+    error::Error,
+    fs::{self, File},
+    io::BufReader,
+    path::Path,
+};
 use uuid::Uuid;
 
 pub struct SessionFile {
@@ -201,6 +207,34 @@ impl Session {
             .or(self.id.as_deref())
             .unwrap_or("<none>")
             .to_string()
+    }
+
+    pub fn export(&self) -> Result<String, Box<dyn Error>> {
+        let Some(session_id) = &self.id else {
+            return Err("Cannot export a session without an id".into());
+        };
+
+        let path = Dirs::session_file(session_id.as_str())?;
+        if !path.is_file() {
+            return Err("Session file not found".into());
+        }
+
+        let data = Self::deserialize_session(path.as_path(), true)?;
+
+        let export_path = current_dir()?.join(format!("{}.json", session_id));
+        let export_data = serde_json::json!({
+            "version": data._ver,
+            "name": data.name,
+            "messages": data.messages,
+            "token_usage": data.token_usage,
+        });
+
+        let json = serde_json::to_string_pretty(&export_data)?;
+        fs::write(&export_path, &json)?;
+
+        Ok(export_path
+            .file_name()
+            .map_or(session_id.clone(), |f| f.to_string_lossy().to_string()))
     }
 
     fn derived_name(history: &ChatRequest) -> String {

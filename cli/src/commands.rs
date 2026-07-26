@@ -354,6 +354,21 @@ impl Commands {
                 app.status = "Rename session".to_string();
                 return InputMode::SessionRename { picker };
             }
+            KeyCode::Char('o')
+                if key.modifiers.contains(KeyModifiers::CONTROL) && !picker.is_empty() =>
+            {
+                let Some(session) = picker.selected_row() else {
+                    return InputMode::Session { picker };
+                };
+                match session.export() {
+                    Ok(path) => {
+                        app.status = format!("Exported session to {}", path);
+                    }
+                    Err(e) => {
+                        app.status = format!("Error exporting session: {}", e);
+                    }
+                }
+            }
             _ => {}
         };
 

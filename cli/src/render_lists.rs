@@ -79,6 +79,7 @@ impl Render {
                 ("Enter", "load"),
                 ("Ctrl+E", "rename"),
                 ("Ctrl+D", "delete"),
+                ("Ctrl+O", "export"),
                 ("Esc", "close"),
             ])
         }
