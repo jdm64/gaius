@@ -102,12 +102,12 @@ impl ToolName {
                         "start_line": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Optional one-based line number to start reading from"
+                            "description": "one-based line number to start reading from; defaults to 1"
                         },
                         "max_lines": {
                             "type": "integer",
                             "minimum": 0,
-                            "description": "Optional maximum number of lines to read"
+                            "description": "maximum number of lines to read; 0 or omitted reads the entire file"
                         }
                     },
                     "required": ["file_path"]
@@ -328,6 +328,7 @@ impl ToolEngine {
         };
         let max_lines = match args.get("max_lines") {
             Some(value) => match value.as_u64() {
+                Some(0) => None,
                 Some(lines) => Some(lines as usize),
                 _ => {
                     return ToolResult::Error(
