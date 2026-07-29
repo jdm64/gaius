@@ -3,6 +3,7 @@
  */
 
 use crate::{
+    harness::time_now,
     input::InputMode,
     render::{Render, format_duration},
     tui::TuiApp,
@@ -41,8 +42,10 @@ impl Render {
             }
         }
 
-        if let Some(durr) = app.snapshot.turn_duration {
-            block = block.title_bottom(Line::from(format_duration(durr)).right_aligned());
+        if let Some(turn_started) = app.snapshot.turn_started {
+            let elapsed = time_now().saturating_sub(turn_started);
+            let time_title = format!(" {} ", format_duration(elapsed));
+            block = block.title_bottom(Line::from(time_title).right_aligned());
         }
 
         let input = Paragraph::new(Text::from(lines))

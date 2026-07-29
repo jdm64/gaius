@@ -77,7 +77,6 @@ pub enum HarnessActorEvent {
         options: Vec<String>,
         answer_tx: oneshot::Sender<String>,
     },
-    TurnStarted,
     TurnFinished(HarnessSnapshot),
     RequestFailed(String, HarnessSnapshot),
     HistoryReplayed(Vec<HarnessEvent>),
@@ -252,8 +251,6 @@ async fn run_turn(
     event_tx: &mpsc::UnboundedSender<HarnessActorEvent>,
     request: UserRequest,
 ) -> Result<(), String> {
-    let _ = event_tx.send(HarnessActorEvent::TurnStarted);
-
     let info_ref = harness.session_info();
     let cancel_flag = harness.cancel_handle();
 

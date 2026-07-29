@@ -185,7 +185,7 @@ impl Render {
 
 pub fn format_duration(duration_ms: u64) -> String {
     if duration_ms < 60_000 {
-        return format!("⏱  {:.3}s", duration_ms as f64 / 1000.0);
+        return format!("⏱ {:.3}s", duration_ms as f64 / 1000.0);
     }
 
     let total_seconds = duration_ms / 1000;
@@ -194,8 +194,8 @@ pub fn format_duration(duration_ms: u64) -> String {
     let seconds = total_seconds % 60;
 
     if hours > 0 {
-        format!("⏱  {:01}:{:02}:{:02}", hours, minutes, seconds)
+        format!("⏱ {:01}:{:02}:{:02}", hours, minutes, seconds)
     } else {
-        format!("⏱  {:01}:{:02}", minutes, seconds)
+        format!("⏱ {:01}:{:02}", minutes, seconds)
     }
 }

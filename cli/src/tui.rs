@@ -8,7 +8,7 @@ use crate::{
     config::Config,
     diff_view::DiffView,
     dirs::Dirs,
-    harness::{Harness, HarnessEvent, HarnessSnapshot},
+    harness::{Harness, HarnessEvent, HarnessSnapshot, time_now},
     harness_actor::{HarnessActorEvent, HarnessActorHandle},
     input::{Input, InputMode},
     render::Render,
@@ -30,8 +30,13 @@ use std::{
     error::Error,
     fs,
     io::{self, Stdout},
+    time::Duration,
 };
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, time};
+
+const DRAW_DELAY: u64 = 250;
+const MAX_FPS: u64 = 60;
+const FRAME_INTERVAL_MS: u64 = 1000 / MAX_FPS;
 
 #[derive(Clone)]
 pub enum TuiMessage {
@@ -150,8 +155,10 @@ impl TuiApp {
 
         let mut guard = TerminalGuard::enter()?;
         let mut terminal_events = EventStream::new();
+        let mut redraw_timer = time::interval(Duration::from_millis(DRAW_DELAY));
         let render = Render::new();
         guard.terminal.draw(|frame| render.draw(self, frame))?;
+        let mut last_draw = time_now();
 
         loop {
             tokio::select! {
@@ -169,13 +176,17 @@ impl TuiApp {
                         latest_snapshot = snapshot;
                     }
                 }
+                _ = redraw_timer.tick(), if self.actor_busy => {}
             }
 
             if let InputMode::Exit = self.mode {
                 break;
             }
 
-            guard.terminal.draw(|frame| render.draw(self, frame))?;
+            if time_now() - last_draw >= FRAME_INTERVAL_MS {
+                guard.terminal.draw(|frame| render.draw(self, frame))?;
+                last_draw = time_now();
+            }
         }
 
         if self.actor_busy {
@@ -289,12 +300,6 @@ impl TuiApp {
                     options,
                     selected: 0,
                 };
-                None
-            }
-            HarnessActorEvent::TurnStarted => {
-                self.actor_busy = true;
-                self.queued_prompts = self.queued_prompts.saturating_sub(1);
-                self.status = "Waiting for agent...".to_string();
                 None
             }
             HarnessActorEvent::TurnFinished(snapshot) => {
@@ -450,6 +455,12 @@ impl TuiApp {
                 self.snapshot.total_cost = cost;
             }
             HarnessEvent::AskUser { .. } => {}
+            HarnessEvent::TurnStarted(turn_started) => {
+                self.actor_busy = true;
+                self.queued_prompts = self.queued_prompts.saturating_sub(1);
+                self.snapshot.turn_started = Some(turn_started);
+                self.status = "Waiting for agent...".to_string();
+            }
             HarnessEvent::TurnDuration(duration_ms) => {
                 self.push_message(TuiMessage::TurnDuration(duration_ms));
             }
@@ -549,6 +560,7 @@ impl TuiApp {
                 title: _,
                 options: _,
             } => {}
+            HarnessEvent::TurnStarted(_) => {}
             HarnessEvent::TurnDuration(duration_ms) => {
                 self.push_message(TuiMessage::TurnDuration(duration_ms));
             }

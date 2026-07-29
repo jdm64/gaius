@@ -64,6 +64,7 @@ pub enum HarnessEvent {
         title: String,
         options: Vec<String>,
     },
+    TurnStarted(u64),
     TurnDuration(u64),
 }
 
@@ -76,7 +77,7 @@ pub struct HarnessSnapshot {
     pub streaming: bool,
     pub plan_mode_on: bool,
     pub total_cost: Option<f64>,
-    pub turn_duration: Option<u64>,
+    pub turn_started: Option<u64>,
 }
 
 pub struct Harness {
@@ -312,7 +313,7 @@ impl Harness {
             streaming: self.streaming(),
             plan_mode_on: self.plan_mode_on,
             total_cost: self.token_usage.usage().total_cost(),
-            turn_duration: self.turn_start.map(|t| time_now().saturating_sub(t)),
+            turn_started: self.turn_start,
         }
     }
 
@@ -339,6 +340,7 @@ impl Harness {
     {
         let start = time_now();
         self.turn_start = Some(start);
+        on_event(HarnessEvent::TurnStarted(start));
         let result = self.run_turn_with_events(request, &mut on_event).await;
         self.turn_start = None;
         let duration = time_now().saturating_sub(start);
@@ -719,7 +721,7 @@ impl Harness {
     }
 }
 
-fn time_now() -> u64 {
+pub fn time_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
