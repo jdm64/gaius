@@ -322,3 +322,36 @@ async fn webfetch_rejects_unsupported_scheme() {
         other => panic!("Expected ToolResult::Error, got: {other:?}"),
     }
 }
+
+#[test]
+fn test_build_tools_without_plan() {
+    let skill_repo = SkillRepo::default();
+    let engine = ToolEngine::new(skill_repo);
+
+    let tools = engine.build_tools_without_plan();
+
+    // Should have all tools except Plan
+    assert_eq!(tools.len(), ToolName::ALL.len() - 1);
+
+    // Verify that Plan is not included but all other tools are
+    let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(
+        !tool_names.contains(&"plan"),
+        "build_tools_without_plan should not include the Plan tool"
+    );
+
+    for tool_name in &ToolName::ALL {
+        if *tool_name == ToolName::Plan {
+            assert!(
+                !tool_names.contains(&tool_name.as_str()),
+                "Plan tool should be absent"
+            );
+        } else {
+            assert!(
+                tool_names.contains(&tool_name.as_str()),
+                "Tool {} should be present",
+                tool_name.as_str()
+            );
+        }
+    }
+}
