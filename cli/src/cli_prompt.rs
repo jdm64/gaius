@@ -95,7 +95,11 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessEvent::ToolCall { name, arguments } => {
+                HarnessEvent::ToolCall {
+                    name,
+                    arguments,
+                    start_time: _,
+                } => {
                     if agent_started {
                         println!();
                         agent_started = false;

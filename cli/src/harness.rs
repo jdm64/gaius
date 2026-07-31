@@ -50,6 +50,7 @@ pub enum HarnessEvent {
     ToolCall {
         name: String,
         arguments: String,
+        start_time: u64,
     },
     ToolResult {
         name: String,
@@ -684,6 +685,7 @@ impl Harness {
         on_event(HarnessEvent::ToolCall {
             name: tc.fn_name.to_string(),
             arguments: tc.fn_arguments.to_string(),
+            start_time: time_now(),
         });
     }
 

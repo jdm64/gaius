@@ -117,6 +117,7 @@ fn replay_diff_marker_after_tool_call() {
             HarnessEvent::ToolCall {
                 name: "edit_file".to_string(),
                 arguments: json!({"file_path":"src/lib.rs"}).to_string(),
+                start_time: 0,
             },
             HarnessEvent::ToolResult {
                 name: "edit_file".to_string(),
@@ -154,6 +155,7 @@ fn replay_tool_error_marker_sets_error_flag() {
             HarnessEvent::ToolCall {
                 name: "search".to_string(),
                 arguments: json!({"query":"rust"}).to_string(),
+                start_time: 0,
             },
             HarnessEvent::ToolResult {
                 name: "search".to_string(),
@@ -186,6 +188,7 @@ fn replay_tool_error_marker_absent_defaults_false() {
             HarnessEvent::ToolCall {
                 name: "search".to_string(),
                 arguments: json!({"query":"rust"}).to_string(),
+                start_time: 0,
             },
             HarnessEvent::ToolResult {
                 name: "search".to_string(),

@@ -4,10 +4,11 @@
 
 use crate::{
     diff_view::{DiffLineKind, DiffView},
+    harness::time_now,
     render::{Render, format_duration},
     selection::RowWrapInfo,
     tools::ToolName,
-    tui::{TuiApp, TuiMessage, wrapped_line_count},
+    tui::{LiveTimer, TuiApp, TuiMessage, wrapped_line_count},
 };
 use ratatui::{
     Frame,
@@ -159,7 +160,11 @@ impl Render {
                     self.user_prompt_bar_line(),
                 ]
             }
-            TuiMessage::ToolCall { name, arguments } => {
+            TuiMessage::ToolCall {
+                name,
+                arguments,
+                start_time,
+            } => {
                 let style = Style::default().fg(self.theme.toolcall);
                 let json_args = from_str::<Value>(arguments).unwrap_or_default();
                 let tool_name = ToolName::from_name(name.as_str());
@@ -167,12 +172,17 @@ impl Render {
                     Self::arguments_json_fields(&json_args, tool.display_fields())
                 });
 
-                let spans = vec![
+                let mut lines = vec![Line::from(vec![
                     Span::styled(name.clone(), style.add_modifier(Modifier::BOLD)),
                     Span::raw(" "),
                     Span::styled(display, style.add_modifier(Modifier::ITALIC)),
-                ];
-                vec![Line::from(spans)]
+                ])];
+
+                if *start_time != 0 {
+                    lines.push(Self::tool_call_duration_line(*start_time, style));
+                }
+
+                lines
             }
             TuiMessage::ToolResult {
                 name,
@@ -311,19 +321,12 @@ impl Render {
 
     fn sync_history_lines(&self, app: &mut TuiApp) {
         if app.rendered_history_generation == app.history_generation {
+            self.refresh_live_timers(app);
             return;
         }
 
-        app.history_lines = self
-            .history_lines(app)
-            .into_iter()
-            .map(Self::owned_line)
-            .collect();
-        app.rendered_history_generation = app.history_generation;
-    }
-
-    fn history_lines(&self, app: &TuiApp) -> Vec<Line<'_>> {
         let mut lines = Vec::new();
+        let mut live_timers = Vec::new();
         lines.push(Line::from(""));
         for (index, message) in app.messages.iter().enumerate() {
             if index > 0 {
@@ -340,10 +343,44 @@ impl Render {
                 }
             }
 
-            lines.extend(self.render_message(message, &app.display_prefs));
+            let rendered = self.render_message(message, &app.display_prefs);
+
+            if let TuiMessage::ToolCall { start_time, .. } = message
+                && *start_time != 0
+                && !rendered.is_empty()
+            {
+                // The duration line is the last line this message renders.
+                live_timers.push(LiveTimer {
+                    line_index: lines.len() + rendered.len() - 1,
+                    start_time: *start_time,
+                });
+            }
+            lines.extend(rendered);
         }
 
-        lines
+        app.live_timers = live_timers;
+        app.history_lines = lines.into_iter().map(Self::owned_line).collect();
+        app.rendered_history_generation = app.history_generation;
+    }
+
+    fn refresh_live_timers(&self, app: &mut TuiApp) {
+        if app.live_timers.is_empty() {
+            return;
+        }
+        let style = Style::default().fg(self.theme.toolcall);
+        for timer in &app.live_timers {
+            if let Some(line) = app.history_lines.get_mut(timer.line_index) {
+                *line = Self::tool_call_duration_line(timer.start_time, style);
+            }
+        }
+    }
+
+    fn tool_call_duration_line(start_time: u64, style: Style) -> Line<'static> {
+        let elapsed = time_now().saturating_sub(start_time);
+        Line::from(Span::styled(
+            format!("  {}", format_duration(elapsed)),
+            style.add_modifier(Modifier::DIM),
+        ))
     }
 
     pub fn visible_history_lines(

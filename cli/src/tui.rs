@@ -8,7 +8,7 @@ use crate::{
     config::Config,
     diff_view::DiffView,
     dirs::Dirs,
-    harness::{Harness, HarnessEvent, HarnessSnapshot, time_now},
+    harness::{Harness, HarnessEvent, HarnessSnapshot},
     harness_actor::{HarnessActorEvent, HarnessActorHandle},
     input::{Input, InputMode},
     render::Render,
@@ -34,7 +34,6 @@ use std::{
 };
 use tokio::{sync::oneshot, time};
 
-const DRAW_DELAY: u64 = 250;
 const MAX_FPS: u64 = 60;
 const FRAME_INTERVAL_MS: u64 = 1000 / MAX_FPS;
 
@@ -49,6 +48,7 @@ pub enum TuiMessage {
     ToolCall {
         name: String,
         arguments: String,
+        start_time: u64,
     },
     ToolResult {
         name: String,
@@ -57,6 +57,14 @@ pub enum TuiMessage {
     },
     DiffView(DiffView),
     TurnDuration(u64),
+}
+
+/// Bookkeeping for a tool-call duration line that must keep advancing each
+/// frame while the tool is running. `line_index` is the position in
+/// `TuiApp::history_lines`; `start_time` is the tool call's start timestamp.
+pub struct LiveTimer {
+    pub line_index: usize,
+    pub start_time: u64,
 }
 
 pub struct TerminalGuard {
@@ -100,6 +108,7 @@ pub struct TuiApp {
     pub prompt_history: Vec<String>,
     pub prompt_history_idx: Option<usize>,
     pub history_lines: Vec<Line<'static>>,
+    pub live_timers: Vec<LiveTimer>,
     pub selection: Selection,
     pub history_generation: u64,
     pub rendered_history_generation: u64,
@@ -137,6 +146,7 @@ impl TuiApp {
             prompt_history: Vec::new(),
             prompt_history_idx: None,
             history_lines: Vec::new(),
+            live_timers: Vec::new(),
             selection: Selection::default(),
             history_generation: 0,
             rendered_history_generation: u64::MAX,
@@ -158,10 +168,10 @@ impl TuiApp {
 
         let mut guard = TerminalGuard::enter()?;
         let mut terminal_events = EventStream::new();
-        let mut redraw_timer = time::interval(Duration::from_millis(DRAW_DELAY));
+        let mut frame_timer = time::interval(Duration::from_millis(FRAME_INTERVAL_MS));
         let render = Render::new();
         guard.terminal.draw(|frame| render.draw(self, frame))?;
-        let mut last_draw = time_now();
+        let mut redraw_pending = false;
 
         loop {
             tokio::select! {
@@ -170,6 +180,7 @@ impl TuiApp {
                         break;
                     };
                     self.handle_terminal_event(event?, &actor).await?;
+                    redraw_pending = true;
                 }
                 actor_event = actor.rx.recv() => {
                     let Some(actor_event) = actor_event else {
@@ -178,17 +189,16 @@ impl TuiApp {
                     if let Some(snapshot) = self.handle_actor_event(actor_event) {
                         latest_snapshot = snapshot;
                     }
+                    redraw_pending = true;
                 }
-                _ = redraw_timer.tick(), if self.actor_busy => {}
+                _ = frame_timer.tick(), if redraw_pending || !self.live_timers.is_empty() => {
+                    guard.terminal.draw(|frame| render.draw(self, frame))?;
+                    redraw_pending = false;
+                }
             }
 
             if let InputMode::Exit = self.mode {
                 break;
-            }
-
-            if time_now() - last_draw >= FRAME_INTERVAL_MS {
-                guard.terminal.draw(|frame| render.draw(self, frame))?;
-                last_draw = time_now();
             }
         }
 
@@ -307,6 +317,7 @@ impl TuiApp {
             }
             HarnessActorEvent::TurnFinished(snapshot) => {
                 self.actor_busy = false;
+                self.finish_last_tool_call();
                 self.save_snapshot(&snapshot);
                 self.status = if self.queued_prompts > 0 {
                     format!("Queued prompt ({} pending)", self.queued_prompts)
@@ -317,6 +328,7 @@ impl TuiApp {
             }
             HarnessActorEvent::RequestFailed(err, snapshot) => {
                 self.actor_busy = false;
+                self.finish_last_tool_call();
                 self.save_snapshot(&snapshot);
                 self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
                 Input::reset_history_scroll(self);
@@ -428,8 +440,16 @@ impl TuiApp {
             HarnessEvent::Thinking(chunk) => {
                 self.append_agent_message(chunk, true);
             }
-            HarnessEvent::ToolCall { name, arguments } => {
-                self.push_message(TuiMessage::ToolCall { name, arguments });
+            HarnessEvent::ToolCall {
+                name,
+                arguments,
+                start_time,
+            } => {
+                self.push_message(TuiMessage::ToolCall {
+                    name,
+                    arguments,
+                    start_time,
+                });
                 Input::reset_history_scroll(self);
             }
             HarnessEvent::ToolResult {
@@ -437,6 +457,7 @@ impl TuiApp {
                 result,
                 error,
             } => {
+                self.finish_last_tool_call();
                 self.push_message(TuiMessage::ToolResult {
                     name,
                     result,
@@ -534,14 +555,23 @@ impl TuiApp {
             HarnessEvent::Thinking(text) => {
                 self.append_agent_message(text, true);
             }
-            HarnessEvent::ToolCall { name, arguments } => {
-                self.push_message(TuiMessage::ToolCall { name, arguments });
+            HarnessEvent::ToolCall {
+                name,
+                arguments,
+                start_time,
+            } => {
+                self.push_message(TuiMessage::ToolCall {
+                    name,
+                    arguments,
+                    start_time,
+                });
             }
             HarnessEvent::ToolResult {
                 name,
                 result,
                 error,
             } => {
+                self.finish_last_tool_call();
                 self.push_message(TuiMessage::ToolResult {
                     name,
                     result,
@@ -596,6 +626,16 @@ impl TuiApp {
     pub fn push_message(&mut self, message: TuiMessage) {
         self.messages.push(message);
         self.mark_history_dirty();
+    }
+
+    fn finish_last_tool_call(&mut self) {
+        for message in self.messages.iter_mut().rev() {
+            if let TuiMessage::ToolCall { start_time, .. } = message {
+                *start_time = 0;
+                self.mark_history_dirty();
+                break;
+            }
+        }
     }
 
     pub fn mark_history_dirty(&mut self) {

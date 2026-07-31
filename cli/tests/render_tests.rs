@@ -352,6 +352,65 @@ fn draw_input_places_cursor_on_next_wrapped_line_at_boundary() {
     );
 }
 
+#[test]
+fn tool_call_duration_renders_on_its_own_line() {
+    let render = Render::new();
+    let msg = TuiMessage::ToolCall {
+        name: "bash".to_string(),
+        arguments: "{}".to_string(),
+        start_time: gaius::harness::time_now() - 5_000,
+    };
+    let lines = render.render_message(&msg, &default_prefs());
+    assert_eq!(lines.len(), 2, "expected name line + duration line");
+    assert!(lines[0].spans.iter().any(|s| s.content == "bash"));
+    assert!(lines[1].spans.iter().any(|s| s.content.contains('\u{23F1}')));
+
+    // A finished tool call (start_time == 0) should not render a duration line.
+    let msg = TuiMessage::ToolCall {
+        name: "bash".to_string(),
+        arguments: "{}".to_string(),
+        start_time: 0,
+    };
+    let lines = render.render_message(&msg, &default_prefs());
+    assert_eq!(lines.len(), 1);
+}
+
+#[test]
+fn live_tool_call_timer_updates_without_new_messages() {
+    use std::thread;
+    use std::time::Duration as StdDuration;
+
+    let render = Render::new();
+    let mut app = TuiApp::new(Config::new());
+    app.push_message(TuiMessage::ToolCall {
+        name: "bash".to_string(),
+        arguments: "{}".to_string(),
+        start_time: gaius::harness::time_now() - 5_000,
+    });
+
+    let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
+
+    // The active tool call should be tracked as a live timer.
+    assert_eq!(app.live_timers.len(), 1);
+    let timer_text = |app: &TuiApp| {
+        app.history_lines[app.live_timers[0].line_index]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>()
+    };
+
+    let first = timer_text(&app);
+    thread::sleep(StdDuration::from_millis(1100));
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
+    let second = timer_text(&app);
+
+    assert_ne!(first, second, "timer should change across frames");
+    // 5.000s -> 6.1xx s: same-length strings, so lexicographic compare holds.
+    assert!(second > first, "timer should advance: {first} -> {second}");
+}
+
 fn line_texts(lines: &[Line<'_>]) -> Vec<String> {
     lines
         .iter()

@@ -21,6 +21,7 @@ fn build_tui_app_messages_with_all_variants() {
     app.push_message(TuiMessage::ToolCall {
         name: "weather".to_string(),
         arguments: serde_json::json!({"city":"Atlanta"}).to_string(),
+        start_time: 0,
     });
     app.push_message(TuiMessage::ToolResult {
         name: "weather".to_string(),
@@ -30,6 +31,7 @@ fn build_tui_app_messages_with_all_variants() {
     app.push_message(TuiMessage::ToolCall {
         name: "123".to_string(),
         arguments: String::new(),
+        start_time: 0,
     });
     app.push_message(TuiMessage::ToolResult {
         name: "123".to_string(),
@@ -55,7 +57,9 @@ fn build_tui_app_messages_with_all_variants() {
         _ => panic!("expected AgentMessage"),
     }
     match &app.messages[3] {
-        TuiMessage::ToolCall { name, arguments } => {
+        TuiMessage::ToolCall {
+            name, arguments, ..
+        } => {
             assert_eq!(name, "weather");
             assert_eq!(arguments, r#"{"city":"Atlanta"}"#);
         }
@@ -70,7 +74,9 @@ fn build_tui_app_messages_with_all_variants() {
         _ => panic!("expected ToolResult"),
     }
     match &app.messages[5] {
-        TuiMessage::ToolCall { name, arguments } => {
+        TuiMessage::ToolCall {
+            name, arguments, ..
+        } => {
             assert_eq!(name, "123");
             assert!(arguments.is_empty());
         }

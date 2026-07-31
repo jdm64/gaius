@@ -116,6 +116,7 @@ where
                             on_event(HarnessEvent::ToolCall {
                                 name: (*name).clone(),
                                 arguments: (*args).clone(),
+                                start_time: 0,
                             });
                             on_event(HarnessEvent::ToolResult {
                                 name: (*name).clone(),
@@ -135,6 +136,7 @@ where
                     on_event(HarnessEvent::ToolCall {
                         name: name.clone(),
                         arguments: args,
+                        start_time: 0,
                     });
                     on_event(HarnessEvent::ToolResult {
                         name,
