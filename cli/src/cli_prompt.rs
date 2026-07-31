@@ -95,21 +95,23 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessEvent::ToolCall {
-                    name,
-                    arguments,
-                    result,
-                    error,
-                } => {
+                HarnessEvent::ToolCall { name, arguments } => {
                     if agent_started {
                         println!();
                         agent_started = false;
                     }
                     println!("tool-call> {} ({})", name, arguments);
+                    None
+                }
+                HarnessEvent::ToolResult {
+                    name,
+                    result,
+                    error,
+                } => {
                     if error {
-                        println!("tool-error> {}", result);
+                        println!("tool-error> {}: {}", name, result);
                     } else {
-                        println!("tool-result> {}", result);
+                        println!("tool-result> {}: {}", name, result);
                     }
                     None
                 }

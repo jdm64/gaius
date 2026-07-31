@@ -117,6 +117,9 @@ fn replay_diff_marker_after_tool_call() {
             HarnessEvent::ToolCall {
                 name: "edit_file".to_string(),
                 arguments: json!({"file_path":"src/lib.rs"}).to_string(),
+            },
+            HarnessEvent::ToolResult {
+                name: "edit_file".to_string(),
                 result: "File edited successfully".to_string(),
                 error: false,
             },
@@ -147,12 +150,17 @@ fn replay_tool_error_marker_sets_error_flag() {
 
     assert_eq!(
         events,
-        vec![HarnessEvent::ToolCall {
-            name: "search".to_string(),
-            arguments: json!({"query":"rust"}).to_string(),
-            result: "something failed".to_string(),
-            error: true,
-        },]
+        vec![
+            HarnessEvent::ToolCall {
+                name: "search".to_string(),
+                arguments: json!({"query":"rust"}).to_string(),
+            },
+            HarnessEvent::ToolResult {
+                name: "search".to_string(),
+                result: "something failed".to_string(),
+                error: true,
+            },
+        ]
     );
 }
 
@@ -174,12 +182,17 @@ fn replay_tool_error_marker_absent_defaults_false() {
 
     assert_eq!(
         events,
-        vec![HarnessEvent::ToolCall {
-            name: "search".to_string(),
-            arguments: json!({"query":"rust"}).to_string(),
-            result: "ok".to_string(),
-            error: false,
-        },]
+        vec![
+            HarnessEvent::ToolCall {
+                name: "search".to_string(),
+                arguments: json!({"query":"rust"}).to_string(),
+            },
+            HarnessEvent::ToolResult {
+                name: "search".to_string(),
+                result: "ok".to_string(),
+                error: false,
+            },
+        ]
     );
 }
 

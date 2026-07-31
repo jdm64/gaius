@@ -50,6 +50,9 @@ pub enum HarnessEvent {
     ToolCall {
         name: String,
         arguments: String,
+    },
+    ToolResult {
+        name: String,
         result: String,
         error: bool,
     },
@@ -381,13 +384,15 @@ impl Harness {
                     on_event(HarnessEvent::AgentMessage(text));
                 }
 
+                self.send_tool_call_event(&tc, &mut on_event);
+
                 let result = self.tool_engine.load_skill(&name);
                 match result {
                     ToolResult::Text(text) => {
-                        self.send_tool_call_event(&tc, text, false, &mut on_event)
+                        self.send_tool_result_event(&tc, text, false, &mut on_event)
                     }
                     ToolResult::Error(err) => {
-                        self.send_tool_call_event(&tc, err, true, &mut on_event)
+                        self.send_tool_result_event(&tc, err, true, &mut on_event)
                     }
                     _ => {
                         return Err("Tool engine failed to run skill".into());
@@ -611,6 +616,9 @@ impl Harness {
             if self.is_cancel() {
                 return;
             }
+
+            self.send_tool_call_event(tc, on_event);
+
             let result = self
                 .tool_engine
                 .execute(&tc.fn_name, &tc.fn_arguments)
@@ -619,20 +627,20 @@ impl Harness {
                 ToolResult::Question(title, options) => {
                     let answer =
                         on_event(HarnessEvent::AskUser { title, options }).unwrap_or_default();
-                    self.send_tool_call_event(tc, answer, false, on_event);
+                    self.send_tool_result_event(tc, answer, false, on_event);
                 }
                 ToolResult::Text(text) => {
                     if tc.fn_name == "plan" {
                         let plan_text = Render::plan_to_md(&tc.fn_arguments);
                         self.last_plan_content = Some(plan_text);
                     }
-                    self.send_tool_call_event(tc, text, false, on_event);
+                    self.send_tool_result_event(tc, text, false, on_event);
                 }
                 ToolResult::FileEdit { message, diff } => {
                     self.send_diff_view_event(tc, message, diff, on_event);
                 }
                 ToolResult::Error(err) => {
-                    self.send_tool_call_event(tc, err, true, on_event);
+                    self.send_tool_result_event(tc, err, true, on_event);
                 }
             }
         }
@@ -669,7 +677,17 @@ impl Harness {
         on_event(HarnessEvent::SystemMessage(message));
     }
 
-    fn send_tool_call_event<F>(
+    fn send_tool_call_event<F>(&mut self, tc: &ToolCall, on_event: &mut F)
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        on_event(HarnessEvent::ToolCall {
+            name: tc.fn_name.to_string(),
+            arguments: tc.fn_arguments.to_string(),
+        });
+    }
+
+    fn send_tool_result_event<F>(
         &mut self,
         tc: &ToolCall,
         result: String,
@@ -684,9 +702,8 @@ impl Harness {
             data: json!({ "tool_error": error }),
         }));
         self.history.messages.push(message);
-        on_event(HarnessEvent::ToolCall {
+        on_event(HarnessEvent::ToolResult {
             name: tc.fn_name.to_string(),
-            arguments: tc.fn_arguments.to_string(),
             result,
             error,
         });
@@ -705,9 +722,8 @@ impl Harness {
         let mut message: ChatMessage = ToolResponse::new(&tc.call_id, result.clone()).into();
         message.content.push(marker);
         self.history.messages.push(message);
-        on_event(HarnessEvent::ToolCall {
+        on_event(HarnessEvent::ToolResult {
             name: tc.fn_name.to_string(),
-            arguments: tc.fn_arguments.to_string(),
             result,
             error: false,
         });

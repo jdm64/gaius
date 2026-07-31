@@ -49,6 +49,9 @@ pub enum TuiMessage {
     ToolCall {
         name: String,
         arguments: String,
+    },
+    ToolResult {
+        name: String,
         result: String,
         error: bool,
     },
@@ -425,15 +428,17 @@ impl TuiApp {
             HarnessEvent::Thinking(chunk) => {
                 self.append_agent_message(chunk, true);
             }
-            HarnessEvent::ToolCall {
+            HarnessEvent::ToolCall { name, arguments } => {
+                self.push_message(TuiMessage::ToolCall { name, arguments });
+                Input::reset_history_scroll(self);
+            }
+            HarnessEvent::ToolResult {
                 name,
-                arguments,
                 result,
                 error,
             } => {
-                self.push_message(TuiMessage::ToolCall {
+                self.push_message(TuiMessage::ToolResult {
                     name,
-                    arguments,
                     result,
                     error,
                 });
@@ -529,15 +534,16 @@ impl TuiApp {
             HarnessEvent::Thinking(text) => {
                 self.append_agent_message(text, true);
             }
-            HarnessEvent::ToolCall {
+            HarnessEvent::ToolCall { name, arguments } => {
+                self.push_message(TuiMessage::ToolCall { name, arguments });
+            }
+            HarnessEvent::ToolResult {
                 name,
-                arguments,
                 result,
                 error,
             } => {
-                self.push_message(TuiMessage::ToolCall {
+                self.push_message(TuiMessage::ToolResult {
                     name,
-                    arguments,
                     result,
                     error,
                 });

@@ -116,6 +116,9 @@ where
                             on_event(HarnessEvent::ToolCall {
                                 name: (*name).clone(),
                                 arguments: (*args).clone(),
+                            });
+                            on_event(HarnessEvent::ToolResult {
+                                name: (*name).clone(),
                                 result: resp.content.clone(),
                                 error: tool_error,
                             });
@@ -130,8 +133,11 @@ where
                 // the UI always renders something.
                 for (name, args) in pending_tool_calls.drain(..) {
                     on_event(HarnessEvent::ToolCall {
-                        name,
+                        name: name.clone(),
                         arguments: args,
+                    });
+                    on_event(HarnessEvent::ToolResult {
+                        name,
                         result: String::new(),
                         error: false,
                     });

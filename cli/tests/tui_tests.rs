@@ -21,12 +21,18 @@ fn build_tui_app_messages_with_all_variants() {
     app.push_message(TuiMessage::ToolCall {
         name: "weather".to_string(),
         arguments: serde_json::json!({"city":"Atlanta"}).to_string(),
+    });
+    app.push_message(TuiMessage::ToolResult {
+        name: "weather".to_string(),
         result: String::new(),
         error: false,
     });
     app.push_message(TuiMessage::ToolCall {
         name: "123".to_string(),
         arguments: String::new(),
+    });
+    app.push_message(TuiMessage::ToolResult {
+        name: "123".to_string(),
         result: "sunny".to_string(),
         error: false,
     });
@@ -35,7 +41,7 @@ fn build_tui_app_messages_with_all_variants() {
         hunks: vec![],
     }));
 
-    assert_eq!(app.messages.len(), 6);
+    assert_eq!(app.messages.len(), 8);
     match &app.messages[0] {
         TuiMessage::SystemMessage(t) => assert_eq!(t, "system: be useful"),
         _ => panic!("expected SystemMessage"),
@@ -49,27 +55,36 @@ fn build_tui_app_messages_with_all_variants() {
         _ => panic!("expected AgentMessage"),
     }
     match &app.messages[3] {
-        TuiMessage::ToolCall {
-            name,
-            arguments,
-            result,
-            error,
-        } => {
+        TuiMessage::ToolCall { name, arguments } => {
             assert_eq!(name, "weather");
             assert_eq!(arguments, r#"{"city":"Atlanta"}"#);
-            assert!(result.is_empty());
-            assert!(!error);
         }
         _ => panic!("expected ToolCall"),
     }
     match &app.messages[4] {
-        TuiMessage::ToolCall { name, result, .. } => {
+        TuiMessage::ToolResult { name, result, error } => {
+            assert_eq!(name, "weather");
+            assert!(result.is_empty());
+            assert!(!error);
+        }
+        _ => panic!("expected ToolResult"),
+    }
+    match &app.messages[5] {
+        TuiMessage::ToolCall { name, arguments } => {
             assert_eq!(name, "123");
-            assert_eq!(result, "sunny");
+            assert!(arguments.is_empty());
         }
         _ => panic!("expected ToolCall"),
     }
-    match &app.messages[5] {
+    match &app.messages[6] {
+        TuiMessage::ToolResult { name, result, error } => {
+            assert_eq!(name, "123");
+            assert_eq!(result, "sunny");
+            assert!(!error);
+        }
+        _ => panic!("expected ToolResult"),
+    }
+    match &app.messages[7] {
         TuiMessage::DiffView(diff) => {
             assert_eq!(diff.file_path, "src/main.rs");
         }

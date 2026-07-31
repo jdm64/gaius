@@ -159,12 +159,7 @@ impl Render {
                     self.user_prompt_bar_line(),
                 ]
             }
-            TuiMessage::ToolCall {
-                name,
-                arguments,
-                result,
-                error,
-            } => {
+            TuiMessage::ToolCall { name, arguments } => {
                 let style = Style::default().fg(self.theme.toolcall);
                 let json_args = from_str::<Value>(arguments).unwrap_or_default();
                 let tool_name = ToolName::from_name(name.as_str());
@@ -177,7 +172,17 @@ impl Render {
                     Span::raw(" "),
                     Span::styled(display, style.add_modifier(Modifier::ITALIC)),
                 ];
-                let mut ret = vec![Line::from(spans)];
+                vec![Line::from(spans)]
+            }
+            TuiMessage::ToolResult {
+                name,
+                result,
+                error,
+            } => {
+                let style = Style::default().fg(self.theme.toolcall);
+                let json_args = Value::Null;
+                let tool_name = ToolName::from_name(name.as_str());
+                let mut ret = Vec::new();
                 if *error {
                     let e_style = Style::default().fg(self.theme.error);
                     let error_lines: Vec<&str> = result.split('\n').collect();
@@ -326,7 +331,9 @@ impl Render {
                 if std::mem::discriminant(previous) != std::mem::discriminant(message)
                     && !matches!(
                         message,
-                        TuiMessage::TokenInfo(_) | TuiMessage::TurnDuration(_)
+                        TuiMessage::TokenInfo(_)
+                            | TuiMessage::TurnDuration(_)
+                            | TuiMessage::ToolResult { .. }
                     )
                 {
                     lines.push(Line::from(""));
