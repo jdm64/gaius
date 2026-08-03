@@ -482,3 +482,69 @@ fn genai_rate_limit_false_for_http_400_with_empty_previous_errors() {
     };
     assert!(!is_rate_limit_error(&err));
 }
+
+// --- ChatResponse rate-limit tests ---
+
+#[test]
+fn genai_rate_limit_true_for_chat_response_with_code_429() {
+    let body = json!({
+        "code": 429,
+        "message": "openai/gpt-5.6-terra is temporarily rate-limited upstream.",
+        "metadata": { "error_type": "rate_limit_exceeded" }
+    });
+    let err: GenaiError = GenaiError::ChatResponse {
+        model_iden: ModelIden::new(AdapterKind::OpenAI, "openai/gpt-5.6-terra"),
+        body,
+    };
+    assert!(is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_true_for_chat_response_with_code_429_only() {
+    // Body with code 429 but no metadata
+    let body = json!({
+        "code": 429,
+        "message": "Rate limit exceeded"
+    });
+    let err: GenaiError = GenaiError::ChatResponse {
+        model_iden: ModelIden::new(AdapterKind::OpenAI, "some-model"),
+        body,
+    };
+    assert!(is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_false_for_chat_response_with_other_error() {
+    let body = json!({
+        "code": 500,
+        "message": "Internal server error"
+    });
+    let err: GenaiError = GenaiError::ChatResponse {
+        model_iden: ModelIden::new(AdapterKind::OpenAI, "some-model"),
+        body,
+    };
+    assert!(!is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_false_for_chat_response_with_unrelated_metadata() {
+    let body = json!({
+        "message": "Bad request",
+        "metadata": { "error_type": "invalid_request" }
+    });
+    let err: GenaiError = GenaiError::ChatResponse {
+        model_iden: ModelIden::new(AdapterKind::OpenAI, "some-model"),
+        body,
+    };
+    assert!(!is_rate_limit_error(&err));
+}
+
+#[test]
+fn genai_rate_limit_false_for_chat_response_empty_body() {
+    let body = json!({});
+    let err: GenaiError = GenaiError::ChatResponse {
+        model_iden: ModelIden::new(AdapterKind::OpenAI, "some-model"),
+        body,
+    };
+    assert!(!is_rate_limit_error(&err));
+}

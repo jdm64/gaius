@@ -7,6 +7,8 @@ use genai::webc::Error as WebcError;
 use reqwest::StatusCode;
 use std::error::Error;
 
+const RATE_LIMIT: i64 = 429;
+
 pub fn is_rate_limit_error(err: &(dyn Error + 'static)) -> bool {
     let Some(genai_err) = err.downcast_ref::<GenaiError>() else {
         return false;
@@ -21,6 +23,7 @@ pub fn is_rate_limit_error(err: &(dyn Error + 'static)) -> bool {
         GenaiError::WebStream {
             error: webc_error, ..
         } => is_rate_limit_error(webc_error.as_ref()),
+        GenaiError::ChatResponse { body, .. } => body_has_chat_response_rate_limit(body),
         _ => false,
     }
 }
@@ -37,9 +40,15 @@ fn body_has_nested_rate_limit(body: &str) -> bool {
             errors.iter().any(|pe| {
                 pe.get("code")
                     .and_then(|c| c.as_i64())
-                    .is_some_and(|code| code == 429)
+                    .is_some_and(|code| code == RATE_LIMIT)
             })
         })
+}
+
+fn body_has_chat_response_rate_limit(body: &serde_json::Value) -> bool {
+    body.get("code")
+        .and_then(|c| c.as_i64())
+        .is_some_and(|code| code == RATE_LIMIT)
 }
 
 pub fn is_webc_rate_limit(webc_err: &WebcError) -> bool {
