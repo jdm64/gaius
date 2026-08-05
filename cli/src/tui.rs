@@ -100,6 +100,8 @@ pub struct TuiApp {
     pub input_cursor: usize,
     pub history_scroll: u16,
     pub history_page_size: u16,
+    pub history_height: u16,
+    pub new_lines_below: u16,
     pub messages: Vec<TuiMessage>,
     pub status: String,
     pub mode: InputMode,
@@ -134,6 +136,8 @@ impl TuiApp {
             input_cursor: 0,
             history_scroll: 0,
             history_page_size: 1,
+            history_height: 0,
+            new_lines_below: 0,
             messages: Vec::new(),
             status: "".to_string(),
             mode: InputMode::PromptInput,
@@ -277,7 +281,7 @@ impl TuiApp {
         self.agents.mark_recent(&self.snapshot.agent_name);
         Input::update_prompt_history(self, prompt.clone());
         Input::clear_input(self);
-        Input::reset_history_scroll(self);
+        Input::scroll_history_bottom(self);
         self.queued_prompts += 1;
         self.status = if self.actor_busy {
             format!("Queued prompt ({} pending)", self.queued_prompts)
@@ -306,7 +310,6 @@ impl TuiApp {
                 answer_tx,
             } => {
                 Input::clear_input(self);
-                Input::reset_history_scroll(self);
                 self.question_answer_tx = Some(answer_tx);
                 self.mode = InputMode::Question {
                     title,
@@ -331,7 +334,6 @@ impl TuiApp {
                 self.finish_last_tool_call();
                 self.save_snapshot(&snapshot);
                 self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
-                Input::reset_history_scroll(self);
                 self.status = "Agent request failed".to_string();
                 Some(snapshot)
             }
@@ -450,7 +452,6 @@ impl TuiApp {
                     arguments,
                     start_time,
                 });
-                Input::reset_history_scroll(self);
             }
             HarnessEvent::ToolResult {
                 name,
@@ -463,11 +464,9 @@ impl TuiApp {
                     result,
                     error,
                 });
-                Input::reset_history_scroll(self);
             }
             HarnessEvent::DiffView(diff) => {
                 self.push_message(TuiMessage::DiffView(diff));
-                Input::reset_history_scroll(self);
             }
             HarnessEvent::TokenUsage {
                 prompt,
@@ -515,7 +514,6 @@ impl TuiApp {
         }
 
         self.mark_history_dirty();
-        Input::reset_history_scroll(self);
     }
 
     pub fn append_token_info(&mut self, chunk: String) {
@@ -534,7 +532,6 @@ impl TuiApp {
         }
 
         self.mark_history_dirty();
-        Input::reset_history_scroll(self);
     }
 
     pub fn load_history(&mut self, harness: &Harness) {

@@ -544,8 +544,9 @@ impl Input {
         app.input_cursor = Self::input_len(app);
     }
 
-    pub fn reset_history_scroll(app: &mut TuiApp) {
+    pub fn scroll_history_bottom(app: &mut TuiApp) {
         app.history_scroll = 0;
+        app.new_lines_below = 0;
     }
 
     pub fn scroll_history_up(app: &mut TuiApp, amount: u16) {
@@ -554,6 +555,8 @@ impl Input {
 
     pub fn scroll_history_down(app: &mut TuiApp, amount: u16) {
         app.history_scroll = app.history_scroll.saturating_sub(amount);
+        let dismissed = amount.min(app.new_lines_below);
+        app.new_lines_below = app.new_lines_below.saturating_sub(dismissed);
     }
 
     pub fn history_page_scroll_amount(app: &TuiApp) -> u16 {

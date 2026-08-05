@@ -113,8 +113,10 @@ fn scrolls_history_with_saturating_offsets() {
     Input::scroll_history_down(&mut app, 10);
     assert_eq!(app.history_scroll, 0);
 
+    // Scrolling up sets the offset; only an explicit force returns to the bottom.
     Input::scroll_history_up(&mut app, 4);
-    Input::reset_history_scroll(&mut app);
+    assert_eq!(app.history_scroll, 4);
+    Input::scroll_history_bottom(&mut app);
     assert_eq!(app.history_scroll, 0);
 }
 

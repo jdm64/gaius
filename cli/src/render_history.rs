@@ -12,7 +12,7 @@ use crate::{
 };
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Padding, Paragraph, Wrap},
@@ -57,7 +57,8 @@ impl Render {
 
         let wrapped_height = wrapped_line_count(&app.history_lines, text_width);
         let max_scroll = wrapped_height.saturating_sub(text_height);
-        let clamped_scroll = app.history_scroll.min(max_scroll);
+        let clamped_scroll = Render::update_scroll_state(app, wrapped_height, max_scroll);
+
         let start = max_scroll.saturating_sub(clamped_scroll);
         let lines = self.visible_history_lines(
             &app.history_lines,
@@ -111,6 +112,56 @@ impl Render {
         frame.render_widget(history, area);
 
         app.history_scroll = clamped_scroll;
+
+        self.render_lines_below(app, frame, area);
+    }
+
+    fn update_scroll_state(app: &mut TuiApp, wrapped_height: u16, max_scroll: u16) -> u16 {
+        let height_growth = if app.history_scroll != 0 && app.history_height != 0 {
+            wrapped_height.saturating_sub(app.history_height)
+        } else {
+            0
+        };
+        if height_growth > 0 {
+            app.history_scroll = app.history_scroll.saturating_add(height_growth);
+        }
+        app.history_height = wrapped_height;
+
+        let clamped_scroll = app.history_scroll.min(max_scroll);
+
+        app.new_lines_below = if clamped_scroll == 0 {
+            0
+        } else if height_growth > 0 {
+            app.new_lines_below
+                .saturating_add(height_growth)
+                .min(clamped_scroll)
+        } else {
+            app.new_lines_below.min(clamped_scroll)
+        };
+
+        clamped_scroll
+    }
+
+    fn render_lines_below(&self, app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
+        if app.new_lines_below > 0 && area.height >= 3 {
+            let text = if app.new_lines_below == 1 {
+                "1 new line".to_string()
+            } else {
+                format!("{} new lines", app.new_lines_below)
+            };
+            let indicator_area = Rect {
+                x: area.x,
+                y: area.y + area.height - 1,
+                width: area.width,
+                height: 1,
+            };
+            let indicator = Paragraph::new(text).alignment(Alignment::Center).style(
+                Style::default()
+                    .fg(self.theme.header)
+                    .add_modifier(Modifier::DIM),
+            );
+            frame.render_widget(indicator, indicator_area);
+        }
     }
 
     pub fn render_message(&self, msg: &TuiMessage, prefs: &DisplayPrefs) -> Vec<Line<'static>> {

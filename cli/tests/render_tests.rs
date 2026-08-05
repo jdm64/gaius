@@ -363,7 +363,12 @@ fn tool_call_duration_renders_on_its_own_line() {
     let lines = render.render_message(&msg, &default_prefs());
     assert_eq!(lines.len(), 2, "expected name line + duration line");
     assert!(lines[0].spans.iter().any(|s| s.content == "bash"));
-    assert!(lines[1].spans.iter().any(|s| s.content.contains('\u{23F1}')));
+    assert!(
+        lines[1]
+            .spans
+            .iter()
+            .any(|s| s.content.contains('\u{23F1}'))
+    );
 
     // A finished tool call (start_time == 0) should not render a duration line.
     let msg = TuiMessage::ToolCall {
@@ -421,4 +426,61 @@ fn line_texts(lines: &[Line<'_>]) -> Vec<String> {
                 .collect()
         })
         .collect()
+}
+
+fn buffer_contains(terminal: &Terminal<TestBackend>, needle: &str) -> bool {
+    let buf = terminal.backend().buffer();
+    for row in 0..buf.area.height {
+        let mut text = String::new();
+        for col in 0..buf.area.width {
+            if let Some(cell) = buf.cell(Position { x: col, y: row }) {
+                text.push_str(cell.symbol());
+            }
+        }
+        if text.contains(needle) {
+            return true;
+        }
+    }
+    false
+}
+
+#[test]
+fn draw_history_anchors_view_and_shows_new_lines_below_indicator() {
+    let render = Render::new();
+    let mut app = TuiApp::new(Config::new());
+
+    // Plenty of short single-line messages so the history is taller than the
+    // viewport.
+    for i in 0..30u32 {
+        app.push_message(TuiMessage::AgentMessage(format!("msg {i}")));
+    }
+
+    let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
+
+    // At the bottom: nothing special.
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
+    assert_eq!(app.history_scroll, 0);
+    assert_eq!(app.new_lines_below, 0);
+    assert!(!buffer_contains(&terminal, " new line"));
+
+    // Simulate the user scrolling up a few lines.
+    app.history_scroll = 5;
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
+    assert_eq!(app.new_lines_below, 0);
+
+    // New output while scrolled up must NOT yank the view to the bottom, must
+    // keep the same viewport (anchored), and must flag the unread lines below.
+    app.push_message(TuiMessage::AgentMessage("new output".to_string()));
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
+    assert_ne!(app.history_scroll, 0); // not yanked to the bottom
+    assert_eq!(app.history_scroll, 6); // anchored: grew by exactly one new line
+    assert_eq!(app.new_lines_below, 1);
+    assert!(buffer_contains(&terminal, " new line"));
+
+    // Returning to the bottom dismisses the indicator.
+    app.history_scroll = 0;
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
+    assert_eq!(app.history_scroll, 0);
+    assert_eq!(app.new_lines_below, 0);
+    assert!(!buffer_contains(&terminal, " new line"));
 }

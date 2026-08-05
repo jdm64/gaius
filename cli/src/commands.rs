@@ -124,7 +124,7 @@ impl Commands {
                         Ok(snapshot) => {
                             app.save_snapshot(&snapshot);
                             app.clear_messages();
-                            Input::reset_history_scroll(app);
+                            Input::scroll_history_bottom(app);
                             app.status = "New session created".to_string();
                             app.context_tokens = None;
                         }
@@ -232,7 +232,6 @@ impl Commands {
                     "Unknown command: /{}",
                     command
                 )));
-                Input::reset_history_scroll(app);
                 Input::clear_input(app);
                 InputMode::PromptInput
             }
@@ -305,7 +304,7 @@ impl Commands {
                             Ok(snapshot) => {
                                 app.save_snapshot(&snapshot);
                                 app.clear_messages();
-                                Input::reset_history_scroll(app);
+                                Input::scroll_history_bottom(app);
                                 app.status = format!("Loaded session: {}", session.display_name());
                                 app.context_tokens = None;
                                 match actor.replay_history().await {
