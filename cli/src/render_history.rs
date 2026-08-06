@@ -198,10 +198,7 @@ impl Render {
                     let error_lines: Vec<&str> = result.split('\n').collect();
                     for i in error_lines {
                         if !i.is_empty() {
-                            ret.push(Line::from(vec![
-                                Span::styled(" \u{21B3} ", e_style),
-                                Span::styled(i.to_string(), e_style),
-                            ]));
+                            ret.push(Line::from(Span::styled(format!("  {}", i), e_style)));
                         }
                     }
                 }
