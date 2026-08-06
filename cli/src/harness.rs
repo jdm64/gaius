@@ -19,7 +19,7 @@ use crate::{
 };
 use futures::StreamExt;
 use genai::{
-    Client,
+    Client, Headers,
     chat::{
         ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ContentPart, CustomPart,
         MessageContent, StreamEnd, ToolCall, ToolResponse,
@@ -28,11 +28,24 @@ use genai::{
 use serde_json::json;
 use std::{
     error::Error,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::time;
 use uuid::Uuid;
+
+static CHAT_OPTIONS: OnceLock<ChatOptions> = OnceLock::new();
+
+fn default_chat_opts() -> &'static ChatOptions {
+    CHAT_OPTIONS.get_or_init(|| {
+        ChatOptions::default()
+            .with_capture_content(true)
+            .with_capture_tool_calls(true)
+            .with_capture_reasoning_content(true)
+            .with_capture_usage(true)
+            .with_extra_headers(Headers::from([("User-Agent", "Gaius")]))
+    })
+}
 
 #[derive(Clone, Debug)]
 pub enum UserRequest {
@@ -471,14 +484,10 @@ impl Harness {
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         let prompt_message_end = self.history.messages.len();
-        let chat_options = ChatOptions::default()
-            .with_capture_content(true)
-            .with_capture_tool_calls(true)
-            .with_capture_reasoning_content(true)
-            .with_capture_usage(true);
+        let chat_options = default_chat_opts();
         let mut response = self
             .client
-            .exec_chat_stream(&self.model.id, self.history.clone(), Some(&chat_options))
+            .exec_chat_stream(&self.model.id, self.history.clone(), Some(chat_options))
             .await?;
 
         let mut stream_end = None;
@@ -578,14 +587,10 @@ impl Harness {
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         let prompt_message_end = self.history.messages.len();
-        let chat_options = ChatOptions::default()
-            .with_capture_content(true)
-            .with_capture_tool_calls(true)
-            .with_capture_reasoning_content(true)
-            .with_capture_usage(true);
+        let chat_options = default_chat_opts();
         let response = self
             .client
-            .exec_chat(&self.model.id, self.history.clone(), Some(&chat_options))
+            .exec_chat(&self.model.id, self.history.clone(), Some(chat_options))
             .await?;
 
         let full_text = response.content.texts().join("");
