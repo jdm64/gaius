@@ -57,6 +57,7 @@ pub enum TuiMessage {
     },
     DiffView(DiffView),
     TurnDuration(u64),
+    Padding,
 }
 
 /// Bookkeeping for a tool-call duration line that must keep advancing each
@@ -464,6 +465,7 @@ impl TuiApp {
                     result,
                     error,
                 });
+                self.push_message(TuiMessage::Padding);
             }
             HarnessEvent::DiffView(diff) => {
                 self.push_message(TuiMessage::DiffView(diff));
@@ -621,6 +623,11 @@ impl TuiApp {
     }
 
     pub fn push_message(&mut self, message: TuiMessage) {
+        if !matches!(message, TuiMessage::Padding) {
+            while matches!(self.messages.last(), Some(TuiMessage::Padding)) {
+                self.messages.pop();
+            }
+        }
         self.messages.push(message);
         self.mark_history_dirty();
     }

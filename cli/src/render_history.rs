@@ -280,6 +280,7 @@ impl Render {
                 let style = Style::default().fg(self.theme.header).dim();
                 vec![Line::from(text).style(style)]
             }
+            TuiMessage::Padding => vec![Line::from("")],
         }
     }
 
@@ -379,7 +380,10 @@ impl Render {
         for (index, message) in app.messages.iter().enumerate() {
             if index > 0 {
                 let previous = &app.messages[index - 1];
-                if std::mem::discriminant(previous) != std::mem::discriminant(message)
+                let is_padding_edge = matches!(previous, TuiMessage::Padding)
+                    || matches!(message, TuiMessage::Padding);
+                if !is_padding_edge
+                    && std::mem::discriminant(previous) != std::mem::discriminant(message)
                     && !matches!(
                         message,
                         TuiMessage::TokenInfo(_)
