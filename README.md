@@ -31,7 +31,7 @@ A LLM agent harness build in Rust, powered by `genai` for provider abstraction.
 This launches the interactive terminal interface where you can:
 
 - Type prompts and interact with LLMs
-- Use slash commands (e.g., `/new`, `/sessions`, `/models`, `/agents`)
+- Use slash commands (e.g., `/new`, `/sessions`, `/models`, `/agents`, `/skills`)
 - Switch between different models
 - Manage conversation sessions
 
@@ -107,11 +107,13 @@ In the TUI, you can use these slash commands:
 - `/sessions` - Load and delete sessions
 - `/models` - List and select models
 - `/agents` - List and select agents
+- `/skills` - List available skills
+- `/plan` - Toggle plan mode on/off
+- `/info` - Show session info
 - `/streaming` - Toggle streaming mode on/off
 - `/thinking` - Toggle rendering of thinking messages on/off
 - `/show-tokens` - Toggle rendering of token info messages on/off
 - `/show-diff` - Toggle rendering of diff messages on/off
-- `/plan` - Toggle plan mode on/off
 
 ## Tools
 
@@ -127,3 +129,5 @@ Gaius provides built-in tools that the agent can use during conversations:
 | `grep` | Search file contents using regex pattern |
 | `question` | Ask the user a question with optional choices |
 | `plan` | Create a structured markdown formatted plan |
+| `skill` | Invoke a skill by name to get its instructions |
+| `webfetch` | Fetch a URL and return its content as cleaned Markdown text |
