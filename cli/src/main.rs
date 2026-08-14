@@ -25,6 +25,11 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
         std::process::exit(0);
     }
 
+    if pargs.contains(["-V", "--version"]) {
+        println!("gaius {}", env!("GIT_VERSION"));
+        std::process::exit(0);
+    }
+
     let prompt_mode = pargs.contains("--prompt");
     let prompt_file = pargs.opt_value_from_os_str("--prompt-file", |path| {
         Ok::<PathBuf, std::convert::Infallible>(PathBuf::from(path))
@@ -63,6 +68,7 @@ fn print_help() {
     println!("  --prompt                Run one prompt from the unnamed argument and exit");
     println!("  --prompt-file <PATH>    Run one prompt read from a file and exit");
     println!("  --session <ID>          Load and continue a saved session");
+    println!("  -V, --version           Print version information");
     println!("  -h, --help              Show this help message");
 }
 
