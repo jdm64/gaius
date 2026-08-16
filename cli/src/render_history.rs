@@ -53,7 +53,7 @@ impl Render {
         let text_height = area.height.saturating_sub(2).max(1);
         app.history_page_size = text_height;
 
-        self.sync_history_lines(app);
+        self.sync_history_lines(app, text_width);
 
         let wrapped_height = wrapped_line_count(&app.history_lines, text_width);
         let max_scroll = wrapped_height.saturating_sub(text_height);
@@ -368,51 +368,85 @@ impl Render {
             .to_string()
     }
 
-    fn sync_history_lines(&self, app: &mut TuiApp) {
-        if app.rendered_history_generation == app.history_generation {
-            self.refresh_live_timers(app);
-            return;
+    fn sync_history_lines(&self, app: &mut TuiApp, text_width: u16) {
+        if app.last_render_width != text_width {
+            app.dirty_from = Some(0);
         }
 
-        let mut lines = Vec::new();
-        let mut live_timers = Vec::new();
-        lines.push(Line::from(""));
-        for (index, message) in app.messages.iter().enumerate() {
-            if index > 0 {
-                let previous = &app.messages[index - 1];
-                let is_padding_edge = matches!(previous, TuiMessage::Padding)
-                    || matches!(message, TuiMessage::Padding);
-                if !is_padding_edge
-                    && std::mem::discriminant(previous) != std::mem::discriminant(message)
-                    && !matches!(
-                        message,
-                        TuiMessage::TokenInfo(_)
-                            | TuiMessage::TurnDuration(_)
-                            | TuiMessage::ToolResult { .. }
-                    )
-                {
-                    lines.push(Line::from(""));
-                }
+        let dirty_from = match app.dirty_from {
+            Some(d) => d,
+            None => {
+                self.refresh_live_timers(app);
+                return;
             }
+        };
 
-            let rendered = self.render_message(message, &app.display_prefs);
+        let last_idx = app.messages.len().saturating_sub(1);
 
-            if let TuiMessage::ToolCall { start_time, .. } = message
-                && *start_time != 0
-                && !rendered.is_empty()
+        if dirty_from == 0 || dirty_from != last_idx {
+            // if dirty_from != last_idx then last_block_start is invalid and
+            // a whole rerender must be done. This could be optimized by
+            // storing block start for each message but probably not worth it.
+            self.full_rerender(app);
+        } else {
+            app.history_lines.truncate(app.last_block_start);
+            app.live_timers
+                .retain(|t| t.line_index < app.last_block_start);
+
+            self.render_message_at(app, last_idx);
+        }
+
+        app.last_render_width = text_width;
+        app.dirty_from = None;
+    }
+
+    fn full_rerender(&self, app: &mut TuiApp) {
+        app.history_lines.clear();
+        app.live_timers.clear();
+        app.history_lines.push(Line::from(""));
+
+        for index in 0..app.messages.len() {
+            self.render_message_at(app, index);
+        }
+    }
+
+    fn render_message_at(&self, app: &mut TuiApp, index: usize) {
+        let message = &app.messages[index];
+        let block_start = app.history_lines.len();
+
+        if index > 0 {
+            let previous = &app.messages[index - 1];
+            let is_padding_edge =
+                matches!(previous, TuiMessage::Padding) || matches!(message, TuiMessage::Padding);
+            if !is_padding_edge
+                && std::mem::discriminant(previous) != std::mem::discriminant(message)
+                && !matches!(
+                    message,
+                    TuiMessage::TokenInfo(_)
+                        | TuiMessage::TurnDuration(_)
+                        | TuiMessage::ToolResult { .. }
+                )
             {
-                // The duration line is the last line this message renders.
-                live_timers.push(LiveTimer {
-                    line_index: lines.len() + rendered.len() - 1,
-                    start_time: *start_time,
-                });
+                app.history_lines.push(Line::from(""));
             }
-            lines.extend(rendered);
         }
 
-        app.live_timers = live_timers;
-        app.history_lines = lines.into_iter().map(Self::owned_line).collect();
-        app.rendered_history_generation = app.history_generation;
+        let content_offset = app.history_lines.len();
+        let rendered = self.render_message(message, &app.display_prefs);
+
+        if let TuiMessage::ToolCall { start_time, .. } = message
+            && *start_time != 0
+            && !rendered.is_empty()
+        {
+            app.live_timers.push(LiveTimer {
+                line_index: content_offset + rendered.len() - 1,
+                start_time: *start_time,
+            });
+        }
+
+        app.history_lines
+            .extend(rendered.into_iter().map(Self::owned_line));
+        app.last_block_start = block_start;
     }
 
     fn refresh_live_timers(&self, app: &mut TuiApp) {

@@ -113,8 +113,9 @@ pub struct TuiApp {
     pub history_lines: Vec<Line<'static>>,
     pub live_timers: Vec<LiveTimer>,
     pub selection: Selection,
-    pub history_generation: u64,
-    pub rendered_history_generation: u64,
+    pub last_render_width: u16,
+    pub last_block_start: usize,
+    pub dirty_from: Option<usize>,
     pub actor_busy: bool,
     pub queued_prompts: usize,
     pub question_answer_tx: Option<oneshot::Sender<String>>,
@@ -153,8 +154,9 @@ impl TuiApp {
             history_lines: Vec::new(),
             live_timers: Vec::new(),
             selection: Selection::default(),
-            history_generation: 0,
-            rendered_history_generation: u64::MAX,
+            last_render_width: 0,
+            last_block_start: 0,
+            dirty_from: Some(0),
             actor_busy: false,
             queued_prompts: 0,
             question_answer_tx: None,
@@ -515,7 +517,7 @@ impl TuiApp {
             }
         }
 
-        self.mark_history_dirty();
+        self.set_dirty_from(self.messages.len().saturating_sub(1));
     }
 
     pub fn append_token_info(&mut self, chunk: String) {
@@ -533,11 +535,11 @@ impl TuiApp {
             }
         }
 
-        self.mark_history_dirty();
+        self.set_dirty_from(self.messages.len().saturating_sub(1));
     }
 
     pub fn load_history(&mut self, harness: &Harness) {
-        self.messages.clear();
+        self.clear_messages();
         harness.replay_history(|event| match event {
             HarnessEvent::SystemMessage(text) => {
                 self.push_message(TuiMessage::SystemMessage(text));
@@ -604,46 +606,58 @@ impl TuiApp {
 
     pub fn clear_messages(&mut self) {
         self.messages.clear();
-        self.mark_history_dirty();
+        self.last_block_start = 0;
+        self.dirty_from = Some(0);
     }
 
     pub fn toggle_thinking(&mut self) {
         self.status = self.display_prefs.toggle_thinking();
-        self.mark_history_dirty();
+        self.dirty_from = Some(0);
     }
 
     pub fn toggle_token_info(&mut self) {
         self.status = self.display_prefs.toggle_token_info();
-        self.mark_history_dirty();
+        self.dirty_from = Some(0);
     }
 
     pub fn toggle_diff_view(&mut self) {
         self.status = self.display_prefs.toggle_diff_view();
-        self.mark_history_dirty();
+        self.dirty_from = Some(0);
     }
 
     pub fn push_message(&mut self, message: TuiMessage) {
+        let mut removed_padding = false;
         if !matches!(message, TuiMessage::Padding) {
-            while matches!(self.messages.last(), Some(TuiMessage::Padding)) {
+            if matches!(self.messages.last(), Some(TuiMessage::Padding)) {
                 self.messages.pop();
+                removed_padding = true;
             }
         }
+
+        let idx = self.messages.len();
         self.messages.push(message);
-        self.mark_history_dirty();
+        self.last_block_start = self
+            .history_lines
+            .len()
+            .saturating_sub(removed_padding as usize);
+        self.set_dirty_from(idx);
+    }
+
+    fn set_dirty_from(&mut self, idx: usize) {
+        match &mut self.dirty_from {
+            Some(d) => *d = (*d).min(idx),
+            None => self.dirty_from = Some(idx),
+        }
     }
 
     fn finish_last_tool_call(&mut self) {
-        for message in self.messages.iter_mut().rev() {
+        for (idx, message) in self.messages.iter_mut().enumerate().rev() {
             if let TuiMessage::ToolCall { start_time, .. } = message {
                 *start_time = 0;
-                self.mark_history_dirty();
+                self.set_dirty_from(idx);
                 break;
             }
         }
-    }
-
-    pub fn mark_history_dirty(&mut self) {
-        self.history_generation = self.history_generation.wrapping_add(1);
     }
 
     pub fn load_prompt_history(&mut self) -> Result<(), Box<dyn Error>> {
