@@ -28,6 +28,8 @@ use genai::{
 use serde_json::json;
 use std::{
     error::Error,
+    fs,
+    path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -111,6 +113,7 @@ pub struct Harness {
     last_plan_content: Option<String>,
     plan_mode_on: bool,
     turn_start: Option<u64>,
+    agents_md: Option<String>,
 }
 
 impl Harness {
@@ -160,6 +163,7 @@ impl Harness {
             plan_mode_on: false,
             live_info,
             turn_start: None,
+            agents_md: read_agents_md(),
         };
 
         harness.rebuild_agent();
@@ -209,6 +213,17 @@ impl Harness {
                 .to_string()
         } else {
             self.agent.prompt.clone()
+        };
+
+        // Prepend AGENTS.md content if available
+        let prompt = if let Some(agents_md) = &self.agents_md {
+            if prompt.is_empty() {
+                agents_md.clone()
+            } else {
+                format!("{}\n\n{}", agents_md, prompt)
+            }
+        } else {
+            prompt
         };
 
         // Append skills section to system prompt if available
@@ -749,4 +764,23 @@ pub fn time_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64
+}
+
+fn read_agents_md() -> Option<String> {
+    let path = PathBuf::from("AGENTS.md");
+    if path.exists() {
+        match fs::read_to_string(&path) {
+            Ok(content) => {
+                let content = content.trim().to_string();
+                if content.is_empty() {
+                    None
+                } else {
+                    Some(content)
+                }
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    }
 }
