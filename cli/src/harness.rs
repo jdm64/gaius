@@ -166,7 +166,7 @@ impl Harness {
             agents_md: read_agents_md(),
         };
 
-        harness.rebuild_agent();
+        harness.build_sys_prompt();
 
         Ok(harness)
     }
@@ -197,10 +197,10 @@ impl Harness {
 
     pub fn set_plan_mode(&mut self, is_on: bool) {
         self.plan_mode_on = is_on;
-        self.rebuild_agent();
+        self.build_sys_prompt();
     }
 
-    fn rebuild_agent(&mut self) {
+    fn build_sys_prompt(&mut self) {
         self.history.tools = if self.plan_mode_on {
             Some(self.tool_engine.build_tools())
         } else {
@@ -272,7 +272,12 @@ impl Harness {
 
     pub fn set_agent(&mut self, agent: AgentDefinition) {
         self.agent = agent;
-        self.rebuild_agent();
+        self.build_sys_prompt();
+    }
+
+    pub fn reload_agent(&mut self, agent: AgentDefinition) {
+        self.agents_md = read_agents_md();
+        self.set_agent(agent);
     }
 
     pub fn new_session(&mut self) -> Result<(), Box<dyn Error>> {
@@ -291,7 +296,7 @@ impl Harness {
         self.history.tools = Some(self.tool_engine.build_tools());
         self.last_plan_content = None;
         self.update_session_info();
-        self.rebuild_agent();
+        self.build_sys_prompt();
         Ok(())
     }
 
@@ -331,7 +336,7 @@ impl Harness {
     pub fn reload_skills(&mut self) -> Vec<Skill> {
         if let Ok(new_repo) = SkillRepo::load() {
             self.tool_engine.skill_repo = new_repo;
-            self.rebuild_agent();
+            self.build_sys_prompt();
         }
         self.list_skills()
     }

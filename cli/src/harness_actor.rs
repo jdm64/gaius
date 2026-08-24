@@ -119,6 +119,10 @@ pub enum HarnessCommand {
     ReloadSkills {
         reply_tx: oneshot::Sender<Result<Vec<Skill>, String>>,
     },
+    RebuildAgent {
+        agent: AgentDefinition,
+        reply_tx: oneshot::Sender<CommandResult>,
+    },
     Shutdown {
         reply_tx: oneshot::Sender<CommandResult>,
     },
@@ -158,6 +162,15 @@ impl HarnessActorHandle {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.send_command(HarnessCommand::ReloadSkills { reply_tx }, Some(reply_rx))
             .await
+    }
+
+    pub async fn rebuild_agent(&self, agent: AgentDefinition) -> CommandResult {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.send_command(
+            HarnessCommand::RebuildAgent { agent, reply_tx },
+            Some(reply_rx),
+        )
+        .await
     }
 
     pub async fn set_model(&self, model: ModelDef) -> CommandResult {
@@ -343,6 +356,10 @@ async fn run_actor(
             HarnessCommand::ReloadSkills { reply_tx } => {
                 let skills = harness.reload_skills();
                 let _ = reply_tx.send(Ok(skills));
+            }
+            HarnessCommand::RebuildAgent { agent, reply_tx } => {
+                harness.reload_agent(agent);
+                let _ = reply_tx.send(Ok(harness.snapshot()));
             }
             HarnessCommand::SetModel { model, reply_tx } => {
                 let result = harness

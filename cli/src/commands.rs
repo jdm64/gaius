@@ -3,8 +3,9 @@
  */
 
 use crate::{
-    agents::AgentDefinition,
+    agents::{AgentDefinition, Agents},
     config::ProviderConfig,
+    dirs::Dirs,
     harness_actor::HarnessActorHandle,
     input::{Input, InputMode, PickList, ProviderInfoRow},
     models::{ModelPickerRow, Models, RecentModelDef},
@@ -54,6 +55,10 @@ impl Commands {
             Command {
                 name: "info",
                 description: "Show session info",
+            },
+            Command {
+                name: "rebuild",
+                description: "Reload agents, skills, and AGENTS.md",
             },
             Command {
                 name: "streaming",
@@ -168,6 +173,49 @@ impl Commands {
                 InputMode::Skills {
                     picker: PickList::all(skills),
                 }
+            }
+            "rebuild" => {
+                if !app.harness_idle() {
+                    app.status = "Agent is busy; finish current turn before rebuilding".to_string();
+                } else {
+                    // Reload agents from disk
+                    let agents = match Dirs::config_dir() {
+                        Ok(config_dir) => match Agents::load(&config_dir) {
+                            Ok(agents) => {
+                                app.agents = agents;
+                                app.agents.all().to_vec()
+                            }
+                            Err(e) => {
+                                app.status = format!("Error reloading agents: {}", e);
+                                Input::clear_input(app);
+                                return InputMode::PromptInput;
+                            }
+                        },
+                        Err(e) => {
+                            app.status = format!("Error getting config dir: {}", e);
+                            Input::clear_input(app);
+                            return InputMode::PromptInput;
+                        }
+                    };
+
+                    // Find the current agent by name
+                    let current_agent_name = &app.snapshot.agent_name;
+                    let agent = agents
+                        .iter()
+                        .find(|a| a.name == *current_agent_name)
+                        .cloned()
+                        .unwrap_or_else(|| app.agents.default_agent().clone());
+
+                    match actor.rebuild_agent(agent).await {
+                        Ok(snapshot) => {
+                            app.save_snapshot(&snapshot);
+                            app.status = "Rebuilt agent and system prompt".to_string();
+                        }
+                        Err(err) => app.status = err,
+                    }
+                }
+                Input::clear_input(app);
+                InputMode::PromptInput
             }
             "info" => match actor.info().await {
                 Ok(info) => {
