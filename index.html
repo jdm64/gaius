@@ -597,6 +597,42 @@ section { padding: 110px 0; position: relative; }
 .step pre .p { color: var(--amber); }
 .step p { margin-top: 14px; font-size: 12px; color: var(--faint); }
 
+/* install method sub-sections */
+.inst-sub {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 56px;
+  margin-bottom: 30px;
+}
+.inst-sub .sec-rule { flex: 1; height: 1px; background: var(--line-soft); min-width: 40px; }
+/* no extra gap above whichever sub-section follows the section header directly */
+.sec-head + .inst-sub { margin-top: 0; }
+
+.inst-note { margin-top: 16px; font-size: 12px; color: var(--faint); }
+.inst-note code { color: var(--amber-dim); }
+
+.cmd-row { display: flex; justify-content: flex-start; }
+.cmd-box { display: inline-flex; max-width: 100%; margin-top: 4px; }
+.cmd-box > .frame-in {
+  display: flex;
+  align-items: center;
+  background: var(--bg-2);
+  min-width: 0;
+  max-width: 100%;
+}
+.cmd-box code {
+  padding: 15px 20px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow-x: auto;
+  min-width: 0;
+  scrollbar-width: none;
+}
+.cmd-box code::-webkit-scrollbar { display: none; }
+
 .config-note {
   margin-top: 34px;
   text-align: center;
@@ -635,7 +671,7 @@ footer {
   .nav-links a:not(:last-child) { display: none; }
   .features-grid, .principles { grid-template-columns: 1fr; }
   section { padding: 80px 0; }
-  .hero-cmd code { font-size: 11.5px; padding: 13px 14px; }
+  .hero-cmd code, .cmd-box code { font-size: 11.5px; padding: 13px 14px; }
   .term-body { font-size: 12px; padding: 18px 16px 14px; }
   .manifest-row { grid-template-columns: 1fr; gap: 2px; padding: 12px 18px; }
   .foot-motto { margin-left: 0; width: 100%; }
@@ -717,6 +753,34 @@ footer {
       <span class="sec-num">00</span>
       <h2 class="sec-title">Install</h2>
       <span class="sec-rule"></span>
+    </div>
+
+    <!-- ---- install: from prebuilt binary ---- -->
+    <div class="inst-sub reveal">
+      <span class="label">// FROM <b>BUILD</b></span>
+      <span class="sec-rule"></span>
+      <span class="label" style="letter-spacing:.12em; color:var(--faint); text-transform:none;">linux x86_64 · continuous</span>
+    </div>
+
+    <div class="cmd-row reveal">
+      <div class="cmd-box frame">
+        <div class="frame-in">
+          <code id="install-cmd"><span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/jdm64/gaius/master/install.sh | sh</code>
+          <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/jdm64/gaius/master/install.sh | sh" aria-label="Copy install command">copy</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="inst-note reveal">
+      Downloads the latest continuous build and installs it to
+      <code>~/.local/bin/gaius</code>. Checks Linux/x86_64 before touching anything.
+    </p>
+
+    <!-- ---- install: from sources ---- -->
+    <div class="inst-sub reveal">
+      <span class="label">// FROM <b>SOURCES</b></span>
+      <span class="sec-rule"></span>
+      <span class="label" style="letter-spacing:.12em; color:var(--faint); text-transform:none;">clone · build · run</span>
     </div>
 
     <div class="steps">
