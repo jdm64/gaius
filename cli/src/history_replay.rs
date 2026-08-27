@@ -10,6 +10,8 @@ pub trait MessageExt {
 
     fn has_plan_marker(&self) -> bool;
 
+    fn has_compact_summary_marker(&self) -> bool;
+
     fn emit_diff_markers<F>(&self, on_event: &mut F)
     where
         F: FnMut(HarnessEvent);
@@ -30,6 +32,14 @@ impl MessageExt for ChatMessage {
         matches!(
             self.content.parts().first(),
             Some(ContentPart::Custom(CustomPart { data, .. })) if data == &serde_json::json!("plan")
+        )
+    }
+
+    fn has_compact_summary_marker(&self) -> bool {
+        matches!(
+            self.content.parts().first(),
+            Some(ContentPart::Custom(CustomPart { data, .. }))
+                if data == &serde_json::json!("compact_summary")
         )
     }
 
@@ -65,6 +75,9 @@ where
                 if !text.is_empty() {
                     if message.has_plan_marker() {
                         on_event(HarnessEvent::PlanMessage(text));
+                    } else if message.has_compact_summary_marker() {
+                        on_event(HarnessEvent::CompactStart { start_time: 0 });
+                        on_event(HarnessEvent::CompactSummary(text));
                     } else {
                         on_event(HarnessEvent::UserPrompt(text));
                     }

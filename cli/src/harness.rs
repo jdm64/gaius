@@ -5,6 +5,7 @@
 use crate::{
     agents::AgentDefinition,
     cancel_handle::CancelHandle,
+    compact::{Compact, CompactOutcome},
     config::Config,
     diff_view::DiffView,
     history_replay,
@@ -21,8 +22,8 @@ use futures::StreamExt;
 use genai::{
     Client, Headers,
     chat::{
-        ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ContentPart, CustomPart,
-        MessageContent, StreamEnd, ToolCall, ToolResponse,
+        ChatMessage, ChatOptions, ChatRequest, ChatResponse, ChatStreamEvent, ContentPart,
+        CustomPart, MessageContent, StreamEnd, ToolCall, ToolResponse, Usage,
     },
 };
 use serde_json::json;
@@ -62,6 +63,10 @@ pub enum HarnessEvent {
     AgentMessage(String),
     SystemMessage(String),
     Thinking(String),
+    CompactStart {
+        start_time: u64,
+    },
+    CompactSummary(String),
     ToolCall {
         name: String,
         arguments: String,
@@ -244,7 +249,7 @@ impl Harness {
         }
     }
 
-    fn is_cancel(&self) -> bool {
+    pub fn is_cancel(&self) -> bool {
         self.cancel.is_cancel()
     }
 
@@ -367,6 +372,27 @@ impl Harness {
         self.update_session_info();
     }
 
+    pub async fn compact<F>(&mut self, on_event: &mut F) -> Result<(), Box<dyn Error>>
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        self.set_cancel(false);
+        self.update_session_info();
+
+        match Compact::compact_now(self, on_event).await? {
+            CompactOutcome::NothingToCompact => {
+                self.send_system_message("Nothing to compact".to_string(), on_event);
+            }
+            CompactOutcome::Cancelled => {
+                self.send_system_message("Compaction cancelled".to_string(), on_event);
+            }
+            // A failure already reported itself with a system message.
+            CompactOutcome::Compacted | CompactOutcome::Failed => {}
+        }
+
+        Ok(())
+    }
+
     pub async fn run_turn<F>(
         &mut self,
         request: UserRequest,
@@ -437,6 +463,13 @@ impl Harness {
 
         loop {
             if self.is_cancel() {
+                self.send_system_message("Request Cancelled".to_string(), &mut on_event);
+                return Ok(());
+            }
+
+            // A cancelled compaction means the user wants out of the turn —
+            // sending the request right after would ignore the cancel.
+            if Compact::maybe_compact(self, &mut on_event).await? == CompactOutcome::Cancelled {
                 self.send_system_message("Request Cancelled".to_string(), &mut on_event);
                 return Ok(());
             }
@@ -607,11 +640,7 @@ impl Harness {
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         let prompt_message_end = self.history.messages.len();
-        let chat_options = default_chat_opts();
-        let response = self
-            .client
-            .exec_chat(&self.model.id, self.history.clone(), Some(chat_options))
-            .await?;
+        let response = self.exec_chat(self.history.clone()).await?;
 
         let full_text = response.content.texts().join("");
         if !full_text.is_empty() {
@@ -632,6 +661,59 @@ impl Harness {
         );
 
         Ok(response.content.into_tool_calls())
+    }
+
+    pub async fn exec_chat(&self, request: ChatRequest) -> Result<ChatResponse, Box<dyn Error>> {
+        let response = self
+            .client
+            .exec_chat(&self.model.id, request, Some(default_chat_opts()))
+            .await?;
+
+        Ok(response)
+    }
+
+    pub async fn exec_chat_cancellable(
+        &self,
+        request: ChatRequest,
+    ) -> Result<ChatResponse, Box<dyn Error>> {
+        let response = self
+            .client
+            .exec_chat(&self.model.id, request, Some(default_chat_opts()));
+        tokio::pin!(response);
+
+        loop {
+            tokio::select! {
+                response = &mut response => return Ok(response?),
+                _ = self.cancel.notified() => {
+                    // A permit can be left over from an earlier cancel that no
+                    // waiter consumed; only a live cancel flag aborts.
+                    if self.is_cancel() {
+                        return Err("request cancelled".into());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Record the usage of a side request — one whose messages are not part of
+    /// the chat history, like the compaction summary call — so its tokens and
+    /// cost are counted in the session usage.
+    pub fn record_usage<F>(&mut self, usage: &Usage, on_event: &mut F)
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        self.token_usage
+            .record_side_usage(usage, self.model.pricing.as_ref());
+        on_event(HarnessEvent::TokenUsage {
+            prompt: usage.prompt_tokens,
+            response: usage.completion_tokens,
+            // A side request (such as compaction) does not change the active
+            // conversation context. `apply_compaction` emits the new total
+            // after it replaces the history.
+            total: None,
+            cost: self.token_usage.usage().total_cost(),
+        });
+        self.update_session_info();
     }
 
     async fn call_tools<F>(&mut self, tool_calls: &[ToolCall], on_event: &mut F)
@@ -755,6 +837,28 @@ impl Harness {
             error: false,
         });
         on_event(HarnessEvent::DiffView(diff));
+    }
+
+    pub fn apply_compaction<F>(
+        &mut self,
+        removed: usize,
+        messages: Vec<ChatMessage>,
+        summary_tokens: Option<i32>,
+        on_event: &mut F,
+    ) -> Result<(), Box<dyn Error>>
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        self.history.messages = messages;
+        self.token_usage.compact(removed, summary_tokens);
+        self.save_history()?;
+        on_event(HarnessEvent::TokenUsage {
+            prompt: None,
+            response: None,
+            total: self.token_usage.total_tokens(),
+            cost: self.token_usage.usage().total_cost(),
+        });
+        Ok(())
     }
 
     fn save_history(&mut self) -> Result<(), Box<dyn Error>> {

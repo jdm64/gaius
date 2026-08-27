@@ -6,6 +6,7 @@ pub mod agents;
 pub mod cancel_handle;
 pub mod cli_prompt;
 pub mod commands;
+pub mod compact;
 pub mod config;
 pub mod diff_view;
 pub mod dirs;

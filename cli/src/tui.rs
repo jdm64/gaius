@@ -25,7 +25,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use futures::StreamExt;
-use ratatui::{Terminal, backend::CrosstermBackend, text::Line};
+use ratatui::{Terminal, backend::CrosstermBackend, style::Style, text::Line};
 use std::{
     error::Error,
     fs,
@@ -44,6 +44,9 @@ pub enum TuiMessage {
     AgentMessage(String),
     Thinking(String),
     SystemMessage(String),
+    CompactionStart {
+        start_time: u64,
+    },
     TokenInfo(String),
     ToolCall {
         name: String,
@@ -60,12 +63,14 @@ pub enum TuiMessage {
     Padding,
 }
 
-/// Bookkeeping for a tool-call duration line that must keep advancing each
-/// frame while the tool is running. `line_index` is the position in
-/// `TuiApp::history_lines`; `start_time` is the tool call's start timestamp.
+/// Bookkeeping for a duration line that must keep advancing each frame while
+/// a tool call or a compaction is running. `line_index` is the position in
+/// `TuiApp::history_lines`; `start_time` is the start timestamp and `style`
+/// the themed style of the line.
 pub struct LiveTimer {
     pub line_index: usize,
     pub start_time: u64,
+    pub style: Style,
 }
 
 pub struct TerminalGuard {
@@ -323,7 +328,7 @@ impl TuiApp {
             }
             HarnessActorEvent::TurnFinished(snapshot) => {
                 self.actor_busy = false;
-                self.finish_last_tool_call();
+                self.finish_last_timer();
                 self.save_snapshot(&snapshot);
                 self.status = if self.queued_prompts > 0 {
                     format!("Queued prompt ({} pending)", self.queued_prompts)
@@ -334,7 +339,7 @@ impl TuiApp {
             }
             HarnessActorEvent::RequestFailed(err, snapshot) => {
                 self.actor_busy = false;
-                self.finish_last_tool_call();
+                self.finish_last_timer();
                 self.save_snapshot(&snapshot);
                 self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
                 self.status = "Agent request failed".to_string();
@@ -445,6 +450,13 @@ impl TuiApp {
             HarnessEvent::Thinking(chunk) => {
                 self.append_agent_message(chunk, true);
             }
+            HarnessEvent::CompactStart { start_time } => {
+                self.push_message(TuiMessage::CompactionStart { start_time });
+            }
+            HarnessEvent::CompactSummary(text) => {
+                self.finish_last_timer();
+                self.push_message(TuiMessage::AgentMessage(text));
+            }
             HarnessEvent::ToolCall {
                 name,
                 arguments,
@@ -461,7 +473,7 @@ impl TuiApp {
                 result,
                 error,
             } => {
-                self.finish_last_tool_call();
+                self.finish_last_timer();
                 self.push_message(TuiMessage::ToolResult {
                     name,
                     result,
@@ -556,6 +568,12 @@ impl TuiApp {
             HarnessEvent::Thinking(text) => {
                 self.append_agent_message(text, true);
             }
+            HarnessEvent::CompactStart { start_time } => {
+                self.push_message(TuiMessage::CompactionStart { start_time });
+            }
+            HarnessEvent::CompactSummary(text) => {
+                self.push_message(TuiMessage::AgentMessage(text));
+            }
             HarnessEvent::ToolCall {
                 name,
                 arguments,
@@ -572,7 +590,7 @@ impl TuiApp {
                 result,
                 error,
             } => {
-                self.finish_last_tool_call();
+                self.finish_last_timer();
                 self.push_message(TuiMessage::ToolResult {
                     name,
                     result,
@@ -650,13 +668,16 @@ impl TuiApp {
         }
     }
 
-    fn finish_last_tool_call(&mut self) {
+    fn finish_last_timer(&mut self) {
         for (idx, message) in self.messages.iter_mut().enumerate().rev() {
-            if let TuiMessage::ToolCall { start_time, .. } = message {
-                *start_time = 0;
-                self.set_dirty_from(idx);
-                break;
-            }
+            let start_time = match message {
+                TuiMessage::ToolCall { start_time, .. } => start_time,
+                TuiMessage::CompactionStart { start_time } => start_time,
+                _ => continue,
+            };
+            *start_time = 0;
+            self.set_dirty_from(idx);
+            break;
         }
     }
 

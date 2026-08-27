@@ -109,6 +109,7 @@ pub enum HarnessCommand {
     ReplayHistory {
         reply_tx: oneshot::Sender<CommandResult>,
     },
+    Compact,
     Cancel,
     Info {
         reply_tx: oneshot::Sender<Result<SessionInfo, String>>,
@@ -221,6 +222,10 @@ impl HarnessActorHandle {
             .await
     }
 
+    pub async fn compact(&self) -> Result<(), String> {
+        self.send_command::<()>(HarnessCommand::Compact, None).await
+    }
+
     pub async fn cancel(&self) -> Result<(), String> {
         self.send_command::<()>(HarnessCommand::Cancel, None).await
     }
@@ -324,6 +329,47 @@ async fn run_turn(
     result
 }
 
+async fn run_compaction(
+    harness: &mut Harness,
+    command_rx: &mut mpsc::Receiver<HarnessCommand>,
+    event_tx: &mpsc::UnboundedSender<HarnessActorEvent>,
+) -> Result<(), String> {
+    let info_ref = harness.session_info();
+    let cancel_flag = harness.cancel_handle();
+    let event_tx_for_callback = event_tx.clone();
+    let mut on_event = move |event: HarnessEvent| -> Option<String> {
+        let _ = event_tx_for_callback.send(HarnessActorEvent::Harness(event));
+        None
+    };
+
+    let mut compaction = Box::pin(harness.compact(&mut on_event));
+    let result: Result<(), String> = loop {
+        tokio::select! {
+            result = &mut compaction => break result.map_err(|err| err.to_string()),
+            cmd = command_rx.recv() => match cmd {
+                Some(HarnessCommand::Cancel) => cancel_flag.cancel(),
+                Some(HarnessCommand::Info { reply_tx }) => {
+                    let _ = reply_tx.send(Ok(info_ref.lock().unwrap().clone()));
+                }
+                Some(_) => {}
+                None => break Err("Actor channel closed".into()),
+            },
+        }
+    };
+
+    drop(compaction);
+    let snapshot = harness.snapshot();
+    match &result {
+        Ok(()) => {
+            let _ = event_tx.send(HarnessActorEvent::TurnFinished(snapshot));
+        }
+        Err(err) => {
+            let _ = event_tx.send(HarnessActorEvent::RequestFailed(err.clone(), snapshot));
+        }
+    }
+    result
+}
+
 async fn run_actor(
     mut harness: Harness,
     mut command_rx: mpsc::Receiver<HarnessCommand>,
@@ -403,6 +449,9 @@ async fn run_actor(
                 harness.replay_history(|event| events.push(event));
                 let _ = event_tx.send(HarnessActorEvent::HistoryReplayed(events));
                 let _ = reply_tx.send(Ok(harness.snapshot()));
+            }
+            HarnessCommand::Compact => {
+                let _ = run_compaction(&mut harness, &mut command_rx, &event_tx).await;
             }
             HarnessCommand::Cancel => {
                 harness.set_cancel(true);

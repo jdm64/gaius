@@ -428,6 +428,69 @@ fn line_texts(lines: &[Line<'_>]) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn compaction_start_renders_rule_with_duration_while_running() {
+    let render = Render::new();
+    let msg = TuiMessage::CompactionStart {
+        start_time: gaius::harness::time_now() - 3_000,
+    };
+    let lines = render.render_message(&msg, &default_prefs());
+    assert_eq!(lines.len(), 2, "expected rule line + duration line");
+
+    // the word Compaction sits centered on a horizontal rule
+    let rule = &line_texts(&lines)[0];
+    let (before, rest) = rule.split_once(" Compaction ").expect("label present");
+    assert!(!before.is_empty() && before.chars().all(|c| c == '\u{2500}'));
+    assert!(!rest.is_empty() && rest.chars().all(|c| c == '\u{2500}'));
+
+    // running compaction shows its duration like a running tool call
+    assert!(
+        lines[1]
+            .spans
+            .iter()
+            .any(|s| s.content.contains('\u{23F1}'))
+    );
+
+    // a finished compaction (start_time == 0) renders just the rule
+    let msg = TuiMessage::CompactionStart { start_time: 0 };
+    let lines = render.render_message(&msg, &default_prefs());
+    assert_eq!(lines.len(), 1);
+    assert!(line_texts(&lines)[0].contains(" Compaction "));
+}
+
+#[test]
+fn live_compaction_timer_updates_without_new_messages() {
+    use std::thread;
+    use std::time::Duration as StdDuration;
+
+    let render = Render::new();
+    let mut app = TuiApp::new(Config::new());
+    app.push_message(TuiMessage::CompactionStart {
+        start_time: gaius::harness::time_now() - 5_000,
+    });
+
+    let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
+
+    // the running compaction should be tracked as a live timer
+    assert_eq!(app.live_timers.len(), 1);
+    let timer_text = |app: &TuiApp| {
+        app.history_lines[app.live_timers[0].line_index]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>()
+    };
+
+    let first = timer_text(&app);
+    thread::sleep(StdDuration::from_millis(1100));
+    terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
+    let second = timer_text(&app);
+
+    assert_ne!(first, second, "timer should change across frames");
+    assert!(second > first, "timer should advance: {first} -> {second}");
+}
+
 fn buffer_contains(terminal: &Terminal<TestBackend>, needle: &str) -> bool {
     let buf = terminal.backend().buffer();
     for row in 0..buf.area.height {

@@ -61,6 +61,10 @@ impl Commands {
                 description: "Reload agents, skills, and AGENTS.md",
             },
             Command {
+                name: "compact",
+                description: "Compact conversation history into a summary",
+            },
+            Command {
                 name: "streaming",
                 description: "Toggle streaming mode on/off",
             },
@@ -212,6 +216,21 @@ impl Commands {
                             app.status = "Rebuilt agent and system prompt".to_string();
                         }
                         Err(err) => app.status = err,
+                    }
+                }
+                Input::clear_input(app);
+                InputMode::PromptInput
+            }
+            "compact" => {
+                if !app.harness_idle() {
+                    app.status = "Agent is busy; finish current turn before compacting".to_string();
+                } else {
+                    app.actor_busy = true;
+                    app.status = "Compacting conversation...".to_string();
+                    Input::scroll_history_bottom(app);
+                    if let Err(err) = actor.compact().await {
+                        app.actor_busy = false;
+                        app.status = err;
                     }
                 }
                 Input::clear_input(app);

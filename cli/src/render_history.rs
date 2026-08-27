@@ -230,7 +230,7 @@ impl Render {
                 ])];
 
                 if *start_time != 0 {
-                    lines.push(Self::tool_call_duration_line(*start_time, style));
+                    lines.push(Self::duration_line(*start_time, style));
                 }
 
                 lines
@@ -261,6 +261,16 @@ impl Render {
                     .fg(self.theme.error)
                     .add_modifier(Modifier::BOLD);
                 vec![Line::from(text.clone()).style(style)]
+            }
+            TuiMessage::CompactionStart { start_time } => {
+                let style = Style::default()
+                    .fg(self.theme.header)
+                    .add_modifier(Modifier::DIM);
+                let mut lines = vec![Self::compaction_rule_line(style)];
+                if *start_time != 0 {
+                    lines.push(Self::duration_line(*start_time, style));
+                }
+                lines
             }
             TuiMessage::TokenInfo(text) => {
                 if !prefs.token_info {
@@ -434,13 +444,23 @@ impl Render {
         let content_offset = app.history_lines.len();
         let rendered = self.render_message(message, &app.display_prefs);
 
-        if let TuiMessage::ToolCall { start_time, .. } = message
-            && *start_time != 0
+        let live_timer = match message {
+            TuiMessage::ToolCall { start_time, .. } if *start_time != 0 => {
+                Some((*start_time, Style::default().fg(self.theme.toolcall)))
+            }
+            TuiMessage::CompactionStart { start_time } if *start_time != 0 => {
+                Some((*start_time, Style::default().fg(self.theme.header)))
+            }
+            _ => None,
+        };
+
+        if let Some((start_time, style)) = live_timer
             && !rendered.is_empty()
         {
             app.live_timers.push(LiveTimer {
                 line_index: content_offset + rendered.len() - 1,
-                start_time: *start_time,
+                start_time,
+                style,
             });
         }
 
@@ -453,15 +473,25 @@ impl Render {
         if app.live_timers.is_empty() {
             return;
         }
-        let style = Style::default().fg(self.theme.toolcall);
         for timer in &app.live_timers {
             if let Some(line) = app.history_lines.get_mut(timer.line_index) {
-                *line = Self::tool_call_duration_line(timer.start_time, style);
+                *line = Self::duration_line(timer.start_time, timer.style);
             }
         }
     }
 
-    fn tool_call_duration_line(start_time: u64, style: Style) -> Line<'static> {
+    /// Horizontal rule with the word "Compaction" centered.
+    fn compaction_rule_line(style: Style) -> Line<'static> {
+        const RULE_WIDTH: usize = 14;
+        let rule = "─".repeat(RULE_WIDTH);
+        Line::from(vec![
+            Span::styled(rule.clone(), style),
+            Span::styled(" Compaction ", style.add_modifier(Modifier::BOLD)),
+            Span::styled(rule, style),
+        ])
+    }
+
+    fn duration_line(start_time: u64, style: Style) -> Line<'static> {
         let elapsed = time_now().saturating_sub(start_time);
         Line::from(Span::styled(
             format!("  {}", format_duration(elapsed)),

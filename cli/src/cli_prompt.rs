@@ -95,6 +95,20 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
+                HarnessEvent::CompactStart { start_time: _ } => {
+                    println!("{} Compaction {}", "─".repeat(14), "─".repeat(14));
+                    let _ = io::stdout().flush();
+                    None
+                }
+                HarnessEvent::CompactSummary(text) => {
+                    if !agent_started {
+                        print!("agent> ");
+                        agent_started = true;
+                    }
+                    print!("{}", text);
+                    let _ = io::stdout().flush();
+                    None
+                }
                 HarnessEvent::ToolCall {
                     name,
                     arguments,
