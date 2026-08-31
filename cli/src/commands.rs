@@ -53,6 +53,10 @@ impl Commands {
                 description: "Toggle plan mode on/off",
             },
             Command {
+                name: "fork",
+                description: "Copy the current session with a new id",
+            },
+            Command {
                 name: "info",
                 description: "Show session info",
             },
@@ -136,6 +140,29 @@ impl Commands {
                             Input::scroll_history_bottom(app);
                             app.status = "New session created".to_string();
                             app.context_tokens = None;
+                        }
+                        Err(e) => {
+                            app.status = e;
+                        }
+                    }
+                };
+                Input::clear_input(app);
+                InputMode::PromptInput
+            }
+            "fork" => {
+                if !app.harness_idle() {
+                    app.status =
+                        "Agent is busy; finish current turn before forking a session".to_string();
+                } else {
+                    match actor.fork_session().await {
+                        Ok(snapshot) => {
+                            app.save_snapshot(&snapshot);
+                            app.push_message(TuiMessage::SystemMessage(format!(
+                                "Session forked: {}",
+                                snapshot.session_id.unwrap_or("<unknown>".to_string()),
+                            )));
+                            app.status = "Forked session".to_string();
+                            Input::scroll_history_bottom(app);
                         }
                         Err(e) => {
                             app.status = e;

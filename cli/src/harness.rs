@@ -289,6 +289,11 @@ impl Harness {
         self.load_session(Session::new())
     }
 
+    pub fn fork_session(&mut self) -> Result<(), Box<dyn Error>> {
+        self.session = Session::new();
+        self.save_history()
+    }
+
     pub fn load_session_by_id(&mut self, session_id: &str) -> Result<(), Box<dyn Error>> {
         self.load_session(Session::new_named(session_id.to_string())?)
     }

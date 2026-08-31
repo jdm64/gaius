@@ -96,6 +96,9 @@ pub enum HarnessCommand {
     NewSession {
         reply_tx: oneshot::Sender<CommandResult>,
     },
+    ForkSession {
+        reply_tx: oneshot::Sender<CommandResult>,
+    },
     LoadSession {
         session_id: String,
         reply_tx: oneshot::Sender<CommandResult>,
@@ -189,6 +192,12 @@ impl HarnessActorHandle {
     pub async fn new_session(&self) -> CommandResult {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.send_command(HarnessCommand::NewSession { reply_tx }, Some(reply_rx))
+            .await
+    }
+
+    pub async fn fork_session(&self) -> CommandResult {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.send_command(HarnessCommand::ForkSession { reply_tx }, Some(reply_rx))
             .await
     }
 
@@ -422,6 +431,13 @@ async fn run_actor(
             HarnessCommand::NewSession { reply_tx } => {
                 let result = harness
                     .new_session()
+                    .map(|_| harness.snapshot())
+                    .map_err(|err| err.to_string());
+                let _ = reply_tx.send(result);
+            }
+            HarnessCommand::ForkSession { reply_tx } => {
+                let result = harness
+                    .fork_session()
                     .map(|_| harness.snapshot())
                     .map_err(|err| err.to_string());
                 let _ = reply_tx.send(result);
