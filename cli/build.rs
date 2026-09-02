@@ -6,13 +6,12 @@ fn main() {
         .arg("rev-parse")
         .arg("--git-dir")
         .output()
+        && git_dir.status.success()
     {
-        if git_dir.status.success() {
-            let git_dir = String::from_utf8_lossy(&git_dir.stdout).trim().to_string();
-            // .git/HEAD changes on every commit/checkout; refs changes on branch switches
-            println!("cargo:rerun-if-changed={git_dir}/HEAD");
-            println!("cargo:rerun-if-changed={git_dir}/refs");
-        }
+        let git_dir = String::from_utf8_lossy(&git_dir.stdout).trim().to_string();
+        // .git/HEAD changes on every commit/checkout; refs changes on branch switches
+        println!("cargo:rerun-if-changed={git_dir}/HEAD");
+        println!("cargo:rerun-if-changed={git_dir}/refs");
     }
 
     let describe = Command::new("git")

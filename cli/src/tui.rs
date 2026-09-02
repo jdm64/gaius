@@ -645,11 +645,11 @@ impl TuiApp {
 
     pub fn push_message(&mut self, message: TuiMessage) {
         let mut removed_padding = false;
-        if !matches!(message, TuiMessage::Padding) {
-            if matches!(self.messages.last(), Some(TuiMessage::Padding)) {
-                self.messages.pop();
-                removed_padding = true;
-            }
+        if !matches!(message, TuiMessage::Padding)
+            && matches!(self.messages.last(), Some(TuiMessage::Padding))
+        {
+            self.messages.pop();
+            removed_padding = true;
         }
 
         let idx = self.messages.len();
