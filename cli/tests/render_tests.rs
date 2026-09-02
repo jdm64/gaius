@@ -25,7 +25,7 @@ fn markdown_heading_has_bold_style() {
     let render = Render::new();
     let md = "# Heading";
     let msg = TuiMessage::AgentMessage(md.to_string());
-    let lines = render.render_message(&msg, &default_prefs());
+    let lines = render.render_message(&msg, &default_prefs(), 80);
     assert!(!lines.is_empty());
     // The heading style should be applied to the Line's style, not the span.
     let line = &lines[0];
@@ -49,7 +49,7 @@ fn markdown_list_has_style() {
     let render = Render::new();
     let md = "- item1\n- item2";
     let msg = TuiMessage::AgentMessage(md.to_string());
-    let lines = render.render_message(&msg, &default_prefs());
+    let lines = render.render_message(&msg, &default_prefs(), 80);
     assert!(!lines.is_empty());
     // List items should have a style (maybe a marker).
     // Check lines contain the items; style might be default but marker could have style?
@@ -127,6 +127,7 @@ fn visible_history_lines_pads_user_prompts_to_width() {
     let lines = render.render_message(
         &TuiMessage::UserPrompt("hello".to_string()),
         &default_prefs(),
+        80,
     );
 
     let (visible, _row_infos) = render.visible_history_lines(&lines, 10, 0, 3);
@@ -325,7 +326,7 @@ fn render_diff_view_includes_headers_lines_and_missing_newline_marker() {
         }],
     });
 
-    let lines = render.render_message(&msg, &default_prefs());
+    let lines = render.render_message(&msg, &default_prefs(), 80);
     let texts = line_texts(&lines);
 
     assert!(texts.contains(&"diff src/lib.rs".to_string()));
@@ -360,7 +361,7 @@ fn tool_call_duration_renders_on_its_own_line() {
         arguments: "{}".to_string(),
         start_time: gaius::harness::time_now() - 5_000,
     };
-    let lines = render.render_message(&msg, &default_prefs());
+    let lines = render.render_message(&msg, &default_prefs(), 80);
     assert_eq!(lines.len(), 2, "expected name line + duration line");
     assert!(lines[0].spans.iter().any(|s| s.content == "bash"));
     assert!(
@@ -376,7 +377,7 @@ fn tool_call_duration_renders_on_its_own_line() {
         arguments: "{}".to_string(),
         start_time: 0,
     };
-    let lines = render.render_message(&msg, &default_prefs());
+    let lines = render.render_message(&msg, &default_prefs(), 80);
     assert_eq!(lines.len(), 1);
 }
 
@@ -434,7 +435,7 @@ fn compaction_start_renders_rule_with_duration_while_running() {
     let msg = TuiMessage::CompactionStart {
         start_time: gaius::harness::time_now() - 3_000,
     };
-    let lines = render.render_message(&msg, &default_prefs());
+    let lines = render.render_message(&msg, &default_prefs(), 80);
     assert_eq!(lines.len(), 2, "expected rule line + duration line");
 
     // the word Compaction sits centered on a horizontal rule
@@ -453,7 +454,7 @@ fn compaction_start_renders_rule_with_duration_while_running() {
 
     // a finished compaction (start_time == 0) renders just the rule
     let msg = TuiMessage::CompactionStart { start_time: 0 };
-    let lines = render.render_message(&msg, &default_prefs());
+    let lines = render.render_message(&msg, &default_prefs(), 80);
     assert_eq!(lines.len(), 1);
     assert!(line_texts(&lines)[0].contains(" Compaction "));
 }

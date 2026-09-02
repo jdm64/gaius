@@ -164,7 +164,12 @@ impl Render {
         }
     }
 
-    pub fn render_message(&self, msg: &TuiMessage, prefs: &DisplayPrefs) -> Vec<Line<'static>> {
+    pub fn render_message(
+        &self,
+        msg: &TuiMessage,
+        prefs: &DisplayPrefs,
+        text_width: u16,
+    ) -> Vec<Line<'static>> {
         match msg {
             TuiMessage::Thinking(text) => {
                 if !prefs.thinking {
@@ -266,7 +271,7 @@ impl Render {
                 let style = Style::default()
                     .fg(self.theme.header)
                     .add_modifier(Modifier::DIM);
-                let mut lines = vec![Self::compaction_rule_line(style)];
+                let mut lines = vec![Self::compaction_rule_line(style, text_width)];
                 if *start_time != 0 {
                     lines.push(Self::duration_line(*start_time, style));
                 }
@@ -397,30 +402,30 @@ impl Render {
             // if dirty_from != last_idx then last_block_start is invalid and
             // a whole rerender must be done. This could be optimized by
             // storing block start for each message but probably not worth it.
-            self.full_rerender(app);
+            self.full_rerender(app, text_width);
         } else {
             app.history_lines.truncate(app.last_block_start);
             app.live_timers
                 .retain(|t| t.line_index < app.last_block_start);
 
-            self.render_message_at(app, last_idx);
+            self.render_message_at(app, last_idx, text_width);
         }
 
         app.last_render_width = text_width;
         app.dirty_from = None;
     }
 
-    fn full_rerender(&self, app: &mut TuiApp) {
+    fn full_rerender(&self, app: &mut TuiApp, text_width: u16) {
         app.history_lines.clear();
         app.live_timers.clear();
         app.history_lines.push(Line::from(""));
 
         for index in 0..app.messages.len() {
-            self.render_message_at(app, index);
+            self.render_message_at(app, index, text_width);
         }
     }
 
-    fn render_message_at(&self, app: &mut TuiApp, index: usize) {
+    fn render_message_at(&self, app: &mut TuiApp, index: usize, text_width: u16) {
         let message = &app.messages[index];
         let block_start = app.history_lines.len();
 
@@ -442,7 +447,7 @@ impl Render {
         }
 
         let content_offset = app.history_lines.len();
-        let rendered = self.render_message(message, &app.display_prefs);
+        let rendered = self.render_message(message, &app.display_prefs, text_width);
 
         let live_timer = match message {
             TuiMessage::ToolCall { start_time, .. } if *start_time != 0 => {
@@ -481,12 +486,16 @@ impl Render {
     }
 
     /// Horizontal rule with the word "Compaction" centered.
-    fn compaction_rule_line(style: Style) -> Line<'static> {
-        const RULE_WIDTH: usize = 14;
-        let rule = "─".repeat(RULE_WIDTH);
+    fn compaction_rule_line(style: Style, text_width: u16) -> Line<'static> {
+        let text_width = text_width as usize;
+        let center = " Compaction ";
+        let center_len = center.len();
+        // Calculate the width for each side of the rule
+        let side_width = text_width.saturating_sub(center_len) / 2;
+        let rule = "─".repeat(side_width);
         Line::from(vec![
             Span::styled(rule.clone(), style),
-            Span::styled(" Compaction ", style.add_modifier(Modifier::BOLD)),
+            Span::styled(center.to_string(), style.add_modifier(Modifier::BOLD)),
             Span::styled(rule, style),
         ])
     }
