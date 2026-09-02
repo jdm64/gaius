@@ -49,7 +49,7 @@ impl DisplayPrefs {
 
 impl Render {
     pub fn draw_history(&self, app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
-        let text_width = area.width.saturating_sub(4).max(1);
+        let text_width = area.width.saturating_sub(2).max(1);
         let text_height = area.height.saturating_sub(2).max(1);
         app.history_page_size = text_height;
 
