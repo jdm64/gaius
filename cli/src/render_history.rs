@@ -83,8 +83,13 @@ impl Render {
             snapshot.agent_name.clone()
         };
 
+        let model_name = match &snapshot.model.reasoning {
+            Some(reasoning) => format!("{}:{}", snapshot.model.id, reasoning),
+            None => snapshot.model.id.clone(),
+        };
+
         let parts: Vec<String> = [
-            Some(format!("Gaius - {} - {}", snapshot.model.id, agent_label)),
+            Some(format!("Gaius - {} - {}", model_name, agent_label)),
             app.context_tokens
                 .map(|tokens| match snapshot.model.context_len {
                     Some(context_len) if context_len > 0 => {

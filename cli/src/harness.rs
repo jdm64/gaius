@@ -9,7 +9,7 @@ use crate::{
     config::Config,
     diff_view::DiffView,
     history_replay,
-    models::ModelDef,
+    models::{ModelDef, ReasoningEffort},
     plan_hook::PlanHook,
     rate_limit::is_rate_limit_error,
     render::Render,
@@ -37,10 +37,10 @@ use std::{
 use tokio::time;
 use uuid::Uuid;
 
-static CHAT_OPTIONS: OnceLock<ChatOptions> = OnceLock::new();
+static BASE_CHAT_OPTIONS: OnceLock<ChatOptions> = OnceLock::new();
 
-fn default_chat_opts() -> &'static ChatOptions {
-    CHAT_OPTIONS.get_or_init(|| {
+fn base_chat_opts() -> &'static ChatOptions {
+    BASE_CHAT_OPTIONS.get_or_init(|| {
         ChatOptions::default()
             .with_capture_content(true)
             .with_capture_tool_calls(true)
@@ -48,6 +48,17 @@ fn default_chat_opts() -> &'static ChatOptions {
             .with_capture_usage(true)
             .with_extra_headers(Headers::from([("User-Agent", "Gaius")]))
     })
+}
+
+/// Build chat options with the given reasoning effort applied on top of the
+/// base defaults.  When `effort` is `None` or `Some(Default)`, the base
+/// options are returned unchanged.
+fn default_chat_opts(effort: Option<&ReasoningEffort>) -> ChatOptions {
+    let opts = base_chat_opts().clone();
+    match effort.and_then(|e| e.to_genai()) {
+        Some(genai_effort) => opts.with_reasoning_effort(genai_effort),
+        None => opts,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -542,10 +553,10 @@ impl Harness {
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         let prompt_message_end = self.history.messages.len();
-        let chat_options = default_chat_opts();
+        let chat_options = default_chat_opts(self.model.reasoning.as_ref());
         let mut response = self
             .client
-            .exec_chat_stream(&self.model.id, self.history.clone(), Some(chat_options))
+            .exec_chat_stream(&self.model.id, self.history.clone(), Some(&chat_options))
             .await?;
 
         let mut stream_end = None;
@@ -669,9 +680,10 @@ impl Harness {
     }
 
     pub async fn exec_chat(&self, request: ChatRequest) -> Result<ChatResponse, Box<dyn Error>> {
+        let chat_options = default_chat_opts(self.model.reasoning.as_ref());
         let response = self
             .client
-            .exec_chat(&self.model.id, request, Some(default_chat_opts()))
+            .exec_chat(&self.model.id, request, Some(&chat_options))
             .await?;
 
         Ok(response)
@@ -681,9 +693,10 @@ impl Harness {
         &self,
         request: ChatRequest,
     ) -> Result<ChatResponse, Box<dyn Error>> {
+        let chat_options = default_chat_opts(self.model.reasoning.as_ref());
         let response = self
             .client
-            .exec_chat(&self.model.id, request, Some(default_chat_opts()));
+            .exec_chat(&self.model.id, request, Some(&chat_options));
         tokio::pin!(response);
 
         loop {

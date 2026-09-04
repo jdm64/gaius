@@ -104,6 +104,7 @@ impl Render {
             InputMode::PromptInput | InputMode::Exit => None,
             InputMode::SessionInfo { info } => self.draw_session_info(frame, chunks[1], info),
             InputMode::Question { .. } => Some(Self::question_help()),
+            InputMode::Reasoning { picker } => self.draw_reasoning(frame, chunks[1], picker),
         };
 
         let help_items = active_help.unwrap_or(vec![("Ctrl+C", "quit"), ("Ctrl+D", "cancel")]);

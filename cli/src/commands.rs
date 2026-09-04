@@ -8,7 +8,7 @@ use crate::{
     dirs::Dirs,
     harness_actor::HarnessActorHandle,
     input::{Input, InputMode, PickList, ProviderInfoRow},
-    models::{ModelPickerRow, Models, RecentModelDef},
+    models::{ModelPickerRow, Models, ReasoningEffort, RecentModelDef},
     session::Session,
     skills::Skill,
     token_usage::SessionInfo,
@@ -51,6 +51,10 @@ impl Commands {
             Command {
                 name: "plan",
                 description: "Toggle plan mode on/off",
+            },
+            Command {
+                name: "reasoning",
+                description: "Set reasoning effort level",
             },
             Command {
                 name: "fork",
@@ -111,6 +115,9 @@ impl Commands {
             InputMode::Agents { picker } => Self::handle_agents_mode(app, key, picker, actor).await,
             InputMode::Files { picker } => Input::handle_files_mode(app, key, picker).await,
             InputMode::Skills { picker } => Self::handle_skills_mode(app, key, picker, actor).await,
+            InputMode::Reasoning { picker } => {
+                Self::handle_reasoning_mode(app, key, picker, actor).await
+            }
             InputMode::Question {
                 title: _,
                 options: _,
@@ -294,6 +301,14 @@ impl Commands {
                 app.toggle_thinking();
                 Input::clear_input(app);
                 InputMode::PromptInput
+            }
+            "reasoning" => {
+                let efforts: Vec<ReasoningEffort> = ReasoningEffort::all().to_vec();
+                let filtered = (0..efforts.len()).collect();
+                Input::clear_input(app);
+                InputMode::Reasoning {
+                    picker: PickList::new(efforts, filtered),
+                }
             }
             "show-tokens" => {
                 app.toggle_token_info();
@@ -534,6 +549,60 @@ impl Commands {
         }
 
         InputMode::SessionRename { picker }
+    }
+
+    pub async fn handle_reasoning_mode(
+        app: &mut TuiApp,
+        key: event::KeyEvent,
+        mut picker: PickList<ReasoningEffort>,
+        actor: &HarnessActorHandle,
+    ) -> InputMode {
+        Input::handle_input_cursor(app, key);
+        match key.code {
+            KeyCode::Esc => return InputMode::PromptInput,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return InputMode::Exit;
+            }
+            KeyCode::Up => {
+                picker.move_up();
+            }
+            KeyCode::Down => {
+                picker.move_down();
+            }
+            KeyCode::Enter => {
+                if !app.harness_idle() {
+                    app.status =
+                        "Agent is busy; finish current turn before changing reasoning".to_string();
+                    return InputMode::Reasoning { picker };
+                }
+                let Some(selected) = picker.selected_row() else {
+                    return InputMode::Reasoning { picker };
+                };
+
+                // Merge the new reasoning effort into the current model.
+                let mut model = app.snapshot.model.clone();
+                model.reasoning = if *selected == ReasoningEffort::Default {
+                    None
+                } else {
+                    Some(selected.clone())
+                };
+
+                match actor.set_model(model.clone()).await {
+                    Ok(snapshot) => {
+                        app.save_snapshot(&snapshot);
+                        app.snapshot.model = model;
+                        let _ = RecentModelDef::add(&app.snapshot.model);
+                        Input::clear_input(app);
+                        app.status = format!("Reasoning effort = {}", selected.label());
+                        return InputMode::PromptInput;
+                    }
+                    Err(err) => app.status = err,
+                }
+            }
+            _ => {}
+        }
+
+        InputMode::Reasoning { picker }
     }
 
     fn handle_session_info_mode(key: event::KeyEvent, info: SessionInfo) -> InputMode {

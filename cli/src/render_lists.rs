@@ -7,7 +7,7 @@ use crate::{
     agents::AgentDefinition,
     commands::Command,
     input::{FileEntry, PickList, ProviderInfoRow},
-    models::ModelPickerRow,
+    models::{ModelPickerRow, ReasoningEffort},
     session::Session,
     skills::Skill,
     token_usage::SessionInfo,
@@ -318,6 +318,31 @@ impl Render {
         frame.render_widget(paragraph, rect);
 
         Some(vec![("Esc|Enter", "close")])
+    }
+
+    pub fn draw_reasoning(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        picker: &PickList<ReasoningEffort>,
+    ) -> Option<Vec<(&'static str, &'static str)>> {
+        self.draw_pick_list(
+            frame,
+            area,
+            picker,
+            PickListRenderSpec {
+                title: "Reasoning Effort",
+                max_width: 30,
+                empty_text: "No levels",
+                background: Style::default(),
+            },
+            |effort, _index| ListItem::new(effort.label()),
+        );
+        Some(vec![
+            ("Up/Down", "select"),
+            ("Enter", "apply"),
+            ("Esc", "cancel"),
+        ])
     }
 
     fn draw_pick_list<'a, T, F>(

@@ -6,7 +6,7 @@ use crate::{
     agents::AgentDefinition,
     commands::{Command, Commands, input_changed_key},
     harness_actor::HarnessActorHandle,
-    models::ModelPickerRow,
+    models::{ModelPickerRow, ReasoningEffort},
     session::Session,
     skills::Skill,
     token_usage::SessionInfo,
@@ -131,6 +131,9 @@ pub enum InputMode {
     },
     SessionInfo {
         info: SessionInfo,
+    },
+    Reasoning {
+        picker: PickList<ReasoningEffort>,
     },
 }
 

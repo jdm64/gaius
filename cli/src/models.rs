@@ -14,6 +14,65 @@ use url::Url;
 
 pub const RECENT_MODELS_LIMIT: usize = 8;
 
+/// Reasoning effort level for models that support it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    Default,
+    None,
+    Low,
+    Medium,
+    High,
+    XHigh,
+    Max,
+}
+
+impl ReasoningEffort {
+    pub fn all() -> &'static [ReasoningEffort] {
+        &[
+            ReasoningEffort::Default,
+            ReasoningEffort::None,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::XHigh,
+            ReasoningEffort::Max,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ReasoningEffort::Default => "default",
+            ReasoningEffort::None => "none",
+            ReasoningEffort::Low => "low",
+            ReasoningEffort::Medium => "medium",
+            ReasoningEffort::High => "high",
+            ReasoningEffort::XHigh => "xhigh",
+            ReasoningEffort::Max => "max",
+        }
+    }
+
+    /// Convert to the genai `ReasoningEffort` variant, returning `None` for
+    /// `Default` (which means "use the provider's default").
+    pub fn to_genai(&self) -> Option<genai::chat::ReasoningEffort> {
+        match self {
+            ReasoningEffort::Default => None,
+            ReasoningEffort::None => Some(genai::chat::ReasoningEffort::None),
+            ReasoningEffort::Low => Some(genai::chat::ReasoningEffort::Low),
+            ReasoningEffort::Medium => Some(genai::chat::ReasoningEffort::Medium),
+            ReasoningEffort::High => Some(genai::chat::ReasoningEffort::High),
+            ReasoningEffort::XHigh => Some(genai::chat::ReasoningEffort::XHigh),
+            ReasoningEffort::Max => Some(genai::chat::ReasoningEffort::Max),
+        }
+    }
+}
+
+impl std::fmt::Display for ReasoningEffort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TokenPrice {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,6 +90,8 @@ pub struct ModelDef {
     pub context_len: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing: Option<TokenPrice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningEffort>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -45,6 +106,8 @@ pub struct CachedModelDef {
 pub struct RecentModelDef {
     pub provider: String,
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningEffort>,
 }
 
 type ProviderModelsCache = BTreeMap<String, Vec<CachedModelDef>>;
@@ -138,6 +201,7 @@ impl CachedModelDef {
                     id: cached.id,
                     context_len: cached.context_len,
                     pricing: cached.pricing,
+                    reasoning: None,
                 })
             })
             .collect()
@@ -171,13 +235,17 @@ impl RecentModelDef {
             .map(|recent| {
                 cache_by_key
                     .get(&(recent.provider.clone(), recent.id.clone()))
-                    .copied()
-                    .cloned()
+                    .map(|model| {
+                        let mut model = (*model).clone();
+                        model.reasoning = recent.reasoning.clone();
+                        model
+                    })
                     .unwrap_or_else(|| ModelDef {
                         provider: recent.provider.clone(),
                         id: recent.id.clone(),
                         context_len: None,
                         pricing: None,
+                        reasoning: recent.reasoning.clone(),
                     })
             })
             .collect()
@@ -200,6 +268,7 @@ impl RecentModelDef {
             &RecentModelDef {
                 provider: model.provider.clone(),
                 id: model.id.clone(),
+                reasoning: model.reasoning.clone(),
             },
         );
         Self::save(&recent)?;
@@ -225,12 +294,16 @@ impl RecentModelDef {
         models.push(model.clone());
 
         for recent_model in recent {
-            if recent_model != model && models.len() < RECENT_MODELS_LIMIT {
+            if !recent_model.same_model(model) && models.len() < RECENT_MODELS_LIMIT {
                 models.push(recent_model.clone());
             }
         }
 
         models
+    }
+
+    fn same_model(&self, other: &RecentModelDef) -> bool {
+        self.provider == other.provider && self.id == other.id
     }
 
     fn same(&self, model: &ModelDef) -> bool {
@@ -454,6 +527,7 @@ impl ProviderConfig {
                                 id: id.to_string(),
                                 context_len: None,
                                 pricing: None,
+                                reasoning: None,
                             })
                         } else {
                             let id = item
@@ -498,6 +572,7 @@ impl ProviderConfig {
                                 id,
                                 context_len,
                                 pricing,
+                                reasoning: None,
                             })
                         }
                     })

@@ -8,6 +8,7 @@ fn model(provider: &str, id: &str) -> ModelDef {
         id: id.to_string(),
         context_len: None,
         pricing: None,
+        reasoning: None,
     }
 }
 
@@ -15,6 +16,7 @@ fn recent_model(provider: &str, id: &str) -> RecentModelDef {
     RecentModelDef {
         provider: provider.to_string(),
         id: id.to_string(),
+        reasoning: None,
     }
 }
 
@@ -75,12 +77,14 @@ fn extracts_openai_compatible_models() {
                 id: "model-a".into(),
                 context_len: None,
                 pricing: None,
+                reasoning: None,
             },
             ModelDef {
                 provider: String::new(),
                 id: "model-b".into(),
                 context_len: None,
                 pricing: None,
+                reasoning: None,
             },
         ]
     );
@@ -104,12 +108,14 @@ fn extracts_model_arrays() {
                 id: "model-a".into(),
                 context_len: None,
                 pricing: None,
+                reasoning: None,
             },
             ModelDef {
                 provider: String::new(),
                 id: "model-b".into(),
                 context_len: None,
                 pricing: None,
+                reasoning: None,
             },
         ]
     );
@@ -208,6 +214,7 @@ fn recent_models_load_with_cache_enriches_known_models() {
             id: "model-b".to_string(),
             context_len: Some(128_000),
             pricing: None,
+            reasoning: None,
         },
     ];
 
@@ -221,6 +228,7 @@ fn recent_models_load_with_cache_enriches_known_models() {
                 id: "model-b".to_string(),
                 context_len: Some(128_000),
                 pricing: None,
+                reasoning: None,
             },
             model("provider", "stale-model"),
         ]
@@ -234,6 +242,7 @@ fn model_picker_rows_deduplicate_recent_models_by_identity() {
         id: "model-a".to_string(),
         context_len: Some(128_000),
         pricing: None,
+        reasoning: None,
     }];
     let recent = vec![model("provider", "model-a")];
 
