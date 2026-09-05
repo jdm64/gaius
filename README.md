@@ -1,4 +1,4 @@
-![GAIUS](logo.png)
+![GAIUS](docs/logo.png)
 
 A LLM agent harness build in Rust, powered by `genai` for provider abstraction.
 
