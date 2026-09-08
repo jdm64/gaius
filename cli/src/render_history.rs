@@ -8,7 +8,7 @@ use crate::{
     render::{Render, format_duration},
     selection::RowWrapInfo,
     tools::ToolName,
-    tui::{LiveTimer, TuiApp, TuiMessage, wrapped_line_count},
+    tui::{LiveTimer, TuiApp, TuiMessage},
 };
 use ratatui::{
     Frame,
@@ -55,17 +55,12 @@ impl Render {
 
         self.sync_history_lines(app, text_width);
 
-        let wrapped_height = wrapped_line_count(&app.history_lines, text_width);
+        let wrapped_height = app.visual_history_lines.len().min(u16::MAX as usize) as u16;
         let max_scroll = wrapped_height.saturating_sub(text_height);
         let clamped_scroll = Render::update_scroll_state(app, wrapped_height, max_scroll);
 
         let start = max_scroll.saturating_sub(clamped_scroll);
-        let lines = self.visible_history_lines(
-            &app.history_lines,
-            text_width,
-            start as usize,
-            text_height as usize,
-        );
+        let lines = self.visible_cached_history_lines(app, start as usize, text_height as usize);
 
         let lines = app.selection.highlight(
             lines.0,
@@ -396,7 +391,7 @@ impl Render {
         let dirty_from = match app.dirty_from {
             Some(d) => d,
             None => {
-                self.refresh_live_timers(app);
+                self.refresh_live_timers(app, text_width);
                 return;
             }
         };
@@ -408,12 +403,15 @@ impl Render {
             // a whole rerender must be done. This could be optimized by
             // storing block start for each message but probably not worth it.
             self.full_rerender(app, text_width);
+            self.rebuild_visual_history(app, text_width);
         } else {
             app.history_lines.truncate(app.last_block_start);
+            self.truncate_visual_history(app, app.last_block_start);
             app.live_timers
                 .retain(|t| t.line_index < app.last_block_start);
 
             self.render_message_at(app, last_idx, text_width);
+            self.append_visual_history(app, app.last_block_start, text_width);
         }
 
         app.last_render_width = text_width;
@@ -428,6 +426,55 @@ impl Render {
         for index in 0..app.messages.len() {
             self.render_message_at(app, index, text_width);
         }
+    }
+
+    fn rebuild_visual_history(&self, app: &mut TuiApp, width: u16) {
+        app.visual_history_lines.clear();
+        app.history_line_starts.clear();
+        self.append_visual_history(app, 0, width);
+    }
+
+    fn truncate_visual_history(&self, app: &mut TuiApp, source_start: usize) {
+        let visual_start = app
+            .history_line_starts
+            .get(source_start)
+            .copied()
+            .unwrap_or(app.visual_history_lines.len());
+        app.visual_history_lines.truncate(visual_start);
+        app.history_line_starts.truncate(source_start);
+    }
+
+    fn append_visual_history(&self, app: &mut TuiApp, source_start: usize, width: u16) {
+        for line in app.history_lines.iter().skip(source_start) {
+            app.history_line_starts.push(app.visual_history_lines.len());
+            let lines = self.visualize_history_line(line, width);
+            app.visual_history_lines.extend(lines);
+        }
+    }
+
+    fn visible_cached_history_lines(
+        &self,
+        app: &TuiApp,
+        start: usize,
+        height: usize,
+    ) -> (Vec<Line<'static>>, Vec<RowWrapInfo>) {
+        let end = start
+            .saturating_add(height)
+            .min(app.visual_history_lines.len());
+        let lines = app.visual_history_lines[start..end].to_vec();
+        let row_info = lines
+            .iter()
+            .enumerate()
+            .map(|(offset, line)| {
+                let visual_index = start + offset;
+                let source_index = app
+                    .history_line_starts
+                    .partition_point(|&row_start| row_start <= visual_index)
+                    .saturating_sub(1);
+                Self::row_info_for_visual_line(line, source_index)
+            })
+            .collect();
+        (lines, row_info)
     }
 
     fn render_message_at(&self, app: &mut TuiApp, index: usize, text_width: u16) {
@@ -479,13 +526,44 @@ impl Render {
         app.last_block_start = block_start;
     }
 
-    fn refresh_live_timers(&self, app: &mut TuiApp) {
+    fn refresh_live_timers(&self, app: &mut TuiApp, width: u16) {
         if app.live_timers.is_empty() {
             return;
         }
-        for timer in &app.live_timers {
-            if let Some(line) = app.history_lines.get_mut(timer.line_index) {
-                *line = Self::duration_line(timer.start_time, timer.style);
+        let timers: Vec<_> = app
+            .live_timers
+            .iter()
+            .map(|timer| (timer.line_index, timer.start_time, timer.style))
+            .collect();
+        for (line_index, start_time, style) in &timers {
+            if let Some(line) = app.history_lines.get_mut(*line_index) {
+                *line = Self::duration_line(*start_time, *style);
+            }
+        }
+        for (line_index, _, _) in timers {
+            self.replace_visual_history_line(app, line_index, width);
+        }
+    }
+
+    fn replace_visual_history_line(&self, app: &mut TuiApp, source_index: usize, width: u16) {
+        let Some(&visual_start) = app.history_line_starts.get(source_index) else {
+            return;
+        };
+        let visual_end = app
+            .history_line_starts
+            .get(source_index + 1)
+            .copied()
+            .unwrap_or(app.visual_history_lines.len());
+        let lines = self.visualize_history_line(&app.history_lines[source_index], width);
+        let new_len = lines.len();
+        let old_len = visual_end - visual_start;
+        app.visual_history_lines
+            .splice(visual_start..visual_end, lines);
+
+        let delta = new_len as isize - old_len as isize;
+        if delta != 0 {
+            for start in app.history_line_starts.iter_mut().skip(source_index + 1) {
+                *start = (*start as isize + delta) as usize;
             }
         }
     }
@@ -513,6 +591,36 @@ impl Render {
         ))
     }
 
+    fn visualize_history_line(&self, line: &Line<'static>, width: u16) -> Vec<Line<'static>> {
+        if Self::is_user_prompt_line(line) {
+            let content_line = Self::strip_user_prompt_prefix(line);
+            let mut lines = Vec::new();
+            for wrapped in Self::wrap_line(&content_line, width.saturating_sub(3).max(1)) {
+                lines.push(self.format_user_prompt_line(wrapped, width));
+            }
+            lines
+        } else {
+            Self::wrap_line(line, width)
+        }
+    }
+
+    fn row_info_for_visual_line(line: &Line<'_>, index: usize) -> RowWrapInfo {
+        if Self::is_user_prompt_line(line) {
+            let content = Self::line_plain_text(&Self::strip_user_prompt_prefix(line));
+            RowWrapInfo {
+                index,
+                prefix: 2,
+                content,
+            }
+        } else {
+            RowWrapInfo {
+                index,
+                prefix: 0,
+                content: Self::line_plain_text(line),
+            }
+        }
+    }
+
     pub fn visible_history_lines(
         &self,
         lines: &[Line<'static>],
@@ -526,45 +634,19 @@ impl Render {
         let end = start.saturating_add(height);
 
         for (index, line) in lines.iter().enumerate() {
-            if Self::is_user_prompt_line(line) {
-                let content_line = Self::strip_user_prompt_prefix(line);
-                for wrapped in Self::wrap_line(&content_line, width - 3) {
-                    let row_info = RowWrapInfo {
-                        index,
-                        prefix: 2,
-                        content: Self::line_plain_text(&wrapped),
-                    };
-                    let formatted = self.format_user_prompt_line(wrapped, width);
-                    if Self::push_visible_line(
-                        &mut visible,
-                        &mut row_infos,
-                        formatted,
-                        row_info,
-                        &mut wrapped_index,
-                        start,
-                        end,
-                    ) {
-                        return (visible, row_infos);
-                    }
-                }
-            } else {
-                for wrapped in Self::wrap_line(line, width) {
-                    let row_info = RowWrapInfo {
-                        index,
-                        prefix: 0,
-                        content: Self::line_plain_text(&wrapped),
-                    };
-                    if Self::push_visible_line(
-                        &mut visible,
-                        &mut row_infos,
-                        wrapped,
-                        row_info,
-                        &mut wrapped_index,
-                        start,
-                        end,
-                    ) {
-                        return (visible, row_infos);
-                    }
+            let wrapped_lines = self.visualize_history_line(line, width);
+            for wrapped in wrapped_lines {
+                let row_info = Self::row_info_for_visual_line(&wrapped, index);
+                if Self::push_visible_line(
+                    &mut visible,
+                    &mut row_infos,
+                    wrapped,
+                    row_info,
+                    &mut wrapped_index,
+                    start,
+                    end,
+                ) {
+                    return (visible, row_infos);
                 }
             }
         }
