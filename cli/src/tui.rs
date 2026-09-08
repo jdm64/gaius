@@ -34,8 +34,8 @@ use std::{
 };
 use tokio::{sync::oneshot, time};
 
-const MAX_FPS: u64 = 60;
-const FRAME_INTERVAL_MS: u64 = 1000 / MAX_FPS;
+const STREAM_FPS: u64 = 15;
+const STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / STREAM_FPS);
 
 #[derive(Clone)]
 pub enum TuiMessage {
@@ -180,10 +180,14 @@ impl TuiApp {
 
         let mut guard = TerminalGuard::enter()?;
         let mut terminal_events = EventStream::new();
-        let mut frame_timer = time::interval(Duration::from_millis(FRAME_INTERVAL_MS));
+
         let render = Render::new();
         guard.terminal.draw(|frame| render.draw(self, frame))?;
-        let mut redraw_pending = false;
+
+        // final viewport is ready after first draw so force redraw
+        let mut redraw_pending = true;
+        let mut frame_timer = time::interval(STREAM_FRAME_INTERVAL);
+        frame_timer.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
@@ -192,7 +196,9 @@ impl TuiApp {
                         break;
                     };
                     self.handle_terminal_event(event?, &actor).await?;
-                    redraw_pending = true;
+                    // redraw immediately so UI feels snappy
+                    guard.terminal.draw(|frame| render.draw(self, frame))?;
+                    redraw_pending = false;
                 }
                 actor_event = actor.rx.recv() => {
                     let Some(actor_event) = actor_event else {
