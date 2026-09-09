@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{input::InputMode, tui::TuiApp};
+use crate::{input::InputMode, render_util::USER_PROMPT_BAR, tui::TuiApp};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
@@ -36,6 +36,48 @@ impl Default for ColorTheme {
             toolcall: Color::Cyan,
             error: Color::Red,
         }
+    }
+}
+
+impl ColorTheme {
+    pub fn format_user_prompt_line(&self, mut line: Line<'static>, width: u16) -> Line<'static> {
+        let bar_style = self.user_prompt_style().fg(self.user_bar);
+        line.spans
+            .insert(0, Span::styled(USER_PROMPT_BAR, bar_style));
+        let width = width.max(1) as usize;
+        let used = line.width();
+        if used < width {
+            line.spans.push(Span::styled(
+                " ".repeat(width - used),
+                self.user_prompt_style(),
+            ));
+        }
+        line
+    }
+
+    pub fn user_prompt_bar_line(&self) -> Line<'static> {
+        let style = self.user_prompt_style();
+        Line::from(vec![Span::styled(USER_PROMPT_BAR, style.fg(self.user_bar))])
+    }
+
+    pub fn user_prompt_style(&self) -> Style {
+        Style::default().bg(self.user_box)
+    }
+
+    pub fn help_spec_to_text(&self, spec: Vec<(&str, &str)>) -> Text<'static> {
+        let mut spans = Vec::new();
+        let style = Style::default().fg(self.header);
+        let dim = Style::default().dim();
+        spans.push(Span::raw("  "));
+        for (i, (label, desc)) in spec.into_iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw("  "));
+            }
+            spans.push(Span::styled(label.to_string(), style));
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(desc.to_string(), dim));
+        }
+        Text::from(Line::from(spans))
     }
 }
 
@@ -108,95 +150,8 @@ impl Render {
         };
 
         let help_items = active_help.unwrap_or(vec![("Ctrl+C", "quit"), ("Ctrl+D", "cancel")]);
-        let help_para = Paragraph::new(self.help_spec_to_text(help_items.clone()))
+        let help_para = Paragraph::new(self.theme.help_spec_to_text(help_items.clone()))
             .block(Block::default().borders(Borders::NONE));
         frame.render_widget(help_para, chunks[2]);
-    }
-
-    pub fn wrap_line(line: &Line<'static>, width: u16) -> Vec<Line<'static>> {
-        let width = width.max(1) as usize;
-        let line_width = line.width();
-        if line_width <= width {
-            return vec![line.clone()];
-        }
-
-        let mut wrapped = Vec::new();
-        let mut current_spans = Vec::new();
-        let mut current_width = 0usize;
-
-        for span in &line.spans {
-            let mut content = String::new();
-            for ch in span.content.chars() {
-                if current_width == width {
-                    wrapped.push(Self::line_from_spans(
-                        line,
-                        std::mem::take(&mut current_spans),
-                    ));
-                    current_width = 0;
-                }
-
-                content.push(ch);
-                current_width += 1;
-
-                if current_width == width {
-                    current_spans.push(Span::styled(std::mem::take(&mut content), span.style));
-                    wrapped.push(Self::line_from_spans(
-                        line,
-                        std::mem::take(&mut current_spans),
-                    ));
-                    current_width = 0;
-                }
-            }
-
-            if !content.is_empty() {
-                current_spans.push(Span::styled(content, span.style));
-            }
-        }
-
-        if !current_spans.is_empty() || wrapped.is_empty() {
-            wrapped.push(Self::line_from_spans(line, current_spans));
-        }
-
-        wrapped
-    }
-
-    fn line_from_spans(source: &Line<'static>, spans: Vec<Span<'static>>) -> Line<'static> {
-        let mut line = Line::from(spans);
-        line.style = source.style;
-        line.alignment = source.alignment;
-        line
-    }
-
-    fn help_spec_to_text(&self, spec: Vec<(&str, &str)>) -> Text<'static> {
-        let mut spans = Vec::new();
-        let style = Style::default().fg(self.theme.header);
-        let dim = Style::default().dim();
-        spans.push(Span::raw("  "));
-        for (i, (label, desc)) in spec.into_iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw("  "));
-            }
-            spans.push(Span::styled(label.to_string(), style));
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(desc.to_string(), dim));
-        }
-        Text::from(Line::from(spans))
-    }
-}
-
-pub fn format_duration(duration_ms: u64) -> String {
-    if duration_ms < 60_000 {
-        return format!("⏱ {:.3}s", duration_ms as f64 / 1000.0);
-    }
-
-    let total_seconds = duration_ms / 1000;
-    let hours = total_seconds / 3600;
-    let minutes = (total_seconds % 3600) / 60;
-    let seconds = total_seconds % 60;
-
-    if hours > 0 {
-        format!("⏱ {:01}:{:02}:{:02}", hours, minutes, seconds)
-    } else {
-        format!("⏱ {:01}:{:02}", minutes, seconds)
     }
 }

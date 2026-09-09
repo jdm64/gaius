@@ -4,11 +4,12 @@
 
 use crate::{
     diff_view::{DiffLineKind, DiffView},
-    harness::time_now,
-    render::{Render, format_duration},
+    render::Render,
+    render_layout::LiveTimer,
+    render_util::{RenderUtil, USER_PROMPT_BAR},
     selection::RowWrapInfo,
     tools::ToolName,
-    tui::{LiveTimer, TuiApp, TuiMessage},
+    tui::{TuiApp, TuiMessage},
 };
 use ratatui::{
     Frame,
@@ -19,8 +20,6 @@ use ratatui::{
 };
 use serde_json::{self, Value, from_str};
 use tui_markdown::{Options, from_str_with_options};
-
-const USER_PROMPT_BAR: &str = "\u{2503} ";
 
 pub struct DisplayPrefs {
     pub thinking: bool,
@@ -55,7 +54,7 @@ impl Render {
 
         self.sync_history_lines(app, text_width);
 
-        let wrapped_height = app.visual_history_lines.len().min(u16::MAX as usize) as u16;
+        let wrapped_height = app.history_layout.visible_lines.len() as u16;
         let max_scroll = wrapped_height.saturating_sub(text_height);
         let clamped_scroll = Render::update_scroll_state(app, wrapped_height, max_scroll);
 
@@ -206,14 +205,14 @@ impl Render {
                     .collect()
             }
             TuiMessage::UserPrompt(text) => {
-                let style = self.user_prompt_style();
+                let style = self.theme.user_prompt_style();
                 vec![
-                    self.user_prompt_bar_line(),
+                    self.theme.user_prompt_bar_line(),
                     Line::from(vec![
                         Span::styled(USER_PROMPT_BAR, style.fg(self.theme.user_bar)),
                         Span::raw(text.clone()).style(style.italic().bold()),
                     ]),
-                    self.user_prompt_bar_line(),
+                    self.theme.user_prompt_bar_line(),
                 ]
             }
             TuiMessage::ToolCall {
@@ -235,7 +234,7 @@ impl Render {
                 ])];
 
                 if *start_time != 0 {
-                    lines.push(Self::duration_line(*start_time, style));
+                    lines.push(RenderUtil::duration_line(*start_time, style));
                 }
 
                 lines
@@ -273,7 +272,7 @@ impl Render {
                     .add_modifier(Modifier::DIM);
                 let mut lines = vec![Self::compaction_rule_line(style, text_width)];
                 if *start_time != 0 {
-                    lines.push(Self::duration_line(*start_time, style));
+                    lines.push(RenderUtil::duration_line(*start_time, style));
                 }
                 lines
             }
@@ -288,10 +287,10 @@ impl Render {
                 if !prefs.diff_view {
                     return vec![];
                 }
-                self.render_diff_view(diff)
+                Self::render_diff_view(diff)
             }
             TuiMessage::TurnDuration(duration_ms) => {
-                let text = format_duration(*duration_ms);
+                let text = RenderUtil::format_duration(*duration_ms);
                 let style = Style::default().fg(self.theme.header).dim();
                 vec![Line::from(text).style(style)]
             }
@@ -299,7 +298,7 @@ impl Render {
         }
     }
 
-    fn render_diff_view(&self, diff: &DiffView) -> Vec<Line<'static>> {
+    fn render_diff_view(diff: &DiffView) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         let header_style = Style::default().add_modifier(Modifier::BOLD);
         let context_style = Style::default().add_modifier(Modifier::DIM);
@@ -360,7 +359,7 @@ impl Render {
                 }
             }
             Some(ToolName::Plan) => {
-                let md = Self::plan_to_md(args);
+                let md = RenderUtil::plan_to_md(args);
                 let options = Options::default();
                 let rendered_lines: Vec<Line> = from_str_with_options(&md, &options)
                     .lines
@@ -376,26 +375,13 @@ impl Render {
         }
     }
 
-    pub fn plan_to_md(args: &Value) -> String {
-        args.get("content")
-            .and_then(|g| g.as_str())
-            .unwrap_or_default()
-            .to_string()
-    }
-
     fn sync_history_lines(&self, app: &mut TuiApp, text_width: u16) {
-        if app.last_render_width != text_width {
-            app.dirty_from = Some(0);
-        }
-
-        let dirty_from = match app.dirty_from {
-            Some(d) => d,
-            None => {
-                self.refresh_live_timers(app, text_width);
-                return;
-            }
+        let Some(dirty_from) = app
+            .history_layout
+            .update_dirty_from(text_width, &self.theme)
+        else {
+            return;
         };
-
         let last_idx = app.messages.len().saturating_sub(1);
 
         if dirty_from == 0 || dirty_from != last_idx {
@@ -403,53 +389,33 @@ impl Render {
             // a whole rerender must be done. This could be optimized by
             // storing block start for each message but probably not worth it.
             self.full_rerender(app, text_width);
-            self.rebuild_visual_history(app, text_width);
         } else {
-            app.history_lines.truncate(app.last_block_start);
-            self.truncate_visual_history(app, app.last_block_start);
-            app.live_timers
-                .retain(|t| t.line_index < app.last_block_start);
-
-            self.render_message_at(app, last_idx, text_width);
-            self.append_visual_history(app, app.last_block_start, text_width);
+            self.rerender_last(app, last_idx, text_width);
         }
 
-        app.last_render_width = text_width;
-        app.dirty_from = None;
+        app.history_layout.last_width = text_width;
+        app.history_layout.dirty_from = None;
     }
 
     fn full_rerender(&self, app: &mut TuiApp, text_width: u16) {
-        app.history_lines.clear();
-        app.live_timers.clear();
-        app.history_lines.push(Line::from(""));
+        app.history_layout.reset_lines();
 
         for index in 0..app.messages.len() {
             self.render_message_at(app, index, text_width);
         }
+
+        app.history_layout
+            .append_visual_history(0, text_width, &self.theme);
     }
 
-    fn rebuild_visual_history(&self, app: &mut TuiApp, width: u16) {
-        app.visual_history_lines.clear();
-        app.history_line_starts.clear();
-        self.append_visual_history(app, 0, width);
-    }
-
-    fn truncate_visual_history(&self, app: &mut TuiApp, source_start: usize) {
-        let visual_start = app
-            .history_line_starts
-            .get(source_start)
-            .copied()
-            .unwrap_or(app.visual_history_lines.len());
-        app.visual_history_lines.truncate(visual_start);
-        app.history_line_starts.truncate(source_start);
-    }
-
-    fn append_visual_history(&self, app: &mut TuiApp, source_start: usize, width: u16) {
-        for line in app.history_lines.iter().skip(source_start) {
-            app.history_line_starts.push(app.visual_history_lines.len());
-            let lines = self.visualize_history_line(line, width);
-            app.visual_history_lines.extend(lines);
-        }
+    fn rerender_last(&self, app: &mut TuiApp, last_idx: usize, text_width: u16) {
+        app.history_layout.truncate_last_block();
+        self.render_message_at(app, last_idx, text_width);
+        app.history_layout.append_visual_history(
+            app.history_layout.last_block_start,
+            text_width,
+            &self.theme,
+        );
     }
 
     fn visible_cached_history_lines(
@@ -460,18 +426,19 @@ impl Render {
     ) -> (Vec<Line<'static>>, Vec<RowWrapInfo>) {
         let end = start
             .saturating_add(height)
-            .min(app.visual_history_lines.len());
-        let lines = app.visual_history_lines[start..end].to_vec();
+            .min(app.history_layout.visible_lines.len());
+        let lines = app.history_layout.visible_lines[start..end].to_vec();
         let row_info = lines
             .iter()
             .enumerate()
             .map(|(offset, line)| {
                 let visual_index = start + offset;
                 let source_index = app
-                    .history_line_starts
+                    .history_layout
+                    .line_starts
                     .partition_point(|&row_start| row_start <= visual_index)
                     .saturating_sub(1);
-                Self::row_info_for_visual_line(line, source_index)
+                RowWrapInfo::new(line, source_index)
             })
             .collect();
         (lines, row_info)
@@ -479,7 +446,7 @@ impl Render {
 
     fn render_message_at(&self, app: &mut TuiApp, index: usize, text_width: u16) {
         let message = &app.messages[index];
-        let block_start = app.history_lines.len();
+        let block_start = app.history_layout.lines.len();
 
         if index > 0 {
             let previous = &app.messages[index - 1];
@@ -494,11 +461,11 @@ impl Render {
                         | TuiMessage::ToolResult { .. }
                 )
             {
-                app.history_lines.push(Line::from(""));
+                app.history_layout.lines.push(Line::from(""));
             }
         }
 
-        let content_offset = app.history_lines.len();
+        let content_offset = app.history_layout.lines.len();
         let rendered = self.render_message(message, &app.display_prefs, text_width);
 
         let live_timer = match message {
@@ -514,58 +481,17 @@ impl Render {
         if let Some((start_time, style)) = live_timer
             && !rendered.is_empty()
         {
-            app.live_timers.push(LiveTimer {
+            app.history_layout.live_timers.push(LiveTimer {
                 line_index: content_offset + rendered.len() - 1,
                 start_time,
                 style,
             });
         }
 
-        app.history_lines
+        app.history_layout
+            .lines
             .extend(rendered.into_iter().map(Self::owned_line));
-        app.last_block_start = block_start;
-    }
-
-    fn refresh_live_timers(&self, app: &mut TuiApp, width: u16) {
-        if app.live_timers.is_empty() {
-            return;
-        }
-        let timers: Vec<_> = app
-            .live_timers
-            .iter()
-            .map(|timer| (timer.line_index, timer.start_time, timer.style))
-            .collect();
-        for (line_index, start_time, style) in &timers {
-            if let Some(line) = app.history_lines.get_mut(*line_index) {
-                *line = Self::duration_line(*start_time, *style);
-            }
-        }
-        for (line_index, _, _) in timers {
-            self.replace_visual_history_line(app, line_index, width);
-        }
-    }
-
-    fn replace_visual_history_line(&self, app: &mut TuiApp, source_index: usize, width: u16) {
-        let Some(&visual_start) = app.history_line_starts.get(source_index) else {
-            return;
-        };
-        let visual_end = app
-            .history_line_starts
-            .get(source_index + 1)
-            .copied()
-            .unwrap_or(app.visual_history_lines.len());
-        let lines = self.visualize_history_line(&app.history_lines[source_index], width);
-        let new_len = lines.len();
-        let old_len = visual_end - visual_start;
-        app.visual_history_lines
-            .splice(visual_start..visual_end, lines);
-
-        let delta = new_len as isize - old_len as isize;
-        if delta != 0 {
-            for start in app.history_line_starts.iter_mut().skip(source_index + 1) {
-                *start = (*start as isize + delta) as usize;
-            }
-        }
+        app.history_layout.last_block_start = block_start;
     }
 
     /// Horizontal rule with the word "Compaction" centered.
@@ -583,77 +509,6 @@ impl Render {
         ])
     }
 
-    fn duration_line(start_time: u64, style: Style) -> Line<'static> {
-        let elapsed = time_now().saturating_sub(start_time);
-        Line::from(Span::styled(
-            format!("  {}", format_duration(elapsed)),
-            style.add_modifier(Modifier::DIM),
-        ))
-    }
-
-    fn visualize_history_line(&self, line: &Line<'static>, width: u16) -> Vec<Line<'static>> {
-        if Self::is_user_prompt_line(line) {
-            let content_line = Self::strip_user_prompt_prefix(line);
-            let mut lines = Vec::new();
-            for wrapped in Self::wrap_line(&content_line, width.saturating_sub(3).max(1)) {
-                lines.push(self.format_user_prompt_line(wrapped, width));
-            }
-            lines
-        } else {
-            Self::wrap_line(line, width)
-        }
-    }
-
-    fn row_info_for_visual_line(line: &Line<'_>, index: usize) -> RowWrapInfo {
-        if Self::is_user_prompt_line(line) {
-            let content = Self::line_plain_text(&Self::strip_user_prompt_prefix(line));
-            RowWrapInfo {
-                index,
-                prefix: 2,
-                content,
-            }
-        } else {
-            RowWrapInfo {
-                index,
-                prefix: 0,
-                content: Self::line_plain_text(line),
-            }
-        }
-    }
-
-    pub fn visible_history_lines(
-        &self,
-        lines: &[Line<'static>],
-        width: u16,
-        start: usize,
-        height: usize,
-    ) -> (Vec<Line<'static>>, Vec<RowWrapInfo>) {
-        let mut visible = Vec::with_capacity(height);
-        let mut row_infos = Vec::with_capacity(height);
-        let mut wrapped_index = 0usize;
-        let end = start.saturating_add(height);
-
-        for (index, line) in lines.iter().enumerate() {
-            let wrapped_lines = self.visualize_history_line(line, width);
-            for wrapped in wrapped_lines {
-                let row_info = Self::row_info_for_visual_line(&wrapped, index);
-                if Self::push_visible_line(
-                    &mut visible,
-                    &mut row_infos,
-                    wrapped,
-                    row_info,
-                    &mut wrapped_index,
-                    start,
-                    end,
-                ) {
-                    return (visible, row_infos);
-                }
-            }
-        }
-
-        (visible, row_infos)
-    }
-
     fn owned_line(line: Line<'_>) -> Line<'static> {
         let mut owned = Line::from(
             line.spans
@@ -664,79 +519,6 @@ impl Render {
         owned.style = line.style;
         owned.alignment = line.alignment;
         owned
-    }
-
-    fn strip_user_prompt_prefix(line: &Line<'_>) -> Line<'static> {
-        let spans: Vec<_> = if line
-            .spans
-            .first()
-            .is_some_and(|s| s.content == USER_PROMPT_BAR)
-        {
-            line.spans[1..]
-                .iter()
-                .map(|s| Span::styled(s.content.to_string(), s.style))
-                .collect()
-        } else {
-            line.spans
-                .iter()
-                .map(|s| Span::styled(s.content.to_string(), s.style))
-                .collect()
-        };
-        let mut result = Line::from(spans);
-        result.style = line.style;
-        result.alignment = line.alignment;
-        result
-    }
-
-    fn format_user_prompt_line(&self, mut line: Line<'static>, width: u16) -> Line<'static> {
-        let bar_style = self.user_prompt_style().fg(self.theme.user_bar);
-        line.spans
-            .insert(0, Span::styled(USER_PROMPT_BAR, bar_style));
-        let width = width.max(1) as usize;
-        let used = line.width();
-        if used < width {
-            line.spans.push(Span::styled(
-                " ".repeat(width - used),
-                self.user_prompt_style(),
-            ));
-        }
-        line
-    }
-
-    fn push_visible_line(
-        visible: &mut Vec<Line<'static>>,
-        row_infos: &mut Vec<RowWrapInfo>,
-        line: Line<'static>,
-        row_info: RowWrapInfo,
-        wrapped_index: &mut usize,
-        start: usize,
-        end: usize,
-    ) -> bool {
-        if *wrapped_index >= start && *wrapped_index < end {
-            visible.push(line);
-            row_infos.push(row_info);
-        }
-        *wrapped_index += 1;
-        *wrapped_index >= end
-    }
-
-    fn user_prompt_bar_line(&self) -> Line<'static> {
-        let style = self.user_prompt_style();
-        Line::from(vec![Span::styled(
-            USER_PROMPT_BAR,
-            style.fg(self.theme.user_bar),
-        )])
-    }
-
-    fn is_user_prompt_line(line: &Line<'_>) -> bool {
-        line.spans
-            .first()
-            .map(|span| span.content == USER_PROMPT_BAR)
-            .unwrap_or(false)
-    }
-
-    fn user_prompt_style(&self) -> Style {
-        Style::default().bg(self.theme.user_box)
     }
 
     fn arguments_json_fields(arguments: &Value, fields: &[&str]) -> String {
@@ -753,12 +535,5 @@ impl Render {
             })
             .collect::<Vec<_>>()
             .join(" ")
-    }
-
-    fn line_plain_text(line: &Line<'_>) -> String {
-        line.spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect()
     }
 }

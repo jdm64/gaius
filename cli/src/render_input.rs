@@ -3,10 +3,7 @@
  */
 
 use crate::{
-    harness::time_now,
-    input::InputMode,
-    render::{Render, format_duration},
-    tui::TuiApp,
+    harness::time_now, input::InputMode, render::Render, render_util::RenderUtil, tui::TuiApp,
 };
 use ratatui::{
     Frame,
@@ -44,7 +41,7 @@ impl Render {
 
         if let Some(turn_started) = app.snapshot.turn_started {
             let elapsed = time_now().saturating_sub(turn_started);
-            let time_title = format!(" {} ", format_duration(elapsed));
+            let time_title = format!(" {} ", RenderUtil::format_duration(elapsed));
             block = block.title_bottom(Line::from(time_title).right_aligned());
         }
 
@@ -71,7 +68,7 @@ impl Render {
             Span::raw(input),
             Span::raw(" "),
         ]);
-        Self::wrap_line(&line, width)
+        RenderUtil::wrap_line(&line, width)
     }
 
     pub fn question_lines(&self, mode: &InputMode, width: u16) -> Vec<Line<'static>> {
@@ -93,7 +90,7 @@ impl Render {
                 line_buf.push(' ');
                 line_buf.push_str(word);
             } else {
-                lines.extend(Self::wrap_line(
+                lines.extend(RenderUtil::wrap_line(
                     &Line::raw(std::mem::take(&mut line_buf)),
                     width,
                 ));
@@ -101,7 +98,7 @@ impl Render {
             }
         }
         if !line_buf.is_empty() {
-            lines.extend(Self::wrap_line(&Line::raw(line_buf), width));
+            lines.extend(RenderUtil::wrap_line(&Line::raw(line_buf), width));
         }
 
         lines.push(Line::raw(""));
@@ -112,7 +109,7 @@ impl Render {
                 Style::default()
             };
             let content = format!("{}) {}", i + 1, opt);
-            lines.extend(Self::wrap_line(&Line::styled(content, style), width));
+            lines.extend(RenderUtil::wrap_line(&Line::styled(content, style), width));
         }
         lines.push(Line::raw(""));
 

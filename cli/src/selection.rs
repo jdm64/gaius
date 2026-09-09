@@ -10,6 +10,8 @@ use ratatui::{
 };
 use std::io::{self, Write};
 
+use crate::render_util::USER_PROMPT_BAR;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct HistoryPoint {
     pub row: u16,
@@ -31,6 +33,61 @@ pub struct RowWrapInfo {
     pub index: usize,
     pub prefix: usize,
     pub content: String,
+}
+
+impl RowWrapInfo {
+    pub fn new(line: &Line<'_>, index: usize) -> Self {
+        if Self::is_prompt_line(line) {
+            let content = Self::line_plain_text(&Self::strip_prompt_prefix(line));
+            Self {
+                index,
+                prefix: 2,
+                content,
+            }
+        } else {
+            Self {
+                index,
+                prefix: 0,
+                content: Self::line_plain_text(line),
+            }
+        }
+    }
+
+    fn line_plain_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    pub fn is_prompt_line(line: &Line<'_>) -> bool {
+        line.spans
+            .first()
+            .map(|span| span.content == USER_PROMPT_BAR)
+            .unwrap_or(false)
+    }
+
+    pub fn strip_prompt_prefix(line: &Line<'_>) -> Line<'static> {
+        let spans: Vec<_> = if line
+            .spans
+            .first()
+            .is_some_and(|s| s.content == USER_PROMPT_BAR)
+        {
+            line.spans[1..]
+                .iter()
+                .map(|s| Span::styled(s.content.to_string(), s.style))
+                .collect()
+        } else {
+            line.spans
+                .iter()
+                .map(|s| Span::styled(s.content.to_string(), s.style))
+                .collect()
+        };
+        let mut result = Line::from(spans);
+        result.style = line.style;
+        result.alignment = line.alignment;
+        result
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

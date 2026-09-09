@@ -7,7 +7,7 @@ use crate::{
     diff_view::DiffLineKind,
     harness::{Harness, HarnessEvent, HarnessSnapshot, UserRequest},
     models::Models,
-    render::format_duration,
+    render_util::RenderUtil,
     token_usage::format_arrows,
 };
 use std::{
@@ -186,7 +186,7 @@ impl CliPrompt {
                 }
                 HarnessEvent::TurnStarted(_) => None,
                 HarnessEvent::TurnDuration(duration_ms) => {
-                    let time = format_duration(duration_ms);
+                    let time = RenderUtil::format_duration(duration_ms);
                     println!("timing> {}", time);
                     let _ = io::stdout().flush();
                     None

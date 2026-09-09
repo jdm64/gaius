@@ -12,7 +12,7 @@ use crate::{
     models::{ModelDef, ReasoningEffort},
     plan_hook::PlanHook,
     rate_limit::is_rate_limit_error,
-    render::Render,
+    render_util::RenderUtil,
     session::Session,
     skills::{Skill, SkillRepo},
     token_usage::{SessionInfo, TokenUsageLedger},
@@ -757,7 +757,7 @@ impl Harness {
                 }
                 ToolResult::Text(text) => {
                     if tc.fn_name == "plan" {
-                        let plan_text = Render::plan_to_md(&tc.fn_arguments);
+                        let plan_text = RenderUtil::plan_to_md(&tc.fn_arguments);
                         self.last_plan_content = Some(plan_text);
                     }
                     self.send_tool_result_event(tc, text, false, on_event);

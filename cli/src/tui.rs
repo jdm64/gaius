@@ -13,6 +13,7 @@ use crate::{
     input::{Input, InputMode},
     render::Render,
     render_history::DisplayPrefs,
+    render_layout::HistoryLayout,
     selection::Selection,
     token_usage::format_arrows,
 };
@@ -25,7 +26,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use futures::StreamExt;
-use ratatui::{Terminal, backend::CrosstermBackend, style::Style, text::Line};
+use ratatui::{Terminal, backend::CrosstermBackend, text::Line};
 use std::{
     error::Error,
     fs,
@@ -61,16 +62,6 @@ pub enum TuiMessage {
     DiffView(DiffView),
     TurnDuration(u64),
     Padding,
-}
-
-/// Bookkeeping for a duration line that must keep advancing each frame while
-/// a tool call or a compaction is running. `line_index` is the position in
-/// `TuiApp::history_lines`; `start_time` is the start timestamp and `style`
-/// the themed style of the line.
-pub struct LiveTimer {
-    pub line_index: usize,
-    pub start_time: u64,
-    pub style: Style,
 }
 
 pub struct TerminalGuard {
@@ -115,14 +106,8 @@ pub struct TuiApp {
     pub display_prefs: DisplayPrefs,
     pub prompt_history: Vec<String>,
     pub prompt_history_idx: Option<usize>,
-    pub history_lines: Vec<Line<'static>>,
-    pub visual_history_lines: Vec<Line<'static>>,
-    pub history_line_starts: Vec<usize>,
-    pub live_timers: Vec<LiveTimer>,
+    pub history_layout: HistoryLayout,
     pub selection: Selection,
-    pub last_render_width: u16,
-    pub last_block_start: usize,
-    pub dirty_from: Option<usize>,
     pub actor_busy: bool,
     pub queued_prompts: usize,
     pub question_answer_tx: Option<oneshot::Sender<String>>,
@@ -158,14 +143,8 @@ impl TuiApp {
             },
             prompt_history: Vec::new(),
             prompt_history_idx: None,
-            history_lines: Vec::new(),
-            visual_history_lines: Vec::new(),
-            history_line_starts: Vec::new(),
-            live_timers: Vec::new(),
+            history_layout: HistoryLayout::default(),
             selection: Selection::default(),
-            last_render_width: 0,
-            last_block_start: 0,
-            dirty_from: Some(0),
             actor_busy: false,
             queued_prompts: 0,
             question_answer_tx: None,
@@ -213,7 +192,7 @@ impl TuiApp {
                     }
                     redraw_pending = true;
                 }
-                _ = frame_timer.tick(), if redraw_pending || !self.live_timers.is_empty() => {
+                _ = frame_timer.tick(), if redraw_pending || !self.history_layout.live_timers.is_empty() => {
                     guard.terminal.draw(|frame| render.draw(self, frame))?;
                     redraw_pending = false;
                 }
@@ -634,23 +613,22 @@ impl TuiApp {
 
     pub fn clear_messages(&mut self) {
         self.messages.clear();
-        self.last_block_start = 0;
-        self.dirty_from = Some(0);
+        self.history_layout.clear();
     }
 
     pub fn toggle_thinking(&mut self) {
         self.status = self.display_prefs.toggle_thinking();
-        self.dirty_from = Some(0);
+        self.history_layout.invalidate_from(0);
     }
 
     pub fn toggle_token_info(&mut self) {
         self.status = self.display_prefs.toggle_token_info();
-        self.dirty_from = Some(0);
+        self.history_layout.invalidate_from(0);
     }
 
     pub fn toggle_diff_view(&mut self) {
         self.status = self.display_prefs.toggle_diff_view();
-        self.dirty_from = Some(0);
+        self.history_layout.invalidate_from(0);
     }
 
     pub fn push_message(&mut self, message: TuiMessage) {
@@ -664,18 +642,12 @@ impl TuiApp {
 
         let idx = self.messages.len();
         self.messages.push(message);
-        self.last_block_start = self
-            .history_lines
-            .len()
-            .saturating_sub(removed_padding as usize);
+        self.history_layout.begin_message_block(removed_padding);
         self.set_dirty_from(idx);
     }
 
     fn set_dirty_from(&mut self, idx: usize) {
-        match &mut self.dirty_from {
-            Some(d) => *d = (*d).min(idx),
-            None => self.dirty_from = Some(idx),
-        }
+        self.history_layout.invalidate_from(idx);
     }
 
     fn finish_last_timer(&mut self) {
