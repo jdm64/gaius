@@ -393,6 +393,10 @@ impl Render {
             self.rerender_last(app, last_idx, text_width);
         }
 
+        // reset height so scroll doesn't drift
+        if app.history_layout.last_width != text_width {
+            app.history_height = app.history_layout.visible_lines.len() as u16;
+        }
         app.history_layout.last_width = text_width;
         app.history_layout.dirty_from = None;
     }
