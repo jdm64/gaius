@@ -33,10 +33,12 @@ use std::{
     io::{self, Stdout},
     time::Duration,
 };
-use tokio::{sync::oneshot, time};
+use tokio::{
+    sync::oneshot,
+    time::{self, Instant},
+};
 
-const STREAM_FPS: u64 = 15;
-const STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / STREAM_FPS);
+const STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 15);
 
 #[derive(Clone)]
 pub enum TuiMessage {
@@ -163,14 +165,8 @@ impl TuiApp {
 
         let mut guard = TerminalGuard::enter()?;
         let mut terminal_events = EventStream::new();
-
         let render = Render::new();
-        guard.terminal.draw(|frame| render.draw(self, frame))?;
-
-        // final viewport is ready after first draw so force redraw
-        let mut redraw_pending = true;
-        let mut frame_timer = time::interval(STREAM_FRAME_INTERVAL);
-        frame_timer.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+        let mut next_render: Option<time::Instant> = Some(Instant::now() + STREAM_FRAME_INTERVAL);
 
         loop {
             tokio::select! {
@@ -179,22 +175,34 @@ impl TuiApp {
                         break;
                     };
                     self.handle_terminal_event(event?, &actor).await?;
-                    // redraw immediately so UI feels snappy
+
+                    // must render now or ui hangs
                     guard.terminal.draw(|frame| render.draw(self, frame))?;
-                    redraw_pending = false;
+                    next_render = None;
                 }
                 actor_event = actor.rx.recv() => {
                     let Some(actor_event) = actor_event else {
                         break;
                     };
+                    let is_ask_user = matches!(actor_event, HarnessActorEvent::AskUser { .. });
                     if let Some(snapshot) = self.handle_actor_event(actor_event) {
                         latest_snapshot = snapshot;
                     }
-                    redraw_pending = true;
+                    if is_ask_user {
+                        // must render now or ui hangs
+                        guard.terminal.draw(|frame| render.draw(self, frame))?;
+                    }
+                    if next_render.is_none() {
+                        next_render = Some(Instant::now() + STREAM_FRAME_INTERVAL);
+                    }
                 }
-                _ = frame_timer.tick(), if redraw_pending || !self.history_layout.live_timers.is_empty() => {
+                _ = time::sleep_until(next_render.unwrap_or(Instant::now())), if next_render.is_some() => {
                     guard.terminal.draw(|frame| render.draw(self, frame))?;
-                    redraw_pending = false;
+                    next_render = if self.actor_busy {
+                        Some(Instant::now() + STREAM_FRAME_INTERVAL)
+                    } else {
+                        None
+                    };
                 }
             }
 
