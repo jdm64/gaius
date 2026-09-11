@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
 # Install script for gaius (https://github.com/jdm64/gaius)
-# Downloads the latest continuous build for linux-x86_64 and
+# Downloads the latest release build for linux-x86_64 and
 # installs it into ~/.local/bin
 
 set -eu
 
-REPO_URL="https://github.com/jdm64/gaius/releases/download/continuous/gaius-linux-x86_64"
+REPO_URL="https://github.com/jdm64/gaius/releases/latest/download/gaius-linux-x86_64"
 BIN_NAME="gaius"
 INSTALL_DIR="${HOME}/.local/bin"
 INSTALL_PATH="${INSTALL_DIR}/${BIN_NAME}"
