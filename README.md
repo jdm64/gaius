@@ -49,6 +49,9 @@ gaius --session <session-id>
 
 # Show help
 gaius --help
+
+# Show version
+gaius --version
 ```
 
 ## Configuration
@@ -109,6 +112,10 @@ In the TUI, you can use these slash commands:
 - `/agents` - List and select agents
 - `/skills` - List available skills
 - `/plan` - Toggle plan mode on/off
+- `/reasoning` - Set reasoning effort level
+- `/fork` - Copy the current session with a new id
+- `/rebuild` - Reload agents, skills, and AGENTS.md
+- `/compact` - Compact conversation history into a summary
 - `/info` - Show session info
 - `/streaming` - Toggle streaming mode on/off
 - `/thinking` - Toggle rendering of thinking messages on/off
