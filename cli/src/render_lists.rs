@@ -40,7 +40,7 @@ impl Render {
             picker,
             PickListRenderSpec {
                 title: "Commands",
-                max_width: 50,
+                max_width: 60,
                 empty_text: "No matching commands",
                 background: Style::default(),
             },
@@ -66,7 +66,7 @@ impl Render {
             picker,
             PickListRenderSpec {
                 title: "Sessions",
-                max_width: 50,
+                max_width: 60,
                 empty_text: "No sessions",
                 background: Style::default(),
             },
@@ -100,7 +100,7 @@ impl Render {
             &display_rows,
             PickListRenderSpec {
                 title: "Models",
-                max_width: 80,
+                max_width: 60,
                 empty_text: "No matching models",
                 background: Style::default(),
             },
@@ -173,7 +173,7 @@ impl Render {
             picker,
             PickListRenderSpec {
                 title: "Agents",
-                max_width: 60,
+                max_width: 30,
                 empty_text: "No matching agents",
                 background: Style::default(),
             },
@@ -223,7 +223,7 @@ impl Render {
             picker,
             PickListRenderSpec {
                 title: "Skills",
-                max_width: 60,
+                max_width: 30,
                 empty_text: "No matching skills",
                 background: Style::default(),
             },
@@ -332,7 +332,7 @@ impl Render {
             picker,
             PickListRenderSpec {
                 title: "Reasoning Effort",
-                max_width: 30,
+                max_width: 20,
                 empty_text: "No levels",
                 background: Style::default(),
             },

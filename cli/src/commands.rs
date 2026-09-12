@@ -70,23 +70,23 @@ impl Commands {
             },
             Command {
                 name: "compact",
-                description: "Compact conversation history into a summary",
+                description: "Compact conversation history into summary",
             },
             Command {
                 name: "streaming",
-                description: "Toggle streaming mode on/off",
+                description: "Toggle streaming mode",
             },
             Command {
                 name: "thinking",
-                description: "Toggle rendering of thinking messages on/off",
+                description: "Toggle rendering of thinking messages",
             },
             Command {
                 name: "show-tokens",
-                description: "Toggle rendering of token info messages on/off",
+                description: "Toggle rendering of token info messages",
             },
             Command {
                 name: "show-diff",
-                description: "Toggle rendering of diff messages on/off",
+                description: "Toggle rendering of diff messages",
             },
         ]
     }
