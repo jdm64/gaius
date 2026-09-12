@@ -249,7 +249,7 @@ impl Session {
             .and_then(|m| first_text(&m.content))
             .map(|s| {
                 s.chars()
-                    .take(40)
+                    .take(60)
                     .filter(|c| !c.is_control())
                     .collect::<String>()
             })
