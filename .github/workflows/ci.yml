@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: ["**"]
 
 permissions:
   contents: write
@@ -44,15 +44,19 @@ jobs:
           path: cli/gaius-linux-x86_64
 
       - name: Force update tag
+        id: vars
         run: |
-          git tag -f continuous
-          git push origin continuous --force
+          SAFE_BRANCH=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9_.-]/-/g')
+          git tag -f continuous-$SAFE_BRANCH
+          git push --force origin continuous-$SAFE_BRANCH
+          echo "branch=$SAFE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "tag=continuous-$SAFE_BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Publish to continuous build
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: continuous
-          name: Continuous Build
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: ${{ steps.vars.outputs.branch }} Continuous Build
           make_latest: false
           prerelease: true
           files: cli/gaius-linux-x86_64
