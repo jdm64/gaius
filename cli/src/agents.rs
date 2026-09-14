@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, path::Path};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentDefinition {
     pub name: String,
     pub prompt: String,

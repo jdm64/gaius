@@ -8,7 +8,7 @@ use crate::{
     dirs::Dirs,
     harness_actor::HarnessActorHandle,
     input::{Input, InputMode, PickList, ProviderInfoRow},
-    models::{ModelPickerRow, Models, ReasoningEffort, RecentModelDef},
+    models::{ModelPickerRow, Models, ProviderDef, ReasoningEffort, RecentModelDef},
     session::Session,
     skills::Skill,
     token_usage::SessionInfo,
@@ -772,7 +772,14 @@ impl Commands {
                 }
 
                 app.status = "Validating provider...".to_string();
-                match provider.list_models().await {
+                let provider_def = match ProviderDef::new(&provider) {
+                    Ok(provider_def) => provider_def,
+                    Err(err) => {
+                        app.status = format!("Error creating provider: {}", err);
+                        return InputMode::AddProvider { picker };
+                    }
+                };
+                match provider_def.list_models().await {
                     Ok(_) => match app.config.add_provider(provider) {
                         Ok(()) => match Models::reload(&app.config).await {
                             Ok(reloaded_models) => {

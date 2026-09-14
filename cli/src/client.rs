@@ -2,13 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{
-    agents::AgentDefinition,
-    config::Config,
-    models::{ModelDef, ReasoningEffort},
-    plan_hook::PlanHook,
-    skills::SkillRepo,
-};
+use crate::{agents::AgentDefinition, models::ModelDef, plan_hook::PlanHook, skills::SkillRepo};
 use genai::{
     Client, Headers,
     chat::{ChatOptions, ChatRequest, ChatResponse, ChatStreamResponse},
@@ -37,9 +31,7 @@ impl LLMClient {
     }
 
     pub async fn set_model(&mut self, model: ModelDef) -> Result<(), Box<dyn Error>> {
-        let mut config = Config::new();
-        config.load().await?;
-        self.client = model.create_client(&config)?;
+        self.client = model.create_client()?;
         self.model = model;
         Ok(())
     }
@@ -95,8 +87,19 @@ impl LLMClient {
         }
     }
 
+    fn get_chat_opts(&self) -> ChatOptions {
+        let mut opts = base_chat_opts().clone();
+        let mut headers = Headers::default();
+        self.model.provider.add_headers(&mut headers);
+        opts = opts.with_extra_headers(headers);
+        match self.model.reasoning.as_ref().and_then(|e| e.to_genai()) {
+            Some(genai_effort) => opts.with_reasoning_effort(genai_effort),
+            None => opts,
+        }
+    }
+
     pub async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, Box<dyn Error>> {
-        let chat_options = default_chat_opts(self.model.reasoning.as_ref());
+        let chat_options = self.get_chat_opts();
         let response = self
             .client
             .exec_chat(&self.model.id, request, Some(&chat_options))
@@ -108,7 +111,7 @@ impl LLMClient {
         &self,
         request: ChatRequest,
     ) -> Result<ChatStreamResponse, Box<dyn Error>> {
-        let chat_options = default_chat_opts(self.model.reasoning.as_ref());
+        let chat_options = self.get_chat_opts();
         let response = self
             .client
             .exec_chat_stream(&self.model.id, request, Some(&chat_options))
@@ -126,19 +129,7 @@ fn base_chat_opts() -> &'static ChatOptions {
             .with_capture_tool_calls(true)
             .with_capture_reasoning_content(true)
             .with_capture_usage(true)
-            .with_extra_headers(Headers::from([("User-Agent", "Gaius")]))
     })
-}
-
-/// Build chat options with the given reasoning effort applied on top of the
-/// base defaults.  When `effort` is `None` or `Some(Default)`, the base
-/// options are returned unchanged.
-fn default_chat_opts(effort: Option<&ReasoningEffort>) -> ChatOptions {
-    let opts = base_chat_opts().clone();
-    match effort.and_then(|e| e.to_genai()) {
-        Some(genai_effort) => opts.with_reasoning_effort(genai_effort),
-        None => opts,
-    }
 }
 
 fn read_agents_md() -> Option<String> {

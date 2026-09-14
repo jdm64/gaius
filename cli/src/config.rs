@@ -2,12 +2,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{agents::Agents, cli_prompt::CliPrompt, dirs::Dirs};
+use crate::{
+    agents::{AgentDefinition, Agents},
+    cli_prompt::CliPrompt,
+    client::LLMClient,
+    dirs::Dirs,
+    models::{ModelDef, ProviderDef},
+};
+use futures::StreamExt;
 use genai::{
-    Client, ModelIden, ServiceTarget,
     adapter::AdapterKind,
-    chat::ChatRequest,
-    resolver::{AuthData, Endpoint, ServiceTargetResolver},
+    chat::{ChatRequest, ChatStreamEvent},
 };
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -23,11 +28,13 @@ pub struct Config {
     agents: Agents,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub name: String,
     pub kind: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub key: String,
 }
 
@@ -39,54 +46,8 @@ pub struct ModelConfig {
 }
 
 pub struct ConfiguredModel {
-    pub provider_name: String,
-    pub provider_kind: String,
-    pub provider_url: String,
-    pub provider_key: String,
-    pub model_id: String,
-}
-
-impl ConfiguredModel {
-    pub fn new(provider: ProviderConfig, model: ModelConfig) -> ConfiguredModel {
-        ConfiguredModel {
-            provider_name: provider.name,
-            provider_kind: provider.kind,
-            provider_url: provider.url,
-            provider_key: provider.key,
-            model_id: model.id,
-        }
-    }
-
-    pub fn create_client(&self) -> Result<Client, Box<dyn Error>> {
-        let kind =
-            AdapterKind::from_lower_str(&self.provider_kind.to_lowercase()).ok_or_else(|| {
-                format!(
-                    "Provider '{}' has invalid kind '{}'.",
-                    self.provider_name, self.provider_kind
-                )
-            })?;
-
-        Ok(Self::raw_create_client(
-            kind,
-            self.provider_url.clone(),
-            self.provider_key.clone(),
-            self.model_id.clone(),
-        ))
-    }
-
-    fn raw_create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
-        let resolver = ServiceTargetResolver::from_resolver_fn(
-            move |mut service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
-                service_target.endpoint = Endpoint::from_owned(url.clone());
-                service_target.auth = AuthData::Key(key.clone());
-                service_target.model = ModelIden::new(kind, model.clone());
-                Ok(service_target)
-            },
-        );
-        Client::builder()
-            .with_service_target_resolver(resolver)
-            .build()
-    }
+    pub provider: ProviderConfig,
+    pub model: ModelConfig,
 }
 
 impl Default for Config {
@@ -114,66 +75,77 @@ impl Config {
         }
 
         println!(
-            "Config file missing ({}). Configure an LLM provider.",
+            "Config file missing: {}\nConfigure an LLM provider:\n",
             path.display()
         );
         loop {
-            let mut kind = CliPrompt::get_input("Kind (blank for OpenAI compatable): ")?;
+            let mut kind =
+                CliPrompt::get_input("Kind (blank=OpenAI compatible; codex=Codex subscription): ")?;
             kind = if kind.is_empty() {
                 "openai".to_string()
             } else {
                 kind
             };
 
-            let adapter_kind = match AdapterKind::from_lower_str(&kind) {
-                Some(kind) => kind,
-                None => {
-                    eprintln!("Invalid provider kind: {}", kind);
-                    continue;
-                }
-            };
+            let is_codex = kind.eq_ignore_ascii_case("codex");
+            if !is_codex && AdapterKind::from_lower_str(&kind).is_none() {
+                eprintln!("Invalid provider kind: {}", kind);
+                continue;
+            }
 
-            let url = CliPrompt::get_input("Url: ")?;
-            let key = CliPrompt::get_input("Key: ")?;
-            let model_id = CliPrompt::get_input("Model: ")?;
-
-            let name = match Url::parse(&url).map(|u| u.host_str().unwrap_or("default").to_string())
-            {
-                Ok(name) => name,
-                Err(_) => "default".to_string(),
-            };
-
-            let model = ConfiguredModel {
-                provider_name: name,
-                provider_kind: adapter_kind.as_lower_str().to_string(),
-                provider_url: url,
-                provider_key: key,
-                model_id,
-            };
-
-            let client = match model.create_client() {
-                Ok(client) => client,
-                Err(err) => {
-                    eprintln!("Error creating client: {}", err);
-                    continue;
-                }
-            };
-
-            match validate_model(&client, &model.model_id.clone()).await {
-                Ok(()) => {
-                    let provider = ProviderConfig {
-                        name: model.provider_name.clone(),
-                        url: model.provider_url,
-                        kind: model.provider_kind,
-                        key: model.provider_key.clone(),
+            let (name, url, key, model_id) = if is_codex {
+                let model_id = CliPrompt::get_input("Model: ")?;
+                ("Codex".to_string(), String::new(), String::new(), model_id)
+            } else {
+                let url = CliPrompt::get_input("Url: ")?;
+                let key = CliPrompt::get_input("Key: ")?;
+                let model_id = CliPrompt::get_input("Model: ")?;
+                let name =
+                    match Url::parse(&url).map(|u| u.host_str().unwrap_or("default").to_string()) {
+                        Ok(name) => name,
+                        Err(_) => "default".to_string(),
                     };
+
+                (name, url, key, model_id)
+            };
+
+            let provider_config = ProviderConfig {
+                name,
+                kind,
+                url,
+                key,
+            };
+            let provider_def = match ProviderDef::new(&provider_config) {
+                Ok(provider_def) => provider_def,
+                Err(err) => {
+                    eprintln!("Error: {}", err);
+                    continue;
+                }
+            };
+
+            let model_def = ModelDef {
+                provider: provider_def,
+                id: model_id,
+                context_len: None,
+                pricing: None,
+                reasoning: None,
+            };
+
+            let mut client = LLMClient::new(AgentDefinition::default());
+            if let Err(err) = client.set_model(model_def.clone()).await {
+                eprintln!("Error setting model: {}", err);
+                continue;
+            }
+
+            match validate_model(&client).await {
+                Ok(()) => {
                     let model = ModelConfig {
-                        name: model.model_id.clone(),
-                        provider: model.provider_name.clone(),
-                        id: model.model_id.clone(),
+                        name: model_def.id.clone(),
+                        provider: model_def.provider.name().to_string(),
+                        id: model_def.id.clone(),
                     };
                     let config = Config {
-                        provider: vec![provider],
+                        provider: vec![provider_config],
                         model: vec![model],
                         agents: Agents::load(&Dirs::config_dir()?)?,
                     };
@@ -210,7 +182,10 @@ impl Config {
                     }
                 };
 
-                Some(ConfiguredModel::new(provider.clone(), model.clone()))
+                Some(ConfiguredModel {
+                    provider: provider.clone(),
+                    model: model.clone(),
+                })
             })
             .collect()
     }
@@ -244,12 +219,14 @@ impl Config {
         if self.provider.iter().any(|p| p.name == provider.name) {
             return Err(format!("Provider '{}' already exists", provider.name).into());
         }
-        if AdapterKind::from_lower_str(&provider.kind.to_lowercase()).is_none() {
-            return Err(format!("Invalid provider kind: {}", provider.kind).into());
-        }
-        Url::parse(&provider.url)?;
-        if provider.key.trim().is_empty() {
-            return Err("Provider key cannot be empty".into());
+        if !provider.kind.eq_ignore_ascii_case("codex") {
+            if AdapterKind::from_lower_str(&provider.kind.to_lowercase()).is_none() {
+                return Err(format!("Invalid provider kind: {}", provider.kind).into());
+            }
+            Url::parse(&provider.url)?;
+            if provider.key.trim().is_empty() {
+                return Err("Provider key cannot be empty".into());
+            }
         }
         Ok(())
     }
@@ -259,8 +236,22 @@ impl Config {
     }
 }
 
-async fn validate_model(client: &Client, model: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let request = ChatRequest::from_user("Reply with ok.");
-    client.exec_chat(model, request, None).await?;
+async fn validate_model(client: &LLMClient) -> Result<(), Box<dyn Error>> {
+    let request = ChatRequest::from_user("Reply with what model you are.");
+    let mut response = client.chat_streaming(request).await?;
+
+    let mut stream_end = None;
+    while let Some(event) = response.stream.next().await {
+        match event {
+            Ok(event) => {
+                if let ChatStreamEvent::End(end) = event {
+                    stream_end = Some(end);
+                }
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+
+    stream_end.ok_or("Chat stream ended without an end event")?;
     Ok(())
 }

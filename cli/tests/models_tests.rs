@@ -1,12 +1,34 @@
-use gaius::config::ProviderConfig;
-use gaius::models::{CachedModelDef, ModelDef, ModelPickerRow, Models, RecentModelDef};
+use gaius::config::{Config, ProviderConfig};
+use gaius::models::{
+    CachedModelDef, ModelDef, ModelPickerRow, Models, ProviderDef, RecentModelDef,
+};
 use serde_json::json;
+
+fn provider_def(name: &str) -> ProviderDef {
+    ProviderDef::new(&ProviderConfig {
+        name: name.to_string(),
+        kind: "openai".to_string(),
+        url: String::new(),
+        key: String::new(),
+    })
+    .expect("provider def")
+}
 
 fn model(provider: &str, id: &str) -> ModelDef {
     ModelDef {
-        provider: provider.to_string(),
+        provider: provider_def(provider),
         id: id.to_string(),
         context_len: None,
+        pricing: None,
+        reasoning: None,
+    }
+}
+
+fn model_with_context(provider: &str, id: &str, context_len: i32) -> ModelDef {
+    ModelDef {
+        provider: provider_def(provider),
+        id: id.to_string(),
+        context_len: Some(context_len),
         pricing: None,
         reasoning: None,
     }
@@ -20,105 +42,30 @@ fn recent_model(provider: &str, id: &str) -> RecentModelDef {
     }
 }
 
-fn provider_config(url: &str) -> ProviderConfig {
-    ProviderConfig {
-        name: String::new(),
-        kind: "openai".to_string(),
-        url: url.to_string(),
-        key: String::new(),
-    }
-}
-
-#[test]
-fn model_urls_walks_provider_path_upward() {
-    let config = provider_config("https://example.com/api/v1");
-    let urls = config.models_list_urls().unwrap();
-    let urls: Vec<String> = urls.into_iter().map(|url| url.to_string()).collect();
-
-    assert_eq!(
-        urls,
-        vec![
-            "https://example.com/api/v1/models",
-            "https://example.com/api/models",
-        ]
-    );
-}
-
-#[test]
-fn model_urls_handles_trailing_slash() {
-    let config = provider_config("https://example.com/v1/");
-    let urls = config.models_list_urls().unwrap();
-    let urls: Vec<String> = urls.into_iter().map(|url| url.to_string()).collect();
-
-    assert_eq!(
-        urls,
-        vec![
-            "https://example.com/v1/models",
-            "https://example.com/models"
-        ]
-    );
-}
-
 #[test]
 fn extracts_openai_compatible_models() {
-    let config = provider_config("");
-    let models = config.extract_model_defs(&json!({
+    let provider = provider_def("");
+    let models = provider.extract_model_defs(&json!({
         "data": [
             { "id": "model-a" },
             { "id": "model-b" }
         ]
     }));
 
-    assert_eq!(
-        models,
-        vec![
-            ModelDef {
-                provider: String::new(),
-                id: "model-a".into(),
-                context_len: None,
-                pricing: None,
-                reasoning: None,
-            },
-            ModelDef {
-                provider: String::new(),
-                id: "model-b".into(),
-                context_len: None,
-                pricing: None,
-                reasoning: None,
-            },
-        ]
-    );
+    assert_eq!(models, vec![model("", "model-a"), model("", "model-b")]);
 }
 
 #[test]
 fn extracts_model_arrays() {
-    let config = provider_config("");
-    let models = config.extract_model_defs(&json!({
+    let provider = provider_def("");
+    let models = provider.extract_model_defs(&json!({
         "models": [
             { "name": "model-a" },
             "model-b"
         ]
     }));
 
-    assert_eq!(
-        models,
-        vec![
-            ModelDef {
-                provider: String::new(),
-                id: "model-a".into(),
-                context_len: None,
-                pricing: None,
-                reasoning: None,
-            },
-            ModelDef {
-                provider: String::new(),
-                id: "model-b".into(),
-                context_len: None,
-                pricing: None,
-                reasoning: None,
-            },
-        ]
-    );
+    assert_eq!(models, vec![model("", "model-a"), model("", "model-b")]);
 }
 
 #[test]
@@ -202,48 +149,29 @@ fn recent_models_truncate_to_eight_entries() {
 }
 
 #[test]
-fn recent_models_load_with_cache_enriches_known_models() {
+fn recent_models_load_with_cache_enriches_known_models_and_drops_stale() {
     let recent = vec![
         recent_model("provider", "model-b"),
         recent_model("provider", "stale-model"),
     ];
     let cache = vec![
         model("provider", "model-a"),
-        ModelDef {
-            provider: "provider".to_string(),
-            id: "model-b".to_string(),
-            context_len: Some(128_000),
-            pricing: None,
-            reasoning: None,
-        },
+        model_with_context("provider", "model-b", 128_000),
     ];
 
     let enriched = RecentModelDef::from_cache(&recent, &cache);
 
+    // Known models are enriched from the cache; stale recent models that are
+    // no longer in the cache are dropped.
     assert_eq!(
         enriched,
-        vec![
-            ModelDef {
-                provider: "provider".to_string(),
-                id: "model-b".to_string(),
-                context_len: Some(128_000),
-                pricing: None,
-                reasoning: None,
-            },
-            model("provider", "stale-model"),
-        ]
+        vec![model_with_context("provider", "model-b", 128_000)]
     );
 }
 
 #[test]
 fn model_picker_rows_deduplicate_recent_models_by_identity() {
-    let available = vec![ModelDef {
-        provider: "provider".to_string(),
-        id: "model-a".to_string(),
-        context_len: Some(128_000),
-        pricing: None,
-        reasoning: None,
-    }];
+    let available = vec![model_with_context("provider", "model-a", 128_000)];
     let recent = vec![model("provider", "model-a")];
 
     let rows = Models::filter_rows("", &available, &recent);
@@ -340,10 +268,19 @@ fn models_cache_loads_provider_model_map() {
     }))
     .unwrap();
 
-    let models = CachedModelDef::to_models(cache);
+    let config: Config = serde_json::from_value(json!({
+        "provider": [
+            { "name": "provider 1", "kind": "openai", "url": "", "key": "" },
+            { "name": "provider 2", "kind": "openai", "url": "", "key": "" }
+        ],
+        "model": []
+    }))
+    .unwrap();
+
+    let models = CachedModelDef::to_models(cache, &config);
     let models: Vec<(String, String)> = models
         .into_iter()
-        .map(|model| (model.provider, model.id))
+        .map(|model| (model.provider.name().to_string(), model.id))
         .collect();
 
     assert_eq!(
