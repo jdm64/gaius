@@ -2,13 +2,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{agents::Agents, cli_prompt::CliPrompt, dirs::Dirs};
-use genai::{
-    Client, ModelIden, ServiceTarget,
-    adapter::AdapterKind,
-    chat::ChatRequest,
-    resolver::{AuthData, Endpoint, ServiceTargetResolver},
+use crate::{
+    agents::Agents,
+    cli_prompt::CliPrompt,
+    dirs::Dirs,
+    models::{ModelDef, ProviderDef},
 };
+use genai::{Client, adapter::AdapterKind, chat::ChatRequest};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use url::Url;
@@ -23,7 +23,7 @@ pub struct Config {
     agents: Agents,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub name: String,
     pub kind: String,
@@ -39,54 +39,8 @@ pub struct ModelConfig {
 }
 
 pub struct ConfiguredModel {
-    pub provider_name: String,
-    pub provider_kind: String,
-    pub provider_url: String,
-    pub provider_key: String,
-    pub model_id: String,
-}
-
-impl ConfiguredModel {
-    pub fn new(provider: ProviderConfig, model: ModelConfig) -> ConfiguredModel {
-        ConfiguredModel {
-            provider_name: provider.name,
-            provider_kind: provider.kind,
-            provider_url: provider.url,
-            provider_key: provider.key,
-            model_id: model.id,
-        }
-    }
-
-    pub fn create_client(&self) -> Result<Client, Box<dyn Error>> {
-        let kind =
-            AdapterKind::from_lower_str(&self.provider_kind.to_lowercase()).ok_or_else(|| {
-                format!(
-                    "Provider '{}' has invalid kind '{}'.",
-                    self.provider_name, self.provider_kind
-                )
-            })?;
-
-        Ok(Self::raw_create_client(
-            kind,
-            self.provider_url.clone(),
-            self.provider_key.clone(),
-            self.model_id.clone(),
-        ))
-    }
-
-    fn raw_create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
-        let resolver = ServiceTargetResolver::from_resolver_fn(
-            move |mut service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
-                service_target.endpoint = Endpoint::from_owned(url.clone());
-                service_target.auth = AuthData::Key(key.clone());
-                service_target.model = ModelIden::new(kind, model.clone());
-                Ok(service_target)
-            },
-        );
-        Client::builder()
-            .with_service_target_resolver(resolver)
-            .build()
-    }
+    pub provider: ProviderConfig,
+    pub model: ModelConfig,
 }
 
 impl Default for Config {
@@ -125,33 +79,73 @@ impl Config {
                 kind
             };
 
-            let adapter_kind = match AdapterKind::from_lower_str(&kind) {
-                Some(kind) => kind,
-                None => {
-                    eprintln!("Invalid provider kind: {}", kind);
+            let is_oauth_openai = kind.eq_ignore_ascii_case("oauth-openai");
+            if !is_oauth_openai && AdapterKind::from_lower_str(&kind).is_none() {
+                eprintln!("Invalid provider kind: {}", kind);
+                continue;
+            }
+
+            let (name, url, key, model_id) = if is_oauth_openai {
+                let model_id = CliPrompt::get_input("Model: ")?;
+                ("openai".to_string(), String::new(), String::new(), model_id)
+            } else {
+                let url = CliPrompt::get_input("Url: ")?;
+                let key = CliPrompt::get_input("Key: ")?;
+                let model_id = CliPrompt::get_input("Model: ")?;
+                let name = match Url::parse(&url)
+                    .map(|u| u.host_str().unwrap_or("default").to_string())
+                {
+                    Ok(name) => name,
+                    Err(_) => "default".to_string(),
+                };
+
+                (name, url, key, model_id)
+            };
+
+            let provider_config = ProviderConfig {
+                name,
+                kind,
+                url,
+                key,
+            };
+            // For oauth-openai this also reads ~/.codex/auth.json, so a
+            // missing/expired codex login sends us back to the prompt.
+            let provider_def = match ProviderDef::new(&provider_config) {
+                Ok(provider_def) => provider_def,
+                Err(err) => {
+                    eprintln!("Error: {}", err);
                     continue;
                 }
             };
 
-            let url = CliPrompt::get_input("Url: ")?;
-            let key = CliPrompt::get_input("Key: ")?;
-            let model_id = CliPrompt::get_input("Model: ")?;
+            // List models before validating so the provider's raw response is
+            // dumped to disk; check the dumped ids if validation fails below.
+            match provider_def.list_models().await {
+                Ok(models) => {
+                    println!(
+                        "Found {} models; response dumped to {}",
+                        models.len(),
+                        Dirs::models_list_dump()?.display()
+                    );
+                }
+                Err(err) => {
+                    eprintln!(
+                        "Model list request failed: {} (see {})",
+                        err,
+                        Dirs::models_list_dump()?.display()
+                    );
+                }
+            }
 
-            let name = match Url::parse(&url).map(|u| u.host_str().unwrap_or("default").to_string())
-            {
-                Ok(name) => name,
-                Err(_) => "default".to_string(),
+            let model_def = ModelDef {
+                provider: provider_def,
+                id: model_id,
+                context_len: None,
+                pricing: None,
+                reasoning: None,
             };
 
-            let model = ConfiguredModel {
-                provider_name: name,
-                provider_kind: adapter_kind.as_lower_str().to_string(),
-                provider_url: url,
-                provider_key: key,
-                model_id,
-            };
-
-            let client = match model.create_client() {
+            let client = match model_def.create_client() {
                 Ok(client) => client,
                 Err(err) => {
                     eprintln!("Error creating client: {}", err);
@@ -159,21 +153,15 @@ impl Config {
                 }
             };
 
-            match validate_model(&client, &model.model_id.clone()).await {
+            match validate_model(&client, &model_def.id.clone()).await {
                 Ok(()) => {
-                    let provider = ProviderConfig {
-                        name: model.provider_name.clone(),
-                        url: model.provider_url,
-                        kind: model.provider_kind,
-                        key: model.provider_key.clone(),
-                    };
                     let model = ModelConfig {
-                        name: model.model_id.clone(),
-                        provider: model.provider_name.clone(),
-                        id: model.model_id.clone(),
+                        name: model_def.id.clone(),
+                        provider: model_def.provider.name().to_string(),
+                        id: model_def.id.clone(),
                     };
                     let config = Config {
-                        provider: vec![provider],
+                        provider: vec![provider_config],
                         model: vec![model],
                         agents: Agents::load(&Dirs::config_dir()?)?,
                     };
@@ -210,7 +198,10 @@ impl Config {
                     }
                 };
 
-                Some(ConfiguredModel::new(provider.clone(), model.clone()))
+                Some(ConfiguredModel {
+                    provider: provider.clone(),
+                    model: model.clone(),
+                })
             })
             .collect()
     }
@@ -244,12 +235,15 @@ impl Config {
         if self.provider.iter().any(|p| p.name == provider.name) {
             return Err(format!("Provider '{}' already exists", provider.name).into());
         }
-        if AdapterKind::from_lower_str(&provider.kind.to_lowercase()).is_none() {
-            return Err(format!("Invalid provider kind: {}", provider.kind).into());
-        }
-        Url::parse(&provider.url)?;
-        if provider.key.trim().is_empty() {
-            return Err("Provider key cannot be empty".into());
+        // oauth-openai is a special kind that reads tokens from ~/.codex/auth.json
+        if !provider.kind.eq_ignore_ascii_case("oauth-openai") {
+            if AdapterKind::from_lower_str(&provider.kind.to_lowercase()).is_none() {
+                return Err(format!("Invalid provider kind: {}", provider.kind).into());
+            }
+            Url::parse(&provider.url)?;
+            if provider.key.trim().is_empty() {
+                return Err("Provider key cannot be empty".into());
+            }
         }
         Ok(())
     }
