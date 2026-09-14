@@ -39,6 +39,13 @@ use tokio::{
 };
 
 const STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 15);
+const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 60);
+
+pub enum RenderReason {
+    UserUI,
+    HarnessMsg,
+    Timer,
+}
 
 #[derive(Clone)]
 pub enum TuiMessage {
@@ -166,7 +173,9 @@ impl TuiApp {
         let mut guard = TerminalGuard::enter()?;
         let mut terminal_events = EventStream::new();
         let render = Render::new();
-        let mut next_render: Option<time::Instant> = Some(Instant::now() + STREAM_FRAME_INTERVAL);
+        let mut render_reason;
+        let mut last_render: Instant = Instant::now();
+        let mut next_render: Option<Instant> = Some(last_render + STREAM_FRAME_INTERVAL);
 
         loop {
             tokio::select! {
@@ -175,39 +184,56 @@ impl TuiApp {
                         break;
                     };
                     self.handle_terminal_event(event?, &actor).await?;
-
-                    // must render now or ui hangs
-                    guard.terminal.draw(|frame| render.draw(self, frame))?;
-                    next_render = None;
+                    render_reason = RenderReason::UserUI;
                 }
                 actor_event = actor.rx.recv() => {
                     let Some(actor_event) = actor_event else {
                         break;
                     };
-                    let is_ask_user = matches!(actor_event, HarnessActorEvent::AskUser { .. });
+
+                    render_reason = if matches!(actor_event, HarnessActorEvent::Harness { .. }) {
+                        RenderReason::HarnessMsg
+                    } else {
+                        RenderReason::UserUI
+                    };
+
                     if let Some(snapshot) = self.handle_actor_event(actor_event) {
                         latest_snapshot = snapshot;
                     }
-                    if is_ask_user {
-                        // must render now or ui hangs
-                        guard.terminal.draw(|frame| render.draw(self, frame))?;
-                    }
-                    if next_render.is_none() {
-                        next_render = Some(Instant::now() + STREAM_FRAME_INTERVAL);
-                    }
                 }
                 _ = time::sleep_until(next_render.unwrap_or(Instant::now())), if next_render.is_some() => {
-                    guard.terminal.draw(|frame| render.draw(self, frame))?;
-                    next_render = if self.actor_busy {
-                        Some(Instant::now() + STREAM_FRAME_INTERVAL)
-                    } else {
-                        None
-                    };
+                    render_reason = RenderReason::Timer;
                 }
             }
 
             if let InputMode::Exit = self.mode {
                 break;
+            }
+
+            let should_draw = match render_reason {
+                RenderReason::Timer => true,
+                RenderReason::HarnessMsg => false,
+                RenderReason::UserUI => last_render.elapsed() >= MIN_FRAME_INTERVAL,
+            };
+
+            if should_draw {
+                guard.terminal.draw(|frame| render.draw(self, frame))?;
+                last_render = Instant::now();
+                next_render = if self.actor_busy {
+                    Some(Instant::now() + STREAM_FRAME_INTERVAL)
+                } else {
+                    None
+                };
+            } else {
+                // based on should_draw there are only two cases why we didn't draw
+                // if it was HarnessMsg then schedule draw at 15 fps
+                // if it was UserUI then schedule draw at 60 fps
+                // other cases shouldn't happen so set to idle(None)
+                next_render = match render_reason {
+                    RenderReason::UserUI => Some(last_render + MIN_FRAME_INTERVAL),
+                    RenderReason::HarnessMsg => Some(last_render + STREAM_FRAME_INTERVAL),
+                    _ => None,
+                };
             }
         }
 
