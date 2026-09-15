@@ -103,7 +103,7 @@ impl Compact {
     }
 
     fn context_len(harness: &Harness) -> i32 {
-        match harness.model().context_len {
+        match harness.client().model().context_len {
             Some(context_len) if context_len > 0 => context_len,
             _ => DEFAULT_CONTEXT_LEN,
         }
@@ -155,7 +155,7 @@ impl Compact {
         on_event(HarnessEvent::CompactSummary(Self::summary_message_text(
             &summary,
         )));
-        harness.record_usage(&content.usage, on_event);
+        harness.record_side_usage(&content.usage, on_event);
 
         Ok((summary, content.usage.completion_tokens))
     }

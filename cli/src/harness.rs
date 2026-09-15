@@ -5,11 +5,11 @@
 use crate::{
     agents::AgentDefinition,
     cancel_handle::CancelHandle,
+    client::LLMClient,
     compact::{Compact, CompactOutcome},
-    config::Config,
     diff_view::DiffView,
     history_replay,
-    models::{ModelDef, ReasoningEffort},
+    models::ModelDef,
     plan_hook::PlanHook,
     rate_limit::is_rate_limit_error,
     render_util::RenderUtil,
@@ -19,47 +19,18 @@ use crate::{
     tools::{ToolEngine, ToolResult},
 };
 use futures::StreamExt;
-use genai::{
-    Client, Headers,
-    chat::{
-        ChatMessage, ChatOptions, ChatRequest, ChatResponse, ChatStreamEvent, ContentPart,
-        CustomPart, MessageContent, StreamEnd, ToolCall, ToolResponse, Usage,
-    },
+use genai::chat::{
+    ChatMessage, ChatRequest, ChatResponse, ChatStreamEvent, ContentPart, CustomPart,
+    MessageContent, StreamEnd, ToolCall, ToolResponse, Usage,
 };
 use serde_json::json;
 use std::{
     error::Error,
-    fs,
-    path::PathBuf,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::time;
 use uuid::Uuid;
-
-static BASE_CHAT_OPTIONS: OnceLock<ChatOptions> = OnceLock::new();
-
-fn base_chat_opts() -> &'static ChatOptions {
-    BASE_CHAT_OPTIONS.get_or_init(|| {
-        ChatOptions::default()
-            .with_capture_content(true)
-            .with_capture_tool_calls(true)
-            .with_capture_reasoning_content(true)
-            .with_capture_usage(true)
-            .with_extra_headers(Headers::from([("User-Agent", "Gaius")]))
-    })
-}
-
-/// Build chat options with the given reasoning effort applied on top of the
-/// base defaults.  When `effort` is `None` or `Some(Default)`, the base
-/// options are returned unchanged.
-fn default_chat_opts(effort: Option<&ReasoningEffort>) -> ChatOptions {
-    let opts = base_chat_opts().clone();
-    match effort.and_then(|e| e.to_genai()) {
-        Some(genai_effort) => opts.with_reasoning_effort(genai_effort),
-        None => opts,
-    }
-}
 
 #[derive(Clone, Debug)]
 pub enum UserRequest {
@@ -117,19 +88,16 @@ pub struct HarnessSnapshot {
 
 pub struct Harness {
     history: ChatRequest,
-    client: Client,
+    client: LLMClient,
     tool_engine: ToolEngine,
-    model: ModelDef,
-    agent: AgentDefinition,
     session: Session,
     token_usage: TokenUsageLedger,
     live_info: Arc<Mutex<SessionInfo>>,
     streaming: bool,
     cancel: CancelHandle,
     last_plan_content: Option<String>,
-    plan_mode_on: bool,
+    plan_mode: bool,
     turn_start: Option<u64>,
-    agents_md: Option<String>,
 }
 
 impl Harness {
@@ -167,19 +135,16 @@ impl Harness {
 
         let mut harness = Self {
             history,
-            client: Client::default(),
+            client: LLMClient::new(agent),
             tool_engine,
-            model: ModelDef::default(),
-            agent,
             session,
             token_usage,
             streaming: true,
             cancel: CancelHandle::new(),
             last_plan_content: None,
-            plan_mode_on: false,
+            plan_mode: false,
             live_info,
             turn_start: None,
-            agents_md: read_agents_md(),
         };
 
         harness.build_sys_prompt();
@@ -191,12 +156,8 @@ impl Harness {
         self.session.id.clone()
     }
 
-    pub fn model(&self) -> &ModelDef {
-        &self.model
-    }
-
-    pub fn agent_name(&self) -> &str {
-        &self.agent.name
+    pub fn client(&self) -> &LLMClient {
+        &self.client
     }
 
     pub fn streaming(&self) -> bool {
@@ -208,56 +169,24 @@ impl Harness {
     }
 
     pub fn plan_mode(&self) -> bool {
-        self.plan_mode_on
+        self.plan_mode
     }
 
     pub fn set_plan_mode(&mut self, is_on: bool) {
-        self.plan_mode_on = is_on;
+        self.plan_mode = is_on;
         self.build_sys_prompt();
     }
 
     fn build_sys_prompt(&mut self) {
-        self.history.tools = if self.plan_mode_on {
+        self.history.tools = if self.plan_mode {
             Some(self.tool_engine.build_tools())
         } else {
             Some(self.tool_engine.build_tools_without_plan())
         };
 
-        let prompt = if self.plan_mode_on {
-            format!("{}\n\n{}", self.agent.prompt, PlanHook::sys_prompt())
-                .trim()
-                .to_string()
-        } else {
-            self.agent.prompt.clone()
-        };
-
-        // Prepend AGENTS.md content if available
-        let prompt = if let Some(agents_md) = &self.agents_md {
-            if prompt.is_empty() {
-                agents_md.clone()
-            } else {
-                format!("{}\n\n{}", agents_md, prompt)
-            }
-        } else {
-            prompt
-        };
-
-        // Append skills section to system prompt if available
-        let prompt = if let Some(skills_prompt) = self.tool_engine.skill_repo.sys_prompt() {
-            if prompt.is_empty() {
-                skills_prompt
-            } else {
-                format!("{}\n\n{}", prompt, skills_prompt)
-            }
-        } else {
-            prompt
-        };
-
-        self.history.system = if prompt.is_empty() {
-            None
-        } else {
-            Some(prompt)
-        }
+        self.history.system = self
+            .client
+            .sys_prompt(&self.tool_engine.skill_repo, self.plan_mode)
     }
 
     pub fn is_cancel(&self) -> bool {
@@ -277,23 +206,18 @@ impl Harness {
     }
 
     pub async fn set_model(&mut self, model: ModelDef) -> Result<(), Box<dyn Error>> {
-        let mut config = Config::new();
-        config.load().await?;
-
-        let client = model.create_client(&config)?;
-        self.client = client;
-        self.model = model;
+        self.client.set_model(model).await?;
         Ok(())
     }
 
     pub fn set_agent(&mut self, agent: AgentDefinition) {
-        self.agent = agent;
+        self.client.set_agent(agent);
         self.build_sys_prompt();
     }
 
     pub fn reload_agent(&mut self, agent: AgentDefinition) {
-        self.agents_md = read_agents_md();
-        self.set_agent(agent);
+        self.client.reload_agent(agent);
+        self.build_sys_prompt();
     }
 
     pub fn new_session(&mut self) -> Result<(), Box<dyn Error>> {
@@ -366,10 +290,10 @@ impl Harness {
         HarnessSnapshot {
             session_id: self.session_id(),
             has_history: !self.history().messages.is_empty(),
-            model: self.model().clone(),
-            agent_name: self.agent_name().to_string(),
+            model: self.client.model().clone(),
+            agent_name: self.client.agent().name.to_string(),
             streaming: self.streaming(),
-            plan_mode_on: self.plan_mode_on,
+            plan_mode_on: self.plan_mode,
             total_cost: self.token_usage.usage().total_cost(),
             turn_started: self.turn_start,
         }
@@ -560,12 +484,8 @@ impl Harness {
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
-        let prompt_message_end = self.history.messages.len();
-        let chat_options = default_chat_opts(self.model.reasoning.as_ref());
-        let mut response = self
-            .client
-            .exec_chat_stream(&self.model.id, self.history.clone(), Some(&chat_options))
-            .await?;
+        let prompt_idx = self.history.messages.len();
+        let mut response = self.client.chat_streaming(self.history.clone()).await?;
 
         let mut stream_end = None;
         let mut emitted_text = false;
@@ -605,16 +525,13 @@ impl Harness {
                 .with_reasoning_content(stream_end.captured_reasoning_content.clone()),
         );
 
-        let assistant_message_index = self.history.messages.len() - 1;
-        if let Some(usage) = stream_end.captured_usage.as_ref() {
-            self.token_usage.record_with_event(
-                prompt_message_end,
-                assistant_message_index,
-                usage,
-                self.model.pricing.as_ref(),
-                on_event,
-            );
-        }
+        let response_idx = self.history.messages.len() - 1;
+        self.record_usage(
+            prompt_idx,
+            response_idx,
+            stream_end.captured_usage,
+            on_event,
+        );
 
         Ok(content.into_tool_calls())
     }
@@ -663,8 +580,8 @@ impl Harness {
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
-        let prompt_message_end = self.history.messages.len();
-        let response = self.exec_chat(self.history.clone()).await?;
+        let prompt_idx = self.history.messages.len();
+        let response = self.client.chat(self.history.clone()).await?;
 
         let full_text = response.content.texts().join("");
         if !full_text.is_empty() {
@@ -675,41 +592,22 @@ impl Harness {
             .messages
             .push(ChatMessage::assistant(response.content.clone()));
 
-        let assistant_message_index = self.history.messages.len() - 1;
-        self.token_usage.record_with_event(
-            prompt_message_end,
-            assistant_message_index,
-            &response.usage,
-            self.model.pricing.as_ref(),
-            on_event,
-        );
+        let response_idx = self.history.messages.len() - 1;
+        self.record_usage(prompt_idx, response_idx, Some(response.usage), on_event);
 
         Ok(response.content.into_tool_calls())
-    }
-
-    pub async fn exec_chat(&self, request: ChatRequest) -> Result<ChatResponse, Box<dyn Error>> {
-        let chat_options = default_chat_opts(self.model.reasoning.as_ref());
-        let response = self
-            .client
-            .exec_chat(&self.model.id, request, Some(&chat_options))
-            .await?;
-
-        Ok(response)
     }
 
     pub async fn exec_chat_cancellable(
         &self,
         request: ChatRequest,
     ) -> Result<ChatResponse, Box<dyn Error>> {
-        let chat_options = default_chat_opts(self.model.reasoning.as_ref());
-        let response = self
-            .client
-            .exec_chat(&self.model.id, request, Some(&chat_options));
+        let response = self.client.chat(request);
         tokio::pin!(response);
 
         loop {
             tokio::select! {
-                response = &mut response => return Ok(response?),
+                response = &mut response => return response,
                 _ = self.cancel.notified() => {
                     // A permit can be left over from an earlier cancel that no
                     // waiter consumed; only a live cancel flag aborts.
@@ -721,15 +619,33 @@ impl Harness {
         }
     }
 
+    fn record_usage<F>(
+        &mut self,
+        prompt_idx: usize,
+        response_idx: usize,
+        usage_opt: Option<Usage>,
+        on_event: &mut F,
+    ) where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        let Some(usage) = usage_opt else {
+            return;
+        };
+
+        let pricing = self.client.model().pricing.as_ref();
+        self.token_usage
+            .record_with_event(prompt_idx, response_idx, &usage, pricing, on_event);
+    }
+
     /// Record the usage of a side request — one whose messages are not part of
     /// the chat history, like the compaction summary call — so its tokens and
     /// cost are counted in the session usage.
-    pub fn record_usage<F>(&mut self, usage: &Usage, on_event: &mut F)
+    pub fn record_side_usage<F>(&mut self, usage: &Usage, on_event: &mut F)
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
-        self.token_usage
-            .record_side_usage(usage, self.model.pricing.as_ref());
+        let pricing = self.client.model().pricing.as_ref();
+        self.token_usage.record_side_usage(usage, pricing);
         on_event(HarnessEvent::TokenUsage {
             prompt: usage.prompt_tokens,
             response: usage.completion_tokens,
@@ -899,23 +815,4 @@ pub fn time_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64
-}
-
-fn read_agents_md() -> Option<String> {
-    let path = PathBuf::from("AGENTS.md");
-    if path.exists() {
-        match fs::read_to_string(&path) {
-            Ok(content) => {
-                let content = content.trim().to_string();
-                if content.is_empty() {
-                    None
-                } else {
-                    Some(content)
-                }
-            }
-            Err(_) => None,
-        }
-    } else {
-        None
-    }
 }

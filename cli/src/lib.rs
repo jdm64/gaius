@@ -4,6 +4,7 @@
 
 pub mod agents;
 pub mod cancel_handle;
+pub mod client;
 pub mod cli_prompt;
 pub mod commands;
 pub mod compact;

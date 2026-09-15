@@ -850,7 +850,7 @@ fn harness_record_usage_emits_event_and_updates_session_info() {
     let mut harness = Harness::new_without_session(basic_agent()).unwrap();
     let mut events = Vec::new();
 
-    harness.record_usage(
+    harness.record_side_usage(
         &Usage {
             prompt_tokens: Some(500),
             completion_tokens: Some(50),
