@@ -52,6 +52,11 @@ jobs:
           echo "branch=$SAFE_BRANCH" >> "$GITHUB_OUTPUT"
           echo "tag=continuous-$SAFE_BRANCH" >> "$GITHUB_OUTPUT"
 
+      - name: Remove existing continuous release if present
+        run: gh release delete "${{ steps.vars.outputs.tag }}" --yes --cleanup-tag || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish to continuous build
         uses: softprops/action-gh-release@v3
         with:

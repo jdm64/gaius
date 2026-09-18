@@ -38,6 +38,11 @@ jobs:
           mv target/release/gaius gaius-linux-x86_64
         working-directory: cli
 
+      - name: Remove existing release if present
+        run: gh release delete "${{ github.ref_name }}" --yes --cleanup-tag || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
