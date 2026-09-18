@@ -33,7 +33,7 @@ jobs:
         run: |
           cargo build --release
           cargo test --release
-          cargo clippy --release
+          cargo clippy --release -- -D warnings
           mv target/release/gaius gaius-linux-x86_64
         working-directory: cli
 
