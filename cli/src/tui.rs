@@ -167,7 +167,7 @@ impl TuiApp {
             eprintln!("Failed to load prompt history: {}", e);
         }
         let mut latest_snapshot = harness.snapshot();
-        let mut actor = HarnessActorHandle::new(harness);
+        let mut actor = HarnessActorHandle::new(harness)?;
         self.save_snapshot(&latest_snapshot);
 
         let mut guard = TerminalGuard::enter()?;

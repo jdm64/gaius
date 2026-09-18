@@ -9,9 +9,16 @@ use crate::{
     skills::Skill,
     token_usage::SessionInfo,
 };
-use tokio::sync::{
-    mpsc,
-    oneshot::{self, error::RecvError},
+use std::{
+    io::{Error, ErrorKind},
+    thread,
+};
+use tokio::{
+    runtime::Builder,
+    sync::{
+        mpsc,
+        oneshot::{self, error::RecvError},
+    },
 };
 
 type CommandResult = Result<HarnessSnapshot, String>;
@@ -138,12 +145,34 @@ pub struct HarnessActorHandle {
 }
 
 impl HarnessActorHandle {
-    pub fn new(harness: Harness) -> HarnessActorHandle {
+    pub fn new(harness: Harness) -> std::io::Result<HarnessActorHandle> {
         let (tx, command_rx) = mpsc::channel(64);
         let (event_tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(run_actor(harness, command_rx, event_tx));
 
-        HarnessActorHandle { tx, rx }
+        // run actor in new thread so it doesn't block UI when tools are called.
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        thread::Builder::new()
+            .name("gaius-harness-actor".to_string())
+            .spawn(move || {
+                let rt = match Builder::new_current_thread().enable_all().build() {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(e));
+                        return;
+                    }
+                };
+                let _ = ready_tx.send(Ok(()));
+                rt.block_on(run_actor(harness, command_rx, event_tx));
+            })?;
+
+        ready_rx.recv().map_err(|_| {
+            Error::new(
+                ErrorKind::Other,
+                "harness actor thread panicked during startup",
+            )
+        })??;
+
+        Ok(HarnessActorHandle { tx, rx })
     }
 
     pub async fn run_prompt(&self, prompt: String) -> Result<(), String> {
