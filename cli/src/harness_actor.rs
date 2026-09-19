@@ -10,7 +10,7 @@ use crate::{
     token_usage::SessionInfo,
 };
 use std::{
-    io::{Error, ErrorKind},
+    io::Error,
     thread,
 };
 use tokio::{
@@ -166,10 +166,7 @@ impl HarnessActorHandle {
             })?;
 
         ready_rx.recv().map_err(|_| {
-            Error::new(
-                ErrorKind::Other,
-                "harness actor thread panicked during startup",
-            )
+            Error::other("harness actor thread panicked during startup")
         })??;
 
         Ok(HarnessActorHandle { tx, rx })
