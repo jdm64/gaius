@@ -538,7 +538,15 @@ impl Harness {
                 attempt + 1
             );
             on_event(HarnessEvent::SystemMessage(message));
-            time::sleep(Duration::from_secs(delay)).await;
+
+            tokio::select! {
+                _ = time::sleep(Duration::from_secs(delay)) => {}
+                _ = self.cancel.notified() => {
+                    if self.is_cancel() {
+                        return Ok(vec![]);
+                    }
+                }
+            }
             delay *= 3;
         }
 
