@@ -41,6 +41,10 @@ impl Dirs {
         Ok(Self::cache_dir()?.join("models_cache.json"))
     }
 
+    pub fn models_recent() -> Result<PathBuf, Box<dyn Error>> {
+        Ok(Dirs::cache_dir()?.join("models_recent.json"))
+    }
+
     pub fn sessions_dir() -> Result<PathBuf, Box<dyn Error>> {
         Ok(Self::data_dir()?.join("sessions"))
     }

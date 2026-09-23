@@ -574,7 +574,7 @@ impl CachedModelDef {
 
 impl RecentModelDef {
     fn load_recent() -> Result<Vec<RecentModelDef>, Box<dyn Error>> {
-        let path = Self::path()?;
+        let path = Dirs::models_recent()?;
         if !path.is_file() {
             return Ok(Vec::new());
         }
@@ -609,7 +609,7 @@ impl RecentModelDef {
     }
 
     pub fn save(recent: &[RecentModelDef]) -> Result<(), Box<dyn Error>> {
-        let path = Self::path()?;
+        let path = Dirs::models_recent()?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -640,10 +640,6 @@ impl RecentModelDef {
             .collect();
         Self::save(&recent)?;
         Ok(recent)
-    }
-
-    fn path() -> Result<PathBuf, Box<dyn Error>> {
-        Ok(Dirs::cache_dir()?.join("recent_models.json"))
     }
 
     pub fn join(recent: &[RecentModelDef], model: &RecentModelDef) -> Vec<RecentModelDef> {
