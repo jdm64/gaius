@@ -7,7 +7,7 @@ use crate::{
     cli_prompt::CliPrompt,
     client::LLMClient,
     dirs::Dirs,
-    models::{ModelDef, ProviderDef},
+    models::{ModelDef, ProviderDef, RecentModelDef},
 };
 use futures::StreamExt;
 use genai::{
@@ -154,6 +154,10 @@ impl Config {
                     }
                     std::fs::write(&path, toml::to_string_pretty(&config)?)?;
                     *self = config;
+
+                    // add to recent list so initial load has a model
+                    RecentModelDef::add(&model_def)?;
+
                     return Ok(());
                 }
                 Err(err) => {
