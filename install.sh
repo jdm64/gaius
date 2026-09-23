@@ -5,7 +5,57 @@
 
 set -eu
 
-REPO_URL="https://github.com/jdm64/gaius/releases/latest/download/gaius-linux-x86_64"
+BUILD="latest"
+
+usage() {
+    echo "Usage: $0 [--build <latest|branch|version>]"
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --build)
+            if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+                echo "error: --build requires a branch name or version." >&2
+                usage >&2
+                exit 1
+            fi
+            BUILD="$2"
+            shift 2
+            ;;
+        --build=*)
+            BUILD="${1#--build=}"
+            if [ -z "$BUILD" ]; then
+                echo "error: --build requires a branch name or version." >&2
+                usage >&2
+                exit 1
+            fi
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "error: unknown option: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+case "$BUILD" in
+    latest)
+        RELEASE="latest/download"
+        ;;
+    v[0-9]?*)
+        RELEASE="download/${BUILD}"
+        ;;
+    *)
+        RELEASE="download/continuous-${BUILD}"
+        ;;
+esac
+
+REPO_URL="https://github.com/jdm64/gaius/releases/${RELEASE}/gaius-linux-x86_64"
 BIN_NAME="gaius"
 INSTALL_DIR="${HOME}/.local/bin"
 INSTALL_PATH="${INSTALL_DIR}/${BIN_NAME}"

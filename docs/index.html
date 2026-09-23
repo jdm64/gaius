@@ -771,9 +771,22 @@ footer {
       </div>
     </div>
 
-    <p class="inst-note reveal">
-      Downloads the latest continuous build and installs it to
+    <p class="inst-note reveal" style="margin-bottom: 2rem;">
+      Downloads the latest release build and installs it to
       <code>~/.local/bin/gaius</code>. Checks Linux/x86_64 before touching anything.
+    </p>
+
+    <div class="cmd-row reveal">
+      <div class="cmd-box frame">
+        <div class="frame-in">
+          <code><span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/jdm64/gaius/master/install.sh | sh -s -- --build master</code>
+          <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/jdm64/gaius/master/install.sh | sh -s -- --build master" aria-label="Copy master build install command">copy</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="inst-note reveal">
+      Downloads the latest continuous build from the <code>master</code> branch.
     </p>
 
     <!-- ---- install: from sources ---- -->
