@@ -232,12 +232,17 @@ impl ProviderConfig {
         match self.kind.as_str() {
             "codex" | "grok" => {}
             _ => {
-                if AdapterKind::from_lower_str(&self.kind.to_lowercase()).is_none() {
+                let Some(kind) = AdapterKind::from_lower_str(&self.kind.to_lowercase()) else {
                     return Err(format!("Invalid provider kind: {}", self.kind).into());
-                }
+                };
                 Url::parse(&self.url)?;
-                if self.key.trim().is_empty() {
-                    return Err("Provider key cannot be empty".into());
+                match kind {
+                    AdapterKind::Ollama => {}
+                    _ => {
+                        if self.key.trim().is_empty() {
+                            return Err("Provider key cannot be empty".into());
+                        }
+                    }
                 }
             }
         }
