@@ -246,7 +246,7 @@ impl ProviderConfig {
 }
 
 async fn validate_model(client: &LLMClient) -> Result<(), Box<dyn Error>> {
-    let request = ChatRequest::from_user("Reply with what model you are.");
+    let request = ChatRequest::from_user("Reply with OK.");
     let mut response = client.chat_streaming(request).await?;
 
     let mut stream_end = None;
