@@ -9,10 +9,7 @@ use crate::{
     skills::Skill,
     token_usage::SessionInfo,
 };
-use std::{
-    io::Error,
-    thread,
-};
+use std::{io::Error, thread};
 use tokio::{
     runtime::Builder,
     sync::{
@@ -165,9 +162,9 @@ impl HarnessActorHandle {
                 rt.block_on(run_actor(harness, command_rx, event_tx));
             })?;
 
-        ready_rx.recv().map_err(|_| {
-            Error::other("harness actor thread panicked during startup")
-        })??;
+        ready_rx
+            .recv()
+            .map_err(|_| Error::other("harness actor thread panicked during startup"))??;
 
         Ok(HarnessActorHandle { tx, rx })
     }

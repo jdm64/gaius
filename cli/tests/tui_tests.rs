@@ -66,7 +66,11 @@ fn build_tui_app_messages_with_all_variants() {
         _ => panic!("expected ToolCall"),
     }
     match &app.messages[4] {
-        TuiMessage::ToolResult { name, result, error } => {
+        TuiMessage::ToolResult {
+            name,
+            result,
+            error,
+        } => {
             assert_eq!(name, "weather");
             assert!(result.is_empty());
             assert!(!error);
@@ -83,7 +87,11 @@ fn build_tui_app_messages_with_all_variants() {
         _ => panic!("expected ToolCall"),
     }
     match &app.messages[6] {
-        TuiMessage::ToolResult { name, result, error } => {
+        TuiMessage::ToolResult {
+            name,
+            result,
+            error,
+        } => {
             assert_eq!(name, "123");
             assert_eq!(result, "sunny");
             assert!(!error);
