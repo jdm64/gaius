@@ -79,8 +79,9 @@ impl Config {
             path.display()
         );
         loop {
-            let mut kind =
-                CliPrompt::get_input("Kind (blank=OpenAI compatible; codex=Codex subscription): ")?;
+            let mut kind = CliPrompt::get_input(
+                "Kind (blank = OpenAI compatible; codex or grok = Codex/Grok subscriptions): ",
+            )?;
             kind = if kind.is_empty() {
                 "openai".to_string()
             } else {
@@ -88,14 +89,16 @@ impl Config {
             };
 
             let is_codex = kind.eq_ignore_ascii_case("codex");
-            if !is_codex && AdapterKind::from_lower_str(&kind).is_none() {
+            let is_grok = kind.eq_ignore_ascii_case("grok");
+            if !is_codex && !is_grok && AdapterKind::from_lower_str(&kind).is_none() {
                 eprintln!("Invalid provider kind: {}", kind);
                 continue;
             }
 
-            let (name, url, key, model_id) = if is_codex {
+            let (name, url, key, model_id) = if is_codex || is_grok {
                 let model_id = CliPrompt::get_input("Model: ")?;
-                ("Codex".to_string(), String::new(), String::new(), model_id)
+                let name = if is_codex { "Codex" } else { "Grok" };
+                (name.to_string(), String::new(), String::new(), model_id)
             } else {
                 let url = CliPrompt::get_input("Url: ")?;
                 let key = CliPrompt::get_input("Key: ")?;
@@ -199,7 +202,7 @@ impl Config {
     }
 
     pub fn add_provider(&mut self, provider: ProviderConfig) -> Result<(), Box<dyn Error>> {
-        self.validate_provider_config(&provider)?;
+        provider.validate(self)?;
         self.provider.push(provider);
         self.save()
     }
@@ -213,30 +216,32 @@ impl Config {
         Ok(())
     }
 
-    pub fn validate_provider_config(
-        &self,
-        provider: &ProviderConfig,
-    ) -> Result<(), Box<dyn Error>> {
-        if provider.name.trim().is_empty() {
+    pub fn agents(&self) -> &Agents {
+        &self.agents
+    }
+}
+
+impl ProviderConfig {
+    pub fn validate(&self, config: &Config) -> Result<(), Box<dyn Error>> {
+        if self.name.trim().is_empty() {
             return Err("Provider name cannot be empty".into());
         }
-        if self.provider.iter().any(|p| p.name == provider.name) {
-            return Err(format!("Provider '{}' already exists", provider.name).into());
+        if config.provider.iter().any(|p| p.name == self.name) {
+            return Err(format!("Provider '{}' already exists", self.name).into());
         }
-        if !provider.kind.eq_ignore_ascii_case("codex") {
-            if AdapterKind::from_lower_str(&provider.kind.to_lowercase()).is_none() {
-                return Err(format!("Invalid provider kind: {}", provider.kind).into());
-            }
-            Url::parse(&provider.url)?;
-            if provider.key.trim().is_empty() {
-                return Err("Provider key cannot be empty".into());
+        match self.kind.as_str() {
+            "codex" | "grok" => {}
+            _ => {
+                if AdapterKind::from_lower_str(&self.kind.to_lowercase()).is_none() {
+                    return Err(format!("Invalid provider kind: {}", self.kind).into());
+                }
+                Url::parse(&self.url)?;
+                if self.key.trim().is_empty() {
+                    return Err("Provider key cannot be empty".into());
+                }
             }
         }
         Ok(())
-    }
-
-    pub fn agents(&self) -> &Agents {
-        &self.agents
     }
 }
 

@@ -766,11 +766,6 @@ impl Commands {
                     key: provider_key.trim().to_string(),
                 };
 
-                if let Err(err) = app.config.validate_provider_config(&provider) {
-                    app.status = format!("Invalid provider: {}", err);
-                    return InputMode::AddProvider { picker };
-                }
-
                 app.status = "Validating provider...".to_string();
                 let provider_def = match ProviderDef::new(&provider) {
                     Ok(provider_def) => provider_def,

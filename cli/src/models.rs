@@ -100,6 +100,10 @@ pub enum ProviderDef {
         access_token: String,
         account_id: String,
     },
+    Grok {
+        name: String,
+        access_token: String,
+    },
 }
 
 impl Default for ProviderDef {
@@ -157,6 +161,11 @@ impl ProviderDef {
                 access_token,
                 account_id,
             })
+        } else if config.kind.eq_ignore_ascii_case("grok") {
+            Ok(ProviderDef::Grok {
+                name: config.name.clone(),
+                access_token: Self::load_grok_token()?,
+            })
         } else {
             Ok(ProviderDef::ApiKey {
                 name: config.name.clone(),
@@ -169,7 +178,9 @@ impl ProviderDef {
 
     pub fn name(&self) -> &str {
         match self {
-            ProviderDef::ApiKey { name, .. } | ProviderDef::Codex { name, .. } => name,
+            ProviderDef::ApiKey { name, .. }
+            | ProviderDef::Codex { name, .. }
+            | ProviderDef::Grok { name, .. } => name,
         }
     }
 
@@ -177,6 +188,7 @@ impl ProviderDef {
         match self {
             ProviderDef::ApiKey { kind, .. } => kind,
             ProviderDef::Codex { .. } => "codex",
+            ProviderDef::Grok { .. } => "grok",
         }
     }
 
@@ -194,6 +206,18 @@ impl ProviderDef {
                     ("originator", "codex_cli_rs".to_string()),
                 ]);
             }
+            ProviderDef::Grok { .. } => {
+                user_agent = format!(
+                    "grok-shell/0.2.101 ({}; {})",
+                    env::consts::OS,
+                    env::consts::ARCH,
+                );
+                headers.merge([
+                    ("X-XAI-Token-Auth", "xai-grok-cli".to_string()),
+                    ("x-grok-client-identifier", "grok-shell".to_string()),
+                    ("x-grok-client-version", "0.2.101".to_string()),
+                ]);
+            }
             _ => {
                 user_agent = format!(
                     "Gaius/{} ({}; {})",
@@ -208,15 +232,18 @@ impl ProviderDef {
 
     pub fn create_client(&self, model: String) -> Result<Client, Box<dyn Error>> {
         match self {
-            ProviderDef::Codex { access_token, .. } => {
-                let endpoint = "https://chatgpt.com/backend-api/codex/responses".to_string();
-                Ok(Self::raw_create_client(
-                    AdapterKind::OpenAIResp,
-                    endpoint,
-                    access_token.clone(),
-                    model,
-                ))
-            }
+            ProviderDef::Codex { access_token, .. } => Ok(Self::raw_create_client(
+                AdapterKind::OpenAIResp,
+                "https://chatgpt.com/backend-api/codex/responses".to_string(),
+                access_token.clone(),
+                model,
+            )),
+            ProviderDef::Grok { access_token, .. } => Ok(Self::raw_create_client(
+                AdapterKind::Xai,
+                "https://cli-chat-proxy.grok.com/v1/responses".to_string(),
+                access_token.clone(),
+                model,
+            )),
             ProviderDef::ApiKey { kind, url, key, .. } => {
                 let kind = AdapterKind::from_lower_str(&kind.to_lowercase())
                     .ok_or_else(|| format!("Invalid provider kind '{}'.", kind))?;
@@ -259,6 +286,26 @@ impl ProviderDef {
         Ok((access_token.to_string(), account_id.to_string()))
     }
 
+    fn load_grok_token() -> Result<String, Box<dyn Error>> {
+        let home = std::env::var("HOME")?;
+        let auth_path = PathBuf::from(home).join(".grok").join("auth.json");
+        let contents = std::fs::read_to_string(&auth_path)
+            .map_err(|err| format!("Unable to read {}: {}", auth_path.display(), err))?;
+        let auth_json: Value = serde_json::from_str(&contents)?;
+        let token = auth_json
+            .as_object()
+            .and_then(|entries| {
+                entries
+                    .iter()
+                    .find(|(key, _)| key.starts_with("https://auth.x.ai::"))
+            })
+            .and_then(|(_, value)| value.get("key"))
+            .and_then(Value::as_str)
+            .filter(|token| !token.is_empty())
+            .ok_or("Invalid Grok auth.json: no non-empty key for https://auth.x.ai")?;
+        Ok(token.to_string())
+    }
+
     fn raw_create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
         let resolver = ServiceTargetResolver::from_resolver_fn(
             move |mut service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
@@ -295,6 +342,9 @@ impl ProviderDef {
         match self {
             ProviderDef::Codex { .. } => Ok(vec![Url::parse(
                 "https://chatgpt.com/backend-api/codex/models?client_version=0.155.0",
+            )?]),
+            ProviderDef::Grok { .. } => Ok(vec![Url::parse(
+                "https://cli-chat-proxy.grok.com/v1/models",
             )?]),
             ProviderDef::ApiKey { url, .. } => {
                 let mut base = Url::parse(url.as_str())?;
@@ -350,6 +400,7 @@ impl ProviderDef {
         let request = client.get(url.clone());
         let request = match self {
             ProviderDef::Codex { access_token, .. } => request.bearer_auth(access_token),
+            ProviderDef::Grok { access_token, .. } => request.bearer_auth(access_token),
             ProviderDef::ApiKey { kind, key, .. } => {
                 if kind.eq_ignore_ascii_case("anthropic") {
                     request
@@ -374,7 +425,9 @@ impl ProviderDef {
 
         let model_defs = match self {
             ProviderDef::Codex { .. } => self.extract_model_defs_codex(&value),
-            ProviderDef::ApiKey { .. } => self.extract_model_defs(&value),
+            ProviderDef::ApiKey { .. } | ProviderDef::Grok { .. } => {
+                self.extract_model_defs(&value)
+            }
         };
         if model_defs.is_empty() {
             return Err("Model response contained no models".into());
@@ -447,6 +500,7 @@ impl ProviderDef {
 
                             let context_len = item
                                 .get("context_length")
+                                .or_else(|| item.get("context_window"))
                                 .and_then(Value::as_i64)
                                 .map(|n| n as i32);
 
