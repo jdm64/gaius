@@ -13,30 +13,69 @@ env:
 
 jobs:
   build:
-    name: Release Build
+    name: Release Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            binary: gaius-linux-x86_64
+          - name: macos-aarch64
+            os: macos-15
+            target: aarch64-apple-darwin
+            binary: gaius-macos-aarch64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+          key: ${{ matrix.target }}
+
+      - name: Build release
+        working-directory: cli
+        run: |
+          cargo clippy --release --target ${{ matrix.target }} -- -D warnings
+          cargo build --release --target ${{ matrix.target }}
+          cargo test --release --target ${{ matrix.target }}
+          mv target/${{ matrix.target }}/release/gaius ${{ matrix.binary }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.binary }}
+          path: cli/${{ matrix.binary }}
+          retention-days: 3
+
+  publish:
+    name: Publish release
+    needs: build
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Cache cargo registry & build artifacts
-        uses: actions/cache@v5
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            cli/target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-release-
+          path: artifacts
 
-      - name: Build release
+      - name: Prepare release files
         run: |
-          cargo build --release
-          cargo test --release
-          cargo clippy --release -- -D warnings
-          mv target/release/gaius gaius-linux-x86_64
-        working-directory: cli
+          mkdir -p release
+          find artifacts -type f -name 'gaius-*' -exec mv {} release/ \;
+          ls -la release/
 
       - name: Remove existing release if present
         run: gh release delete "${{ github.ref_name }}" --yes --cleanup-tag || true
@@ -47,6 +86,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
-          files: cli/gaius-linux-x86_64
+          files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

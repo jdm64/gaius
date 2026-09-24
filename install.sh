@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Install script for gaius (https://github.com/jdm64/gaius)
-# Downloads the latest release build for linux-x86_64 and
-# installs it into ~/.local/bin
+# Downloads the release build for this OS (Linux x86_64 or macOS arm64)
+# and installs it into ~/.local/bin
 
 set -eu
 
@@ -55,21 +55,45 @@ case "$BUILD" in
         ;;
 esac
 
-REPO_URL="https://github.com/jdm64/gaius/releases/${RELEASE}/gaius-linux-x86_64"
+# Platform ------------------------------------------------------------------
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+case "${OS}" in
+    Linux)
+        case "${ARCH}" in
+            x86_64)
+                ASSET="gaius-linux-x86_64"
+                ;;
+            *)
+                echo "error: unsupported Linux architecture '${ARCH}'. Only x86_64 is supported." >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    Darwin)
+        case "${ARCH}" in
+            arm64|aarch64)
+                ASSET="gaius-macos-aarch64"
+                ;;
+            *)
+                echo "error: unsupported macOS architecture '${ARCH}'. Only Apple Silicon (arm64) is supported." >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    *)
+        echo "error: unsupported operating system '${OS}'. Only Linux and macOS are supported." >&2
+        exit 1
+        ;;
+esac
+
+REPO_URL="https://github.com/jdm64/gaius/releases/${RELEASE}/${ASSET}"
 BIN_NAME="gaius"
 INSTALL_DIR="${HOME}/.local/bin"
 INSTALL_PATH="${INSTALL_DIR}/${BIN_NAME}"
 
 # Sanity checks -------------------------------------------------------------
-if [ "$(uname -s)" != "Linux" ]; then
-    echo "error: this script only supports Linux." >&2
-    exit 1
-fi
-
-if [ "$(uname -m)" != "x86_64" ]; then
-    echo "error: this script only supports x86_64 architectures." >&2
-    exit 1
-fi
 
 command -v curl >/dev/null 2>&1 || {
     echo "error: 'curl' is required but was not found in PATH." >&2
