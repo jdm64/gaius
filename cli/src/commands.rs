@@ -625,7 +625,7 @@ impl Commands {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return InputMode::Exit;
             }
-            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Input::clear_input(app);
                 app.status = "Add provider".to_string();
                 let rows = vec![

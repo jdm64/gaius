@@ -117,7 +117,7 @@ impl Render {
         Some(vec![
             ("Type", "filter"),
             ("Enter", "select"),
-            ("Ctrl+N", "add provider"),
+            ("Ctrl+A", "add provider"),
             ("Ctrl+R", "reload"),
             ("Ctrl+D", "delete"),
             ("Esc", "close"),
