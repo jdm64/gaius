@@ -77,10 +77,13 @@ impl Render {
             snapshot.agent_name.clone()
         };
 
-        let model_name = match &snapshot.model.reasoning {
+        let mut model_name = match &snapshot.model.reasoning {
             Some(reasoning) => format!("{}:{}", snapshot.model.id, reasoning),
             None => snapshot.model.id.clone(),
         };
+        if model_name.is_empty() {
+            model_name = "[no model]".to_string();
+        }
 
         let parts: Vec<String> = [
             Some(format!("Gaius - {} - {}", model_name, agent_label)),

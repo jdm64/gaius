@@ -75,6 +75,7 @@ fn print_help() {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
+    let is_prompt_mode = args.prompt.is_some();
     let initial_prompt = match (args.prompt, args.prompt_file) {
         (Some(prompt), None) => Some(prompt),
         (None, Some(path)) => Some(std::fs::read_to_string(path)?),
@@ -92,17 +93,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Harness::new(agent, args.session_id)?
     };
 
-    let snapshot;
-    if let Some(prompt) = initial_prompt {
-        snapshot = CliPrompt::run(Some(prompt), config, &mut harness).await?;
+    let models_cache = Models::list(&config).await?;
+    let snapshot = if is_prompt_mode {
+        let first_model = Models::first_from_config(&config, &models_cache)?;
+        harness.set_model(first_model.clone()).await?;
+
+        CliPrompt::new(initial_prompt, harness).run().await?
     } else {
-        // restore the last used model instead of what's in config
-        if let Some(recent_model) = Models::first_from_recent(&config).await {
+        if let Some(recent_model) = Models::first_from_recent(&models_cache) {
             harness.set_model(recent_model).await?;
+        } else if let Ok(config_model) = Models::first_from_config(&config, &models_cache) {
+            harness.set_model(config_model).await?;
         }
 
-        snapshot = TuiApp::new(config).run(harness).await?;
-    }
+        TuiApp::new(config).run(harness).await?
+    };
 
     if snapshot.has_history
         && let Some(session_id) = snapshot.session_id

@@ -3,10 +3,8 @@
  */
 
 use crate::{
-    config::Config,
     diff_view::DiffLineKind,
     harness::{Harness, HarnessEvent, HarnessSnapshot, UserRequest},
-    models::Models,
     render_util::RenderUtil,
     token_usage::format_arrows,
 };
@@ -15,48 +13,38 @@ use std::{
     io::{self, Write},
 };
 
-pub struct CliPrompt;
+pub struct CliPrompt {
+    init_prompt: Option<String>,
+    harness: Harness,
+}
 
 impl CliPrompt {
-    /// Run a prompt (or interactive loop) against the given harness.
-    ///
-    /// If `prompt` is `None`, the user is prompted interactively until they
-    /// enter an empty line.
-    ///
-    /// Returns the session ID, if one was created.
-    pub async fn run(
-        prompt: Option<String>,
-        config: Config,
-        harness: &mut Harness,
-    ) -> Result<HarnessSnapshot, Box<dyn Error>> {
-        let first_model = Models::first_from_config(&config).await?;
-        harness.set_model(first_model.clone()).await?;
-        Self::run_inner(prompt, harness).await?;
-        Ok(harness.snapshot())
+    pub fn new(init_prompt: Option<String>, harness: Harness) -> Self {
+        CliPrompt {
+            init_prompt,
+            harness,
+        }
     }
 
-    async fn run_inner(
-        prompt: Option<String>,
-        harness: &mut Harness,
-    ) -> Result<(), Box<dyn Error>> {
-        if let Some(prompt) = prompt {
-            Self::run_turn(prompt, harness).await?;
+    pub async fn run(&mut self) -> Result<HarnessSnapshot, Box<dyn Error>> {
+        if let Some(prompt) = self.init_prompt.clone() {
+            self.run_turn(prompt).await?;
         } else {
             loop {
                 let input = Self::get_input("user> ")?;
                 if input.is_empty() {
                     break;
                 }
-                Self::run_turn(input, harness).await?;
+                self.run_turn(input).await?;
             }
         }
 
-        Ok(())
+        Ok(self.harness.snapshot())
     }
 
-    pub async fn run_turn(prompt: String, harness: &mut Harness) -> Result<(), Box<dyn Error>> {
+    pub async fn run_turn(&mut self, prompt: String) -> Result<(), Box<dyn Error>> {
         let mut agent_started = false;
-        harness
+        self.harness
             .run_turn(UserRequest::Prompt(prompt), |event| match event {
                 HarnessEvent::UserPrompt(text) => {
                     println!("user> {}", text);

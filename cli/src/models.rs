@@ -721,45 +721,54 @@ impl RecentModelDef {
 pub struct Models;
 
 impl Models {
-    pub async fn first_from_config(config: &Config) -> Result<ModelDef, Box<dyn Error>> {
+    pub fn first_from_config(
+        config: &Config,
+        cache: &[ModelDef],
+    ) -> Result<ModelDef, Box<dyn Error>> {
         let configured_models = config.configured_models();
-        let Some(selected_model) = configured_models.first() else {
+        if configured_models.is_empty() {
             return Err("Unable to find configured model".into());
-        };
+        }
 
-        let cached_models = Models::list(config).await.unwrap_or_default();
-        if cached_models.is_empty() {
+        if cache.is_empty() {
             return Err("Unable to load model cache".into());
         }
 
-        let found = cached_models
-            .iter()
-            .find(|model| {
-                model.provider.name() == selected_model.model.provider
-                    && model.id == selected_model.model.id
-            })
-            .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "Model '{}' not found in cached models",
-                    selected_model.model.id
-                )
-            })?;
+        if let Some(found) = configured_models.iter().find_map(|selected_model| {
+            cache
+                .iter()
+                .find(|model| {
+                    model.provider.name() == selected_model.model.provider
+                        && model.id == selected_model.model.id
+                })
+                .cloned()
+        }) {
+            return Ok(found);
+        }
 
-        Ok(found)
+        Err(format!(
+            "None of the configured models found in cached models: {}",
+            configured_models
+                .iter()
+                .map(|model| model.model.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .into())
     }
 
-    pub async fn first_from_recent(config: &Config) -> Option<ModelDef> {
-        let cached_models = Models::list(config).await.unwrap_or_default();
-        if cached_models.is_empty() {
+    pub fn first_from_recent(cache: &[ModelDef]) -> Option<ModelDef> {
+        if cache.is_empty() {
             return None;
         }
 
-        RecentModelDef::load(&cached_models).into_iter().next()
+        RecentModelDef::load(cache).into_iter().next()
     }
 
     pub async fn list(config: &Config) -> Result<Vec<ModelDef>, Box<dyn Error>> {
-        if let Some(models) = CachedModelDef::load(config)? {
+        if let Some(models) = CachedModelDef::load(config)?
+            && !models.is_empty()
+        {
             return Ok(models);
         }
 
