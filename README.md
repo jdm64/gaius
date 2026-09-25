@@ -25,7 +25,7 @@ A LLM agent harness build in Rust, powered by `genai` for provider abstraction.
 ### Interactive TUI mode
 
 ```bash
-./target/release/gaius
+gaius
 ```
 
 This launches the interactive terminal interface where you can:
@@ -38,6 +38,9 @@ This launches the interactive terminal interface where you can:
 ### Command-line mode
 
 ```bash
+# Enter simple interactive mode
+gaius --cli
+
 # Run a single prompt and exit
 gaius --prompt "Hello, how are you?"
 
@@ -99,8 +102,8 @@ Gaius stores data in the following locations:
 | `~/.config/gaius/agents/*.toml` | Agent definitions |
 | `~/.local/share/gaius/sessions/*.mpk` | Session history (MessagePack format) |
 | `~/.cache/gaius/models_cache.json` | Cached model list per provider |
+| `~/.cache/gaius/models_recent.json` | Recently used model IDs |
 | `~/.cache/gaius/prompt_history.json` | History of recent used prompts |
-| `~/.cache/gaius/recent_models.json` | Recently used model IDs |
 
 ## Slash commands
 

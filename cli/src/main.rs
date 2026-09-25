@@ -12,8 +12,8 @@ use std::error::Error;
 use std::path::PathBuf;
 
 struct Args {
+    cli_mode: bool,
     prompt: Option<String>,
-    prompt_file: Option<PathBuf>,
     session_id: Option<String>,
 }
 
@@ -30,18 +30,26 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
         std::process::exit(0);
     }
 
+    let cli_mode = pargs.contains("--cli");
     let prompt_mode = pargs.contains("--prompt");
     let prompt_file = pargs.opt_value_from_os_str("--prompt-file", |path| {
         Ok::<PathBuf, std::convert::Infallible>(PathBuf::from(path))
     })?;
     let session_id = pargs.opt_value_from_str("--session")?;
 
-    if prompt_mode && prompt_file.is_some() {
-        return Err("--prompt and --prompt-file cannot both be present".into());
+    // --cli, --prompt and --prompt-file are mutually exclusive.
+    let specified_modes = [cli_mode, prompt_mode, prompt_file.is_some()]
+        .iter()
+        .filter(|&&specified| specified)
+        .count();
+    if specified_modes > 1 {
+        return Err("--cli, --prompt and --prompt-file are mutually exclusive".into());
     }
 
     let prompt = if prompt_mode {
         Some(pargs.free_from_str()?)
+    } else if let Some(path) = prompt_file {
+        Some(std::fs::read_to_string(path)?)
     } else {
         None
     };
@@ -52,8 +60,8 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
     }
 
     Ok(Args {
+        cli_mode,
         prompt,
-        prompt_file,
         session_id,
     })
 }
@@ -65,9 +73,12 @@ fn print_help() {
     println!("  gaius [OPTIONS]");
     println!();
     println!("OPTIONS:");
-    println!("  --prompt                Run one prompt from the unnamed argument and exit");
-    println!("  --prompt-file <PATH>    Run one prompt read from a file and exit");
+    println!("  --cli                   Enter simple interactive mode");
+    println!("  --prompt \"<PROMPT>\"     Run one prompt from quoted argument and exit");
+    println!("  --prompt-file <PATH>    Run one prompt read from file and exit");
+    println!();
     println!("  --session <ID>          Load and continue a saved session");
+    println!();
     println!("  -V, --version           Print version information");
     println!("  -h, --help              Show this help message");
 }
@@ -75,30 +86,22 @@ fn print_help() {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
-    let is_prompt_mode = args.prompt.is_some();
-    let initial_prompt = match (args.prompt, args.prompt_file) {
-        (Some(prompt), None) => Some(prompt),
-        (None, Some(path)) => Some(std::fs::read_to_string(path)?),
-        (None, None) => None,
-        (Some(_), Some(_)) => unreachable!("parse_args rejects conflicting prompt modes"),
-    };
-
     let mut config = Config::new();
     config.load().await?;
 
     let agent = config.agents().default_agent().clone();
-    let mut harness = if initial_prompt.is_some() && args.session_id.is_none() {
+    let mut harness = if args.prompt.is_some() && args.session_id.is_none() {
         Harness::new_without_session(agent)?
     } else {
         Harness::new(agent, args.session_id)?
     };
 
     let models_cache = Models::list(&config).await?;
-    let snapshot = if is_prompt_mode {
+    let snapshot = if args.cli_mode || args.prompt.is_some() {
         let first_model = Models::first_from_config(&config, &models_cache)?;
         harness.set_model(first_model.clone()).await?;
 
-        CliPrompt::new(initial_prompt, harness).run().await?
+        CliPrompt::new(args.prompt, harness).run().await?
     } else {
         if let Some(recent_model) = Models::first_from_recent(&models_cache) {
             harness.set_model(recent_model).await?;
