@@ -3,6 +3,8 @@
  */
 
 pub mod agents;
+pub mod auth;
+pub mod auth_codex;
 pub mod cancel_handle;
 pub mod cli_prompt;
 pub mod client;

@@ -3,6 +3,7 @@
  */
 
 use crate::{
+    auth_codex::CodexAuth,
     config::ProviderConfig,
     models::{ModelDef, TokenPrice},
 };
@@ -13,7 +14,7 @@ use genai::{
 };
 
 use serde_json::Value;
-use std::{env, error::Error, path::PathBuf, time::Duration};
+use std::{env, error::Error, path::PathBuf, sync::Arc, time::Duration};
 use url::Url;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,8 +27,7 @@ pub enum ProviderDef {
     },
     Codex {
         name: String,
-        access_token: String,
-        account_id: String,
+        auth: Arc<CodexAuth>,
     },
     Grok {
         name: String,
@@ -49,7 +49,10 @@ impl Default for ProviderDef {
 impl ProviderDef {
     pub fn new(config: &ProviderConfig) -> Result<Self, Box<dyn Error>> {
         if config.kind.eq_ignore_ascii_case("codex") {
-            Self::new_codex(config.name.clone())
+            Ok(ProviderDef::Codex {
+                name: config.name.clone(),
+                auth: CodexAuth::get()?,
+            })
         } else if config.kind.eq_ignore_ascii_case("grok") {
             Self::new_grok(config.name.clone())
         } else {
@@ -81,16 +84,16 @@ impl ProviderDef {
     pub fn add_headers(&self, headers: &mut Headers) {
         let user_agent: String;
         match self {
-            ProviderDef::Codex { account_id, .. } => {
+            ProviderDef::Codex { auth, .. } => {
                 user_agent = format!(
                     "codex_cli_rs/0.155.0 ({}; {})",
                     env::consts::OS,
                     env::consts::ARCH,
                 );
-                headers.merge([
-                    ("chatgpt-account-id", account_id.clone()),
-                    ("originator", "codex_cli_rs".to_string()),
-                ]);
+                headers.merge([("originator", "codex_cli_rs".to_string())]);
+                if let Some(account_id) = auth.account_id() {
+                    headers.merge([("chatgpt-account-id", account_id)]);
+                }
             }
             ProviderDef::Grok { .. } => {
                 user_agent = format!(
@@ -116,12 +119,12 @@ impl ProviderDef {
         headers.merge([("User-Agent", user_agent)]);
     }
 
-    pub fn create_client(&self, model: String) -> Result<Client, Box<dyn Error>> {
+    pub async fn create_client(&self, model: String) -> Result<Client, Box<dyn Error>> {
         match self {
-            ProviderDef::Codex { access_token, .. } => Ok(Self::raw_create_client(
+            ProviderDef::Codex { auth, .. } => Ok(Self::raw_create_client(
                 AdapterKind::OpenAIResp,
                 "https://chatgpt.com/backend-api/codex/responses".to_string(),
-                access_token.clone(),
+                auth.access_token().await?,
                 model,
             )),
             ProviderDef::Grok { access_token, .. } => Ok(Self::raw_create_client(
@@ -141,39 +144,6 @@ impl ProviderDef {
                 ))
             }
         }
-    }
-
-    /// Load the credentials written by `codex login` from `~/.codex/auth.json`.
-    fn new_codex(provider_name: String) -> Result<ProviderDef, Box<dyn Error>> {
-        let home = std::env::var("HOME")?;
-        let auth_path = PathBuf::from(home).join(".codex").join("auth.json");
-
-        if !auth_path.exists() {
-            return Err(format!("OAuth auth file not found at {}", auth_path.display()).into());
-        }
-
-        let contents = std::fs::read_to_string(&auth_path)?;
-        let auth_json: Value = serde_json::from_str(&contents)?;
-        let tokens = auth_json
-            .get("tokens")
-            .ok_or("Invalid auth.json format: missing tokens")?;
-
-        let access_token = tokens
-            .get("access_token")
-            .and_then(Value::as_str)
-            .filter(|token| !token.is_empty())
-            .ok_or("Invalid auth.json format: missing tokens.access_token")?;
-        let account_id = tokens
-            .get("account_id")
-            .and_then(Value::as_str)
-            .filter(|id| !id.is_empty())
-            .ok_or("Invalid auth.json format: missing tokens.account_id")?;
-
-        Ok(ProviderDef::Codex {
-            name: provider_name,
-            access_token: access_token.to_string(),
-            account_id: account_id.to_string(),
-        })
     }
 
     fn new_grok(provider_name: String) -> Result<ProviderDef, Box<dyn Error>> {
@@ -293,7 +263,7 @@ impl ProviderDef {
     ) -> Result<Vec<ModelDef>, Box<dyn Error>> {
         let request = client.get(url.clone());
         let request = match self {
-            ProviderDef::Codex { access_token, .. } => request.bearer_auth(access_token),
+            ProviderDef::Codex { auth, .. } => request.bearer_auth(auth.access_token().await?),
             ProviderDef::Grok { access_token, .. } => request.bearer_auth(access_token),
             ProviderDef::ApiKey { kind, key, .. } => {
                 if kind.eq_ignore_ascii_case("anthropic") {

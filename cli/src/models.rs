@@ -122,8 +122,8 @@ impl ModelDef {
         self.provider.name() == other.provider.name() && self.id == other.id
     }
 
-    pub fn create_client(&self) -> Result<Client, Box<dyn Error>> {
-        self.provider.create_client(self.id.clone())
+    pub async fn create_client(&self) -> Result<Client, Box<dyn Error>> {
+        self.provider.create_client(self.id.clone()).await
     }
 }
 

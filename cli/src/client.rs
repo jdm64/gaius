@@ -31,7 +31,7 @@ impl LLMClient {
     }
 
     pub async fn set_model(&mut self, model: ModelDef) -> Result<(), Box<dyn Error>> {
-        self.client = model.create_client()?;
+        self.client = model.create_client().await?;
         self.model = model;
         Ok(())
     }

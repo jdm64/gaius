@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use gaius::auth_codex::CodexAuth;
 use gaius::cli_prompt::CliPrompt;
 use gaius::config::Config;
 use gaius::harness::Harness;
@@ -15,6 +16,7 @@ struct Args {
     cli_mode: bool,
     prompt: Option<String>,
     session_id: Option<String>,
+    login: Option<String>,
 }
 
 fn parse_args() -> Result<Args, Box<dyn Error>> {
@@ -36,14 +38,19 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
         Ok::<PathBuf, std::convert::Infallible>(PathBuf::from(path))
     })?;
     let session_id = pargs.opt_value_from_str("--session")?;
+    let login = pargs.opt_value_from_str("--login")?;
 
-    // --cli, --prompt and --prompt-file are mutually exclusive.
-    let specified_modes = [cli_mode, prompt_mode, prompt_file.is_some()]
-        .iter()
-        .filter(|&&specified| specified)
-        .count();
+    let specified_modes = [
+        cli_mode,
+        prompt_mode,
+        prompt_file.is_some(),
+        login.is_some(),
+    ]
+    .iter()
+    .filter(|&&specified| specified)
+    .count();
     if specified_modes > 1 {
-        return Err("--cli, --prompt and --prompt-file are mutually exclusive".into());
+        return Err("--cli, --prompt, --prompt-file and --login are mutually exclusive".into());
     }
 
     let prompt = if prompt_mode {
@@ -63,6 +70,7 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
         cli_mode,
         prompt,
         session_id,
+        login,
     })
 }
 
@@ -79,13 +87,33 @@ fn print_help() {
     println!();
     println!("  --session <ID>          Load and continue a saved session");
     println!();
+    println!("  --login <PROVIDER>      Log in to a provider (codex) and exit");
+    println!();
     println!("  -V, --version           Print version information");
     println!("  -h, --help              Show this help message");
+}
+
+async fn login(provider: &str) -> Result<(), Box<dyn Error>> {
+    if provider.eq_ignore_ascii_case("codex") {
+        CodexAuth::get()?.login().await?;
+        return Ok(());
+    }
+
+    Err(format!(
+        "Unknown provider '{}' to log in to. Supported: codex",
+        provider
+    )
+    .into())
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
+
+    if let Some(provider) = args.login.as_deref() {
+        return login(provider).await;
+    }
+
     let mut config = Config::new();
     config.load().await?;
 

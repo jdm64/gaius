@@ -4,6 +4,7 @@
 
 use crate::{
     agents::{AgentDefinition, Agents},
+    auth_codex::CodexAuth,
     cli_prompt::CliPrompt,
     client::LLMClient,
     dirs::Dirs,
@@ -102,6 +103,21 @@ impl Config {
             }
 
             let (name, url, key, model_id) = if is_codex || is_grok {
+                if is_codex {
+                    match CodexAuth::get().map(|auth| auth.is_logged_in()) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            eprintln!(
+                                "Not logged in to Codex yet. Run 'gaius --login codex' first."
+                            )
+                        }
+                        Err(err) => eprintln!(
+                            "Could not read the saved Codex login ({err}). \
+                             Run 'gaius --login codex' to sign in again."
+                        ),
+                    }
+                }
+
                 let model_id = CliPrompt::get_input("Model: ")?;
                 let name = if is_codex { "Codex" } else { "Grok" };
                 (name.to_string(), String::new(), String::new(), model_id)

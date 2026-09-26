@@ -1,4 +1,10 @@
+use gaius::auth_codex::CodexAuth;
+use gaius::auth_codex::CodexToken;
+use gaius::config::ProviderConfig;
 use gaius::providers::ProviderDef;
+use genai::Headers;
+use std::error::Error;
+use std::sync::Arc;
 
 fn api_key_provider(url: &str) -> ProviderDef {
     ProviderDef::ApiKey {
@@ -7,6 +13,60 @@ fn api_key_provider(url: &str) -> ProviderDef {
         url: url.to_string(),
         key: String::new(),
     }
+}
+
+pub fn empty_codex_auth() -> Result<CodexAuth, Box<dyn Error>> {
+    Ok(CodexAuth::at(
+        "https://auth.openai.com/oauth/token",
+        &CodexAuth::path()?,
+        None,
+    ))
+}
+
+#[test]
+fn codex_provider_has_no_token_until_logged_in() {
+    let provider = ProviderDef::Codex {
+        name: "Codex".to_string(),
+        auth: Arc::new(empty_codex_auth().expect("empty auth")),
+    };
+
+    assert!(!matches!(&provider, ProviderDef::Codex { auth, .. } if auth.is_logged_in()));
+    assert_eq!(provider.kind_str(), "codex");
+    assert_eq!(provider.name(), "Codex");
+}
+
+#[tokio::test]
+async fn codex_provider_without_login_points_at_login_command() {
+    let provider = ProviderDef::Codex {
+        name: "Codex".to_string(),
+        auth: Arc::new(empty_codex_auth().expect("empty auth")),
+    };
+
+    let err = provider
+        .create_client("gpt-5-codex".to_string())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("--login codex"), "{}", err);
+}
+
+#[test]
+fn codex_model_urls_point_at_chatgpt_backend() {
+    let provider = ProviderDef::Codex {
+        name: "Codex".to_string(),
+        auth: Arc::new(empty_codex_auth().expect("empty auth")),
+    };
+    let urls: Vec<String> = provider
+        .models_list_urls()
+        .unwrap()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+
+    assert_eq!(
+        urls,
+        vec!["https://chatgpt.com/backend-api/codex/models?client_version=0.155.0"]
+    );
 }
 
 #[test]
@@ -37,4 +97,61 @@ fn model_urls_handles_trailing_slash() {
             "https://example.com/models"
         ]
     );
+}
+
+#[test]
+fn codex_providers_share_one_auth() {
+    let config = ProviderConfig {
+        name: "Codex".to_string(),
+        kind: "codex".to_string(),
+        url: String::new(),
+        key: String::new(),
+    };
+
+    // The endpoint rotates the refresh token on every use, so two providers
+    // holding separate copies could each exchange the same one and leave the
+    // loser (or the token file) with credentials that no longer work.
+    let (first, second) = match (ProviderDef::new(&config), ProviderDef::new(&config)) {
+        (Ok(first), Ok(second)) => (first, second),
+        // Building one reads the saved token, so an unreadable local token
+        // file leaves nothing to compare.
+        _ => return,
+    };
+    let (ProviderDef::Codex { auth: one, .. }, ProviderDef::Codex { auth: other, .. }) =
+        (&first, &second)
+    else {
+        panic!("expected codex providers");
+    };
+
+    assert!(
+        Arc::ptr_eq(one, other),
+        "codex providers built separate auths"
+    );
+}
+
+#[test]
+fn codex_requests_carry_the_account_header() {
+    let token = CodexToken {
+        id_token: String::new(),
+        access_token: "access".to_string(),
+        refresh_token: "refresh".to_string(),
+        account_id: "acct-1".to_string(),
+        expires: 1_767_225_600,
+    };
+
+    let provider = ProviderDef::Codex {
+        name: "Codex".to_string(),
+        auth: Arc::new(CodexAuth::at(
+            "http://127.0.0.1:1/oauth/token",
+            std::path::Path::new("unused.json"),
+            Some(token),
+        )),
+    };
+
+    let mut headers = Headers::default();
+    provider.add_headers(&mut headers);
+
+    let merged = format!("{headers:?}");
+    assert!(merged.contains("acct-1"), "{merged}");
+    assert!(merged.contains("originator"), "{merged}");
 }
