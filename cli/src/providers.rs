@@ -49,17 +49,9 @@ impl Default for ProviderDef {
 impl ProviderDef {
     pub fn new(config: &ProviderConfig) -> Result<Self, Box<dyn Error>> {
         if config.kind.eq_ignore_ascii_case("codex") {
-            let (access_token, account_id) = Self::load_codex_tokens()?;
-            Ok(ProviderDef::Codex {
-                name: config.name.clone(),
-                access_token,
-                account_id,
-            })
+            Self::new_codex(config.name.clone())
         } else if config.kind.eq_ignore_ascii_case("grok") {
-            Ok(ProviderDef::Grok {
-                name: config.name.clone(),
-                access_token: Self::load_grok_token()?,
-            })
+            Self::new_grok(config.name.clone())
         } else {
             Ok(ProviderDef::ApiKey {
                 name: config.name.clone(),
@@ -152,7 +144,7 @@ impl ProviderDef {
     }
 
     /// Load the credentials written by `codex login` from `~/.codex/auth.json`.
-    fn load_codex_tokens() -> Result<(String, String), Box<dyn Error>> {
+    fn new_codex(provider_name: String) -> Result<ProviderDef, Box<dyn Error>> {
         let home = std::env::var("HOME")?;
         let auth_path = PathBuf::from(home).join(".codex").join("auth.json");
 
@@ -177,10 +169,14 @@ impl ProviderDef {
             .filter(|id| !id.is_empty())
             .ok_or("Invalid auth.json format: missing tokens.account_id")?;
 
-        Ok((access_token.to_string(), account_id.to_string()))
+        Ok(ProviderDef::Codex {
+            name: provider_name,
+            access_token: access_token.to_string(),
+            account_id: account_id.to_string(),
+        })
     }
 
-    fn load_grok_token() -> Result<String, Box<dyn Error>> {
+    fn new_grok(provider_name: String) -> Result<ProviderDef, Box<dyn Error>> {
         let home = std::env::var("HOME")?;
         let auth_path = PathBuf::from(home).join(".grok").join("auth.json");
         let contents = std::fs::read_to_string(&auth_path)
@@ -197,7 +193,11 @@ impl ProviderDef {
             .and_then(Value::as_str)
             .filter(|token| !token.is_empty())
             .ok_or("Invalid Grok auth.json: no non-empty key for https://auth.x.ai")?;
-        Ok(token.to_string())
+
+        Ok(ProviderDef::Grok {
+            name: provider_name,
+            access_token: token.to_string(),
+        })
     }
 
     fn raw_create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
