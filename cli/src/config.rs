@@ -7,7 +7,8 @@ use crate::{
     cli_prompt::CliPrompt,
     client::LLMClient,
     dirs::Dirs,
-    models::{ModelDef, ProviderDef, RecentModelDef},
+    models::{ModelDef, RecentModelDef},
+    providers::ProviderDef,
 };
 use futures::StreamExt;
 use genai::{

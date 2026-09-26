@@ -1,7 +1,6 @@
 use gaius::config::{Config, ProviderConfig};
-use gaius::models::{
-    CachedModelDef, ModelDef, ModelPickerRow, Models, ProviderDef, RecentModelDef,
-};
+use gaius::models::{CachedModelDef, ModelDef, ModelPickerRow, Models, RecentModelDef};
+use gaius::providers::ProviderDef;
 use serde_json::json;
 
 fn provider_def(name: &str) -> ProviderDef {
