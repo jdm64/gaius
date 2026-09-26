@@ -16,7 +16,7 @@ use genai::{
     chat::{ChatRequest, ChatStreamEvent},
 };
 use serde::{Deserialize, Serialize};
-use std::error::Error;
+use std::{error::Error, path::PathBuf};
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,10 +75,15 @@ impl Config {
             return Ok(());
         }
 
+        self.setup(path).await
+    }
+
+    async fn setup(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
         println!(
             "Config file missing: {}\nConfigure an LLM provider:\n",
             path.display()
         );
+
         loop {
             let mut kind = CliPrompt::get_input(
                 "Kind (blank = OpenAI compatible; codex or grok = Codex/Grok subscriptions): ",
