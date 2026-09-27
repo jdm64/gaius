@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use crate::dirs::Dirs;
 use regex::Regex;
 use std::collections::HashMap;
 use std::error::Error;
@@ -25,7 +26,7 @@ const DESCRIPTION_MAX_LEN: usize = 1024;
 
 impl SkillRepo {
     pub fn load() -> Result<Self, Box<dyn Error>> {
-        let config_dir = crate::dirs::Dirs::config_dir()?;
+        let config_dir = Dirs::config_dir()?;
         let skills_dir = config_dir.join("skills");
         let mut repo = Self::default();
 

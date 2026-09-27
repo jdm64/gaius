@@ -92,6 +92,10 @@ impl Session {
         history: &ChatRequest,
         token_usage: &TokenUsageLedger,
     ) -> Result<(), Box<dyn Error>> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
         let file = File::create(path)?;
         let mut ser = Serializer::new(file).with_struct_map();
 

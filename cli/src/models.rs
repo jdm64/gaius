@@ -175,12 +175,19 @@ impl CachedModelDef {
             .into_iter()
             .filter_map(|(provider_name, mut cached_models)| {
                 cached_models.sort_by(|a, b| a.id.cmp(&b.id));
-                let provider_def = config
+                let provider_def = match config
                     .providers()
                     .iter()
                     .find(|p| p.name == provider_name)
                     .map(ProviderDef::new)
-                    .and_then(Result::ok)?;
+                {
+                    Some(Ok(provider_def)) => provider_def,
+                    Some(Err(err)) => {
+                        eprintln!("Skipping cached models for {provider_name}: {err}");
+                        return None;
+                    }
+                    None => return None,
+                };
                 Some(cached_models.into_iter().map(move |cached| ModelDef {
                     provider: provider_def.clone(),
                     id: cached.id,

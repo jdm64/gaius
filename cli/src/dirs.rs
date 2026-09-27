@@ -13,7 +13,6 @@ impl Dirs {
     pub fn config_dir() -> Result<PathBuf, Box<dyn Error>> {
         let home = std::env::var("HOME")?;
         let dir = PathBuf::from(home).join(".config").join("gaius");
-        std::fs::create_dir_all(&dir)?;
         Ok(dir)
     }
 
@@ -30,7 +29,6 @@ impl Dirs {
             .join(".local")
             .join("share")
             .join("gaius");
-        std::fs::create_dir_all(&dir)?;
         Ok(dir)
     }
 
@@ -39,14 +37,13 @@ impl Dirs {
     }
 
     pub fn auth_file(provider: &str) -> Result<PathBuf, Box<dyn Error>> {
+        Self::validate_provider(provider)?;
         Ok(Self::data_dir()?.join(format!("auth_{provider}.json")))
     }
 
     pub fn session_file(session_id: &str) -> Result<PathBuf, Box<dyn Error>> {
         Self::validate_session_id(session_id)?;
-        let sessions_dir = Self::sessions_dir()?;
-        std::fs::create_dir_all(&sessions_dir)?;
-        Ok(sessions_dir.join(format!("{}.mpk", session_id)))
+        Ok(Self::sessions_dir()?.join(format!("{}.mpk", session_id)))
     }
 
     pub fn validate_session_id(session_id: &str) -> Result<(), Box<dyn Error>> {
@@ -61,13 +58,28 @@ impl Dirs {
         Ok(())
     }
 
+    pub fn validate_provider(provider: &str) -> Result<(), Box<dyn Error>> {
+        if provider.is_empty() {
+            return Err("Provider name cannot be empty".into());
+        }
+
+        if provider.contains('/') || provider.contains('\\') {
+            return Err("Provider name cannot contain path separators".into());
+        }
+
+        if provider == "." || provider == ".." {
+            return Err("Provider name cannot be a path component".into());
+        }
+
+        Ok(())
+    }
+
     ///
     /// --- Cache Dirs ---
     ///
     pub fn cache_dir() -> Result<PathBuf, Box<dyn Error>> {
         let home = std::env::var("HOME")?;
         let dir = PathBuf::from(home).join(".cache").join("gaius");
-        std::fs::create_dir_all(&dir)?;
         Ok(dir)
     }
 
