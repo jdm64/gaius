@@ -1,5 +1,6 @@
-use gaius::auth_codex::CodexAuth;
-use gaius::auth_codex::CodexToken;
+use gaius::auth_file::OAuthFile;
+use gaius::auth_handle::OAuthHandle;
+use gaius::auth_spec::{CODEX, GROK, OAuthSpec};
 use gaius::config::ProviderConfig;
 use gaius::providers::ProviderDef;
 use genai::Headers;
@@ -15,19 +16,28 @@ fn api_key_provider(url: &str) -> ProviderDef {
     }
 }
 
-pub fn empty_codex_auth() -> Result<CodexAuth, Box<dyn Error>> {
-    Ok(CodexAuth::at(
-        "https://auth.openai.com/oauth/token",
-        &CodexAuth::path()?,
-        None,
-    ))
+pub fn empty_auth(spec: &'static OAuthSpec) -> Result<OAuthHandle, Box<dyn Error>> {
+    Ok(OAuthHandle::at(spec, None))
+}
+
+fn logged_in_auth(spec: &'static OAuthSpec, access_token: &str) -> OAuthHandle {
+    OAuthHandle::at(
+        spec,
+        Some(OAuthFile {
+            id_token: String::new(),
+            access_token: access_token.to_string(),
+            refresh_token: "refresh".to_string(),
+            account_id: Some("acct-1".to_string()),
+            expires: 1_767_225_600,
+        }),
+    )
 }
 
 #[test]
 fn codex_provider_has_no_token_until_logged_in() {
     let provider = ProviderDef::Codex {
         name: "Codex".to_string(),
-        auth: Arc::new(empty_codex_auth().expect("empty auth")),
+        auth: Arc::new(empty_auth(&CODEX).expect("empty auth")),
     };
 
     assert!(!matches!(&provider, ProviderDef::Codex { auth, .. } if auth.is_logged_in()));
@@ -39,7 +49,7 @@ fn codex_provider_has_no_token_until_logged_in() {
 async fn codex_provider_without_login_points_at_login_command() {
     let provider = ProviderDef::Codex {
         name: "Codex".to_string(),
-        auth: Arc::new(empty_codex_auth().expect("empty auth")),
+        auth: Arc::new(empty_auth(&CODEX).expect("empty auth")),
     };
 
     let err = provider
@@ -54,7 +64,7 @@ async fn codex_provider_without_login_points_at_login_command() {
 fn codex_model_urls_point_at_chatgpt_backend() {
     let provider = ProviderDef::Codex {
         name: "Codex".to_string(),
-        auth: Arc::new(empty_codex_auth().expect("empty auth")),
+        auth: Arc::new(empty_auth(&CODEX).expect("empty auth")),
     };
     let urls: Vec<String> = provider
         .models_list_urls()
@@ -131,21 +141,9 @@ fn codex_providers_share_one_auth() {
 
 #[test]
 fn codex_requests_carry_the_account_header() {
-    let token = CodexToken {
-        id_token: String::new(),
-        access_token: "access".to_string(),
-        refresh_token: "refresh".to_string(),
-        account_id: "acct-1".to_string(),
-        expires: 1_767_225_600,
-    };
-
     let provider = ProviderDef::Codex {
         name: "Codex".to_string(),
-        auth: Arc::new(CodexAuth::at(
-            "http://127.0.0.1:1/oauth/token",
-            std::path::Path::new("unused.json"),
-            Some(token),
-        )),
+        auth: Arc::new(logged_in_auth(&CODEX, "access")),
     };
 
     let mut headers = Headers::default();
@@ -154,4 +152,42 @@ fn codex_requests_carry_the_account_header() {
     let merged = format!("{headers:?}");
     assert!(merged.contains("acct-1"), "{merged}");
     assert!(merged.contains("originator"), "{merged}");
+}
+
+#[test]
+fn grok_requests_carry_the_client_headers() {
+    let provider = ProviderDef::Grok {
+        name: "Grok".to_string(),
+        auth: Arc::new(logged_in_auth(&GROK, "access")),
+    };
+
+    let mut headers = Headers::default();
+    provider.add_headers(&mut headers);
+
+    let merged = format!("{headers:?}");
+    assert!(merged.contains("grok-shell"), "{merged}");
+    assert!(merged.contains("x-grok-client-identifier"), "{merged}");
+    assert!(merged.contains("X-XAI-Token-Auth"), "{merged}");
+    // Grok's id token has no account to name, so the header codex needs is not
+    // sent rather than sent empty.
+    assert!(!merged.contains("chatgpt-account-id"), "{merged}");
+}
+
+#[tokio::test]
+async fn grok_provider_without_login_points_at_its_own_login_command() {
+    let provider = ProviderDef::Grok {
+        name: "Grok".to_string(),
+        auth: Arc::new(empty_auth(&GROK).expect("empty auth")),
+    };
+
+    assert_eq!(provider.kind_str(), "grok");
+    assert_eq!(provider.name(), "Grok");
+
+    let err = provider
+        .create_client("grok-4".to_string())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("--login grok"), "{}", err);
+    assert!(!err.contains("--login codex"), "{}", err);
 }

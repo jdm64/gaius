@@ -4,7 +4,8 @@
 
 use crate::{
     agents::{AgentDefinition, Agents},
-    auth_codex::CodexAuth,
+    auth_handle::OAuthHandle,
+    auth_spec::OAuthKind,
     cli_prompt::CliPrompt,
     client::LLMClient,
     dirs::Dirs,
@@ -95,32 +96,34 @@ impl Config {
                 kind
             };
 
-            let is_codex = kind.eq_ignore_ascii_case("codex");
-            let is_grok = kind.eq_ignore_ascii_case("grok");
-            if !is_codex && !is_grok && AdapterKind::from_lower_str(&kind).is_none() {
+            let sub = OAuthKind::from_lower_str(&kind);
+            if sub.is_none() && AdapterKind::from_lower_str(&kind).is_none() {
                 eprintln!("Invalid provider kind: {}", kind);
                 continue;
             }
 
-            let (name, url, key, model_id) = if is_codex || is_grok {
-                if is_codex {
-                    match CodexAuth::get().map(|auth| auth.is_logged_in()) {
-                        Ok(true) => {}
-                        Ok(false) => {
-                            eprintln!(
-                                "Not logged in to Codex yet. Run 'gaius --login codex' first."
-                            )
-                        }
-                        Err(err) => eprintln!(
-                            "Could not read the saved Codex login ({err}). \
-                             Run 'gaius --login codex' to sign in again."
-                        ),
-                    }
+            let (name, url, key, model_id) = if let Some(sub) = sub {
+                let spec = sub.spec();
+                match OAuthHandle::get(sub).map(|auth| auth.is_logged_in()) {
+                    Ok(true) => {}
+                    Ok(false) => eprintln!(
+                        "Not logged in to {} yet. Run 'gaius --login {}' first.",
+                        spec.display, spec.id
+                    ),
+                    Err(err) => eprintln!(
+                        "Could not read the saved {} login ({err}). \
+                         Run 'gaius --login {}' to sign in again.",
+                        spec.display, spec.id
+                    ),
                 }
 
                 let model_id = CliPrompt::get_input("Model: ")?;
-                let name = if is_codex { "Codex" } else { "Grok" };
-                (name.to_string(), String::new(), String::new(), model_id)
+                (
+                    spec.display.to_string(),
+                    String::new(),
+                    String::new(),
+                    model_id,
+                )
             } else {
                 let url = CliPrompt::get_input("Url: ")?;
                 let key = CliPrompt::get_input("Key: ")?;
@@ -251,23 +254,24 @@ impl ProviderConfig {
         if config.provider.iter().any(|p| p.name == self.name) {
             return Err(format!("Provider '{}' already exists", self.name).into());
         }
-        match self.kind.as_str() {
-            "codex" | "grok" => {}
+        if OAuthKind::from_lower_str(&self.kind).is_some() {
+            return Ok(());
+        }
+
+        let Some(kind) = AdapterKind::from_lower_str(&self.kind.to_lowercase()) else {
+            return Err(format!("Invalid provider kind: {}", self.kind).into());
+        };
+
+        Url::parse(&self.url)?;
+        match kind {
+            AdapterKind::Ollama => {}
             _ => {
-                let Some(kind) = AdapterKind::from_lower_str(&self.kind.to_lowercase()) else {
-                    return Err(format!("Invalid provider kind: {}", self.kind).into());
-                };
-                Url::parse(&self.url)?;
-                match kind {
-                    AdapterKind::Ollama => {}
-                    _ => {
-                        if self.key.trim().is_empty() {
-                            return Err("Provider key cannot be empty".into());
-                        }
-                    }
+                if self.key.trim().is_empty() {
+                    return Err("Provider key cannot be empty".into());
                 }
             }
         }
+
         Ok(())
     }
 }

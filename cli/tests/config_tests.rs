@@ -1,4 +1,5 @@
 use gaius::{
+    auth_file::OAuthFile,
     config::{Config, ProviderConfig},
     dirs::Dirs,
 };
@@ -110,14 +111,14 @@ fn writing_a_token_creates_the_directory_it_needs() {
         let path = Dirs::auth_file("codex").unwrap();
         assert!(!path.exists());
 
-        let token = gaius::auth_codex::CodexToken {
+        let token = OAuthFile {
             id_token: "id".to_string(),
             access_token: "access".to_string(),
             refresh_token: "refresh".to_string(),
-            account_id: "acct".to_string(),
+            account_id: Some("acct".to_string()),
             expires: 1_767_225_600,
         };
-        gaius::auth::save_token_file(&path, &token).unwrap();
+        token.save("codex").unwrap();
 
         assert!(path.is_file());
     });

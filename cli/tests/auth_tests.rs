@@ -1,25 +1,41 @@
 use base64::Engine;
 use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use gaius::auth::*;
-use gaius::auth_codex::*;
+use gaius::auth_file::{OAuthFile, OAuthFileRequester};
+use gaius::auth_handle::*;
+use gaius::auth_spec::{CODEX, GROK, Nonce, OAuthKind, OAuthSpec, OPENAI_CLAIMS, Redirect};
+use gaius::dirs::Dirs;
+use std::error::Error;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
+use url::form_urlencoded;
 
-const UNUSED_ENDPOINT: &str = "http://127.0.0.1:1/oauth/token";
+/// The login tests bind the ports the providers registered redirects on, so
+/// they take turns rather than fighting over them.
+static LOGIN_PORTS: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
 
-fn token_with_exp(exp: i64) -> CodexToken {
+/// A form value as it goes on the wire.
+fn encoded(value: &str) -> String {
+    form_urlencoded::Serializer::new(String::new())
+        .append_pair("", value)
+        .finish()
+        .trim_start_matches('=')
+        .to_string()
+}
+
+fn token_with_exp(exp: i64) -> OAuthFile {
     let claims = format!("{{\"exp\":{exp}}}");
     let payload = URL_SAFE_NO_PAD.encode(claims);
-    CodexToken {
+    OAuthFile {
         id_token: String::new(),
         access_token: format!("header.{payload}.signature"),
         refresh_token: String::new(),
-        account_id: String::new(),
+        account_id: None,
         expires: exp,
     }
 }
@@ -69,10 +85,16 @@ fn an_expiry_past_2038_is_kept_as_given() {
     // exchange a token that was not yet due.
     for exp in [2_147_483_648, 4_102_444_800] {
         let payload = URL_SAFE_NO_PAD.encode(format!("{{\"exp\":{exp}}}"));
-        let expires = CodexToken::token_expires(&format!("header.{payload}.signature"));
+        let response = OAuthResponse {
+            access_token: format!("header.{payload}.signature"),
+            id_token: None,
+            refresh_token: None,
+            expires_in: None,
+        };
+        let expires = response.token_expires();
         assert_eq!(expires, exp, "the expiry was clamped to {expires}");
 
-        let token = CodexToken {
+        let token = OAuthFile {
             expires,
             ..token_with_exp(0)
         };
@@ -80,20 +102,52 @@ fn an_expiry_past_2038_is_kept_as_given() {
     }
 }
 
+/// A signed-looking token carrying `claims`, as the id token of a response.
+fn id_token_with(claims: &str) -> String {
+    let payload = URL_SAFE_NO_PAD.encode(claims);
+    format!("header.{payload}.signature")
+}
+
+/// A response naming `id_token`, from a provider with no account claim.
+fn response_with_id_token(id_token: &str) -> OAuthResponse {
+    OAuthResponse {
+        access_token: "new-access".to_string(),
+        id_token: Some(id_token.to_string()),
+        refresh_token: Some("new-refresh".to_string()),
+        expires_in: None,
+    }
+}
+
 #[test]
 fn extracts_account_id_from_id_token() {
+    // Codex namespaces its own claims and wants the account back on every
+    // request, so the id token is read for it.
     let claims = format!(
         "{{\"{}\":{{\"chatgpt_account_id\":\"acct-123\"}}}}",
-        AUTH_CLAIMS
+        OPENAI_CLAIMS
     );
-    let b64 = URL_SAFE_NO_PAD.encode(claims);
-    let id_token = format!("header.{}.signature", b64);
+    let token = OAuthFile::new(
+        &CODEX,
+        &response_with_id_token(&id_token_with(&claims)),
+        None,
+        None,
+    )
+    .expect("build codex token");
 
-    assert_eq!(
-        CodexToken::account_id(&id_token).as_deref(),
-        Some("acct-123")
-    );
-    assert_eq!(CodexToken::account_id("garbage"), None);
+    assert_eq!(token.account_id.as_deref(), Some("acct-123"));
+    // Codex requires one; without it there is no account to send back.
+    let missing = OAuthFile::new(&CODEX, &response_with_id_token("garbage"), None, None);
+    assert!(missing.is_err(), "an id token with no account was accepted");
+}
+
+#[test]
+fn a_provider_with_no_account_claim_needs_no_account() {
+    // Grok's id token carries no account, and asking for one would make every
+    // grok login fail.
+    let token = OAuthFile::new(&GROK, &response_with_id_token("garbage"), None, None)
+        .expect("build grok token");
+
+    assert_eq!(token.account_id, None);
 }
 
 #[test]
@@ -101,42 +155,153 @@ fn pkce_challenge_matches_rfc_7636_example() {
     let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
     let expected = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
-    assert_eq!(code_challenge(verifier), expected);
+    assert_eq!(OAuthSpec::code_challenge(verifier), expected);
+}
+
+/// The authorize URL a provider's spec produces for `redirect_uri`.
+///
+/// `nonce` is only sent for a provider that uses one, so the tests below can
+/// pass the same value for every provider and still see the right URL.
+fn authorize_url_for(spec: &'static OAuthSpec, redirect_uri: &str, nonce: &str) -> String {
+    let nonce = (spec.nonce == Nonce::Required).then_some(nonce);
+    spec.authorize_url("verifier-for-the-test", "state-123", redirect_uri, nonce)
 }
 
 #[test]
-fn authorize_url_carries_pkce_and_registered_redirect() {
-    let verifier = "verifier-for-the-test";
-    let url = url::Url::parse(&authorize_url(verifier, "state-123")).unwrap();
-    let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+fn every_authorize_url_carries_pkce_and_its_own_registration() {
+    for kind in OAuthKind::ALL {
+        let spec = kind.spec();
+        let redirect_uri = format!(
+            "http://{}:{}{}",
+            spec.redirect.host, 1234, spec.redirect.path
+        );
+        let url = url::Url::parse(&authorize_url_for(spec, &redirect_uri, "nonce-abc"))
+            .unwrap_or_else(|_| panic!("{} authorize url is a url", spec.display));
+        let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
 
-    assert_eq!(url.path(), "/oauth/authorize");
-    assert_eq!(params["response_type"], "code");
-    assert_eq!(params["client_id"], CODEX_CLIENT_ID);
-    assert_eq!(params["redirect_uri"], REDIRECT_URI);
-    assert_eq!(params["scope"], "openid profile email offline_access");
-    assert_eq!(params["code_challenge_method"], "S256");
-    assert_eq!(params["code_challenge"], code_challenge(verifier));
-    assert_eq!(params["state"], "state-123");
+        assert_eq!(params["client_id"], spec.client_id, "{}", spec.id);
+        assert_eq!(params["redirect_uri"], redirect_uri, "{}", spec.id);
+        assert_eq!(params["scope"], spec.scope, "{}", spec.id);
+        assert_eq!(params["response_type"], "code", "{}", spec.id);
+        assert_eq!(params["code_challenge_method"], "S256", "{}", spec.id);
+        assert_eq!(
+            params["code_challenge"],
+            OAuthSpec::code_challenge("verifier-for-the-test"),
+            "{}",
+            spec.id
+        );
+        assert_eq!(params["state"], "state-123", "{}", spec.id);
+
+        // Each provider's endpoints, and every parameter it needs on top of
+        // the ones the flow sends anyway.
+        assert_eq!(
+            format!(
+                "{}://{}{}",
+                url.scheme(),
+                url.host_str().unwrap(),
+                url.path()
+            ),
+            spec.authorize_url,
+            "{}",
+            spec.id
+        );
+        for (key, value) in spec.authorize_extra {
+            assert_eq!(params[*key], *value, "{} is missing {key}", spec.id);
+        }
+    }
 }
 
 #[test]
-fn registered_redirect_is_pinned_to_the_loopback_port() {
-    assert_eq!(REDIRECT_URI, "http://localhost:1455/auth/callback");
+fn a_nonce_is_sent_only_where_one_is_required() {
+    // xAI checks the nonce it was sent against the id token it returns, so a
+    // login without one is refused there; codex never sends one.
+    let grok = url::Url::parse(&authorize_url_for(
+        &GROK,
+        "http://127.0.0.1:1/callback",
+        "nonce-abc",
+    ))
+    .expect("grok authorize url is a url");
+    let codex = url::Url::parse(&authorize_url_for(
+        &CODEX,
+        "http://localhost:1455/auth/callback",
+        "nonce-abc",
+    ))
+    .expect("codex authorize url is a url");
 
-    let redirect = url::Url::parse(REDIRECT_URI).unwrap();
-    let port = redirect.port().unwrap();
-    assert_eq!(LOOPBACK_ADDR, format!("localhost:{port}"));
+    let nonce_of = |url: &url::Url| {
+        url.query_pairs()
+            .find(|(key, _)| key == "nonce")
+            .map(|(_, value)| value.into_owned())
+    };
+
+    assert_eq!(nonce_of(&grok).as_deref(), Some("nonce-abc"));
+    assert_eq!(nonce_of(&codex), None);
+}
+
+#[test]
+fn an_id_token_for_another_login_is_rejected() {
+    // The id token comes back with the token response, and this is the one place
+    // both it and the nonce that was sent are in hand.
+    let returned = id_token_with(r#"{"nonce":"someone-elses-login"}"#);
+    let err = OAuthFile::new(
+        &GROK,
+        &response_with_id_token(&returned),
+        None,
+        Some("our-login"),
+    )
+    .expect_err("an id token issued for another login was accepted");
+
     assert!(
-        redirect
-            .host_str()
-            .is_some_and(|host| host.ends_with("localhost"))
+        err.to_string().contains("not issued for this login"),
+        "{err}"
+    );
+
+    let ours = id_token_with(r#"{"nonce":"our-login"}"#);
+    assert!(
+        OAuthFile::new(
+            &GROK,
+            &response_with_id_token(&ours),
+            None,
+            Some("our-login")
+        )
+        .is_ok(),
+        "the id token for this login was rejected"
     );
 }
 
 #[test]
+fn codex_is_pinned_to_the_loopback_port_it_registered() {
+    // The redirect is registered with a fixed port, so a fallback would send
+    // the browser somewhere the authorization was never made for.
+    const { assert!(!CODEX.redirect.fallback_port) };
+    assert_eq!(
+        CODEX.redirect.uri(CODEX.redirect.port),
+        "http://localhost:1455/auth/callback"
+    );
+
+    // Grok's port is only a preference, and its redirect has to name whichever
+    // port the listener ended up on.
+    const { assert!(GROK.redirect.fallback_port) };
+    assert_eq!(GROK.redirect.uri(56121), "http://127.0.0.1:56121/callback");
+    assert_eq!(GROK.redirect.uri(45678), "http://127.0.0.1:45678/callback");
+}
+
+#[test]
+fn each_provider_keeps_its_token_in_its_own_file() {
+    let paths: Vec<String> = OAuthKind::ALL
+        .iter()
+        .map(|kind| kind.spec().path().unwrap().display().to_string())
+        .collect();
+
+    assert_eq!(paths.len(), 2, "the providers share a token file");
+    assert_ne!(paths[0], paths[1]);
+    assert!(paths[0].ends_with("auth_codex.json"), "{}", paths[0]);
+    assert!(paths[1].ends_with("auth_grok.json"), "{}", paths[1]);
+}
+
+#[test]
 fn parses_authorization_code_from_callback() {
-    let callback = OAuth::parse_callback("/auth/callback?code=abc123&state=xyz").unwrap();
+    let callback = Callback::parse("/auth/callback?code=abc123&state=xyz").unwrap();
 
     assert_eq!(callback.code.as_deref(), Some("abc123"));
     assert_eq!(callback.state.as_deref(), Some("xyz"));
@@ -145,7 +310,7 @@ fn parses_authorization_code_from_callback() {
 
 #[test]
 fn percent_escapes_in_callback_are_decoded() {
-    let callback = OAuth::parse_callback("/auth/callback?code=a%2Fb%2Bc&state=x%20y").unwrap();
+    let callback = Callback::parse("/auth/callback?code=a%2Fb%2Bc&state=x%20y").unwrap();
 
     assert_eq!(callback.code.as_deref(), Some("a/b+c"));
     assert_eq!(callback.state.as_deref(), Some("x y"));
@@ -153,18 +318,18 @@ fn percent_escapes_in_callback_are_decoded() {
 
 #[test]
 fn ignores_loopback_requests_that_are_not_the_callback() {
-    assert_eq!(OAuth::parse_callback("/favicon.ico"), None);
-    assert_eq!(OAuth::parse_callback("/auth/callback"), None);
-    assert_eq!(OAuth::parse_callback("/auth/callback?state=xyz"), None);
-    assert_eq!(OAuth::parse_callback("garbage request"), None);
+    assert_eq!(Callback::parse("/favicon.ico"), None);
+    assert_eq!(Callback::parse("/auth/callback"), None);
+    assert_eq!(Callback::parse("/auth/callback?state=xyz"), None);
+    assert_eq!(Callback::parse("garbage request"), None);
 }
 
 #[test]
 fn describes_a_refused_authorization() {
     let with_description =
-        OAuth::parse_callback("/auth/callback?error=access_denied&error_description=User+declined")
+        Callback::parse("/auth/callback?error=access_denied&error_description=User+declined")
             .unwrap();
-    let bare = OAuth::parse_callback("/auth/callback?error=access_denied").unwrap();
+    let bare = Callback::parse("/auth/callback?error=access_denied").unwrap();
 
     assert_eq!(with_description.code, None);
     assert_eq!(
@@ -180,7 +345,7 @@ fn a_refusal_may_carry_only_a_description() {
     // is read as "not our request" leaves the user waiting out the login
     // timeout on a 404 page.
     let callback =
-        OAuth::parse_callback("/auth/callback?error_description=User+declined").expect("refusal");
+        Callback::parse("/auth/callback?error_description=User+declined").expect("refusal");
 
     assert_eq!(callback.code, None);
     assert_eq!(callback.error.as_deref(), Some("User declined"));
@@ -249,7 +414,7 @@ async fn a_silent_peer_does_not_hold_the_login() {
     // rest of the login: the callback the user was waiting for then sat
     // unread until the whole timeout ran out, and the error blamed the
     // browser for a sign in that had in fact succeeded.
-    let oauth = OAuth::new(authorize_url, "127.0.0.1:0")
+    let oauth = OAuthClient::new(loopback_url(&CODEX), &["127.0.0.1:0"])
         .await
         .expect("bind loopback listener");
     let port = oauth.local_addr().expect("listener address").port();
@@ -288,6 +453,14 @@ async fn a_silent_peer_does_not_hold_the_login() {
     drop(silent);
 }
 
+/// The authorize URL builder a test hands the loopback listener. It only has to
+/// be a real one: the callback has to match the `state` it puts in.
+fn loopback_url(spec: &'static OAuthSpec) -> impl Fn(&str, &str, &std::net::SocketAddr) -> String {
+    move |verifier, state, addr| {
+        spec.authorize_url(verifier, state, &spec.redirect.uri(addr.port()), None)
+    }
+}
+
 /// Run an `OAuth` loopback server on an OS-assigned port, sending each target
 /// to it in order and returning the resulting code plus the browser response
 /// to each request.
@@ -297,7 +470,7 @@ async fn a_silent_peer_does_not_hold_the_login() {
 /// deliberately wrong. Every wait is bounded by a timeout to fail the test
 /// instead of hanging when something goes wrong.
 async fn loopback_login(targets: &[&str]) -> (Result<String, String>, Vec<String>) {
-    let oauth = OAuth::new(authorize_url, "127.0.0.1:0")
+    let oauth = OAuthClient::new(loopback_url(&CODEX), &["127.0.0.1:0"])
         .await
         .expect("bind loopback listener");
     let port = oauth.local_addr().expect("listener address").port();
@@ -341,53 +514,73 @@ async fn wait_for<F: Future>(future: F) -> Option<F::Output> {
 
 #[test]
 fn builds_token_from_response_reusing_previous_values() {
-    let previous = CodexToken {
+    let previous = OAuthFile {
         id_token: "old-id".to_string(),
         access_token: "old-access".to_string(),
         refresh_token: "old-refresh".to_string(),
-        account_id: "acct-old".to_string(),
+        account_id: Some("acct-old".to_string()),
         expires: 0,
     };
-    let response = TokenResponse {
+    let response = OAuthResponse {
         access_token: "new-access".to_string(),
         id_token: None,
         refresh_token: Some("new-refresh".to_string()),
+        expires_in: None,
     };
 
-    let token = CodexToken::new(&response, Some(&previous)).unwrap();
+    let token = OAuthFile::new(&CODEX, &response, Some(&previous), None).unwrap();
     assert_eq!(token.id_token, "old-id");
     assert_eq!(token.refresh_token, "new-refresh");
     assert_eq!(token.access_token, "new-access");
-    assert_eq!(token.account_id, "acct-old");
+    assert_eq!(token.account_id.as_deref(), Some("acct-old"));
 }
 
 #[test]
 fn login_needs_an_id_token() {
-    let response = TokenResponse {
+    let response = OAuthResponse {
         access_token: "new-access".to_string(),
         id_token: None,
         refresh_token: Some("new-refresh".to_string()),
+        expires_in: None,
     };
 
-    assert!(CodexToken::new(&response, None).is_err());
+    assert!(OAuthFile::new(&CODEX, &response, None, None).is_err());
+}
+
+fn load_token_from(spec: &OAuthSpec, path: &Path) -> Result<Option<OAuthFile>, Box<dyn Error>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let contents = std::fs::read_to_string(path)
+        .map_err(|err| format!("Unable to read {}: {}", path.display(), err))?;
+    let token = serde_json::from_str(&contents).map_err(|err| {
+        format!(
+            "Invalid {} auth file {}: {}",
+            spec.display,
+            path.display(),
+            err
+        )
+    })?;
+    Ok(Some(token))
 }
 
 #[test]
 fn saves_and_loads_token_file() {
     let dir = std::env::temp_dir().join(format!("gaius-auth-test-{}", uuid::Uuid::now_v7()));
     let path = dir.join("auth_codex.json");
-    let token = CodexToken {
+    let token = OAuthFile {
         id_token: "id".to_string(),
         access_token: "access".to_string(),
         refresh_token: "refresh".to_string(),
-        account_id: "acct".to_string(),
+        account_id: Some("acct".to_string()),
         expires: 1_767_225_600,
     };
 
-    CodexAuth::save_token_to(&path, Some(&token)).unwrap();
-    assert_eq!(CodexAuth::load_token_from(&path).unwrap(), Some(token));
+    let _ = token.save_to(path.clone());
+    assert_eq!(load_token_from(&CODEX, &path).unwrap(), Some(token));
     assert_eq!(
-        CodexAuth::load_token_from(&dir.join("missing.json")).unwrap(),
+        load_token_from(&CODEX, &dir.join("missing.json")).unwrap(),
         None
     );
 
@@ -400,6 +593,11 @@ fn a_token_file_written_before_the_expiry_widened_still_loads() {
     // still reads into the wider field, so widening it does not sign an
     // existing login out on upgrade; the value is left exactly as written
     // rather than clamped to the old ceiling.
+    //
+    // `account_id` also changed from a plain string to an optional one, to
+    // serve providers that have no account. A string on disk still reads into
+    // it, so an existing codex login keeps the account it sends on every
+    // request.
     let dir = temp_dir_for("auth-legacy-expiry");
     let path = dir.join("auth_codex.json");
     std::fs::create_dir_all(&dir).unwrap();
@@ -410,10 +608,11 @@ fn a_token_file_written_before_the_expiry_widened_still_loads() {
     )
     .unwrap();
 
-    let token = CodexAuth::load_token_from(&path)
+    let token = load_token_from(&CODEX, &path)
         .unwrap()
         .expect("the saved login loads");
     assert_eq!(token.expires, 2_000_000_000);
+    assert_eq!(token.account_id.as_deref(), Some("acct"));
     assert!(!token.needs_refresh(), "a stored expiry was not honored");
 
     std::fs::remove_dir_all(&dir).ok();
@@ -422,22 +621,23 @@ fn a_token_file_written_before_the_expiry_widened_still_loads() {
 #[test]
 fn describes_oauth_errors() {
     let body = r#"{"error":"invalid_grant","error_description":"refresh token expired"}"#;
-    let described = describe_error("refresh", reqwest::StatusCode::BAD_REQUEST, body);
+    let described =
+        OAuthFileRequester::describe_error("refresh", reqwest::StatusCode::BAD_REQUEST, body);
 
     assert!(described.contains("400"), "{}", described);
     assert!(described.contains("invalid_grant"), "{}", described);
     assert!(described.contains("refresh token expired"), "{}", described);
 }
 
-fn auth_with(token: CodexToken) -> CodexAuth {
-    CodexAuth::at(UNUSED_ENDPOINT, Path::new("unused.json"), Some(token))
+fn auth_with(token: OAuthFile) -> OAuthHandle {
+    OAuthHandle::at(&CODEX, Some(token))
 }
 
 #[tokio::test]
 async fn access_token_uses_stored_token_while_fresh() {
     let mut token = token_with_exp(expires_in(3600));
     token.access_token = "stored-access".to_string();
-    token.account_id = "acct-1".to_string();
+    token.account_id = Some("acct-1".to_string());
     let auth = auth_with(token);
 
     assert!(auth.is_logged_in());
@@ -447,7 +647,7 @@ async fn access_token_uses_stored_token_while_fresh() {
 
 #[tokio::test]
 async fn access_token_without_login_points_at_login_command() {
-    let auth = CodexAuth::at(UNUSED_ENDPOINT, Path::new("unused.json"), None);
+    let auth = OAuthHandle::at(&CODEX, None);
     let err = auth.access_token().await.unwrap_err().to_string();
 
     assert!(!auth.is_logged_in());
@@ -456,7 +656,7 @@ async fn access_token_without_login_points_at_login_command() {
 
 #[tokio::test]
 async fn refresh_without_login_points_at_login_command() {
-    let auth = CodexAuth::at(UNUSED_ENDPOINT, Path::new("unused.json"), None);
+    let auth = OAuthHandle::at(&CODEX, None);
     let err = auth.refresh().await.unwrap_err().to_string();
 
     assert!(err.contains("--login codex"), "{}", err);
@@ -503,24 +703,81 @@ fn reads_the_oauth_error_code_out_of_a_response() {
     // The code is what tells a dead grant from a request the endpoint did not
     // like, so it has to be read from both shapes an error can arrive in.
     assert_eq!(
-        error_code(r#"{"error":"invalid_grant","error_description":"expired"}"#).as_deref(),
+        OAuthFileRequester::error_code(
+            r#"{"error":"invalid_grant","error_description":"expired"}"#
+        )
+        .as_deref(),
         Some("invalid_grant")
     );
     assert_eq!(
-        error_code(r#"{"error":{"code":"invalid_grant","message":"expired"}}"#).as_deref(),
+        OAuthFileRequester::error_code(r#"{"error":{"code":"invalid_grant","message":"expired"}}"#)
+            .as_deref(),
         Some("invalid_grant")
     );
-    assert_eq!(error_code("not json at all"), None);
-    assert_eq!(error_code(r#"{"error_description":"no code here"}"#), None);
+    assert_eq!(OAuthFileRequester::error_code("not json at all"), None);
+    assert_eq!(
+        OAuthFileRequester::error_code(r#"{"error_description":"no code here"}"#),
+        None
+    );
 }
 
 /// An auth holding a token that is already past its expiry, wired to `endpoint`
 /// and to a token file nothing else uses.
-fn expired_auth(endpoint: &str, path: &Path) -> CodexAuth {
+fn expired_auth(id: &'static str, endpoint: String) -> OAuthHandle {
+    let endpoint: &'static str = Box::leak(endpoint.into_boxed_str());
     let mut token = token_with_exp(expires_in(-60));
     token.access_token = "stored-access".to_string();
     token.refresh_token = "stored-refresh".to_string();
-    CodexAuth::at(endpoint, path, Some(token))
+    // Codex names an account in its id token and sends it back on every request,
+    // so a stored codex login always has one to carry.
+    token.account_id = Some("acct-1".to_string());
+    let spec = leak_codex_spec(id, endpoint);
+    OAuthHandle::at(spec, Some(token))
+}
+
+/// Leak a `Codex`-like spec with a custom id and token URL, so tests can point
+/// at a mock endpoint without needing a field on the handle.
+fn leak_codex_spec(id: &'static str, token_url: &'static str) -> &'static OAuthSpec {
+    Box::leak(Box::new(OAuthSpec {
+        id,
+        display: "Test",
+        client_id: CODEX.client_id,
+        scope: CODEX.scope,
+        authorize_url: CODEX.authorize_url,
+        token_url,
+        authorize_extra: CODEX.authorize_extra,
+        nonce: CODEX.nonce,
+        redirect: Redirect {
+            host: CODEX.redirect.host,
+            port: CODEX.redirect.port,
+            path: CODEX.redirect.path,
+            fallback_port: CODEX.redirect.fallback_port,
+        },
+        account_id_claim: CODEX.account_id_claim,
+        sign_in_msg: CODEX.sign_in_msg,
+    }))
+}
+
+/// Leak a `Grok`-like spec with a custom id and token URL.
+fn leak_grok_spec(id: &'static str, token_url: &'static str) -> &'static OAuthSpec {
+    Box::leak(Box::new(OAuthSpec {
+        id,
+        display: "Grok",
+        client_id: GROK.client_id,
+        scope: GROK.scope,
+        authorize_url: GROK.authorize_url,
+        token_url,
+        authorize_extra: GROK.authorize_extra,
+        nonce: GROK.nonce,
+        redirect: Redirect {
+            host: GROK.redirect.host,
+            port: GROK.redirect.port,
+            path: GROK.redirect.path,
+            fallback_port: GROK.redirect.fallback_port,
+        },
+        account_id_claim: GROK.account_id_claim,
+        sign_in_msg: GROK.sign_in_msg,
+    }))
 }
 
 /// A private temp directory for a test, so its token file can never be
@@ -536,10 +793,9 @@ async fn a_refused_refresh_drops_the_credentials() {
         r#"{"error":"invalid_grant","error_description":"refresh token expired"}"#,
     )
     .await;
-    let dir = temp_dir_for("auth-refused");
-    let path = dir.join("auth_codex.json");
-    let auth = expired_auth(&endpoint, &path);
-    CodexAuth::save_token_to(&path, auth.token().as_ref()).unwrap();
+    let auth = expired_auth("test-refused", endpoint);
+    let path = Dirs::auth_file(auth.spec().id).unwrap();
+    auth.token().map(|t| t.save_to(path.clone()));
 
     let err = auth.refresh().await.unwrap_err().to_string();
 
@@ -554,28 +810,27 @@ async fn a_refused_refresh_drops_the_credentials() {
         path.display()
     );
 
-    std::fs::remove_dir_all(&dir).ok();
+    OAuthFile::delete(auth.spec().id).ok();
 }
 
 #[tokio::test]
 async fn a_transient_refresh_failure_keeps_the_credentials() {
-    let dir = temp_dir_for("auth-transient");
-    let path = dir.join("auth_codex.json");
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
 
     // Nothing is listening now, so the exchange fails before it is judged.
     let endpoint = format!("http://127.0.0.1:{port}/oauth/token");
-    let auth = expired_auth(&endpoint, &path);
-    CodexAuth::save_token_to(&path, auth.token().as_ref()).unwrap();
+    let auth = expired_auth("test-transient", endpoint);
+    let path = Dirs::auth_file(auth.spec().id).unwrap();
+    auth.token().map(|t| t.save_to(path.clone()));
 
     assert!(auth.refresh().await.is_err());
 
     assert!(auth.is_logged_in());
     assert!(path.exists(), "{} should have been kept", path.display());
 
-    std::fs::remove_dir_all(&dir).ok();
+    OAuthFile::delete(auth.spec().id).ok();
 }
 
 #[tokio::test]
@@ -588,10 +843,9 @@ async fn a_refusal_that_is_not_of_the_credentials_keeps_them() {
         r#"{"error":"forbidden","error_description":"proxy said no"}"#,
     )
     .await;
-    let dir = temp_dir_for("auth-forbidden");
-    let path = dir.join("auth_codex.json");
-    let auth = expired_auth(&endpoint, &path);
-    CodexAuth::save_token_to(&path, auth.token().as_ref()).unwrap();
+    let auth = expired_auth("test-forbidden", endpoint);
+    let path = Dirs::auth_file(auth.spec().id).unwrap();
+    auth.token().map(|t| t.save_to(path.clone()));
 
     let err = auth.refresh().await.unwrap_err().to_string();
 
@@ -602,7 +856,7 @@ async fn a_refusal_that_is_not_of_the_credentials_keeps_them() {
     );
     assert!(path.exists(), "{} should have been kept", path.display());
 
-    std::fs::remove_dir_all(&dir).ok();
+    OAuthFile::delete(auth.spec().id).ok();
 }
 
 #[tokio::test]
@@ -612,9 +866,9 @@ async fn concurrent_refreshes_exchange_the_token_once() {
         r#"{"access_token":"new-access","refresh_token":"new-refresh"}"#,
     )
     .await;
-    let dir = temp_dir_for("auth-concurrent");
-    let path = dir.join("auth_codex.json");
-    let auth = Arc::new(expired_auth(&endpoint, &path));
+    let auth = Arc::new(expired_auth("test-concurrent", endpoint));
+    let path = Dirs::auth_file(auth.spec().id).unwrap();
+    auth.token().map(|t| t.save_to(path.clone()));
 
     // The token endpoint rotates the refresh token on each use, so a second
     // exchange started from a stale copy spends a token that no longer works.
@@ -633,13 +887,13 @@ async fn concurrent_refreshes_exchange_the_token_once() {
     assert_eq!(token.access_token, "new-access");
     assert_eq!(token.refresh_token, "new-refresh");
     assert_eq!(
-        CodexAuth::load_token_from(&path)
+        load_token_from(&CODEX, &path)
             .unwrap()
             .map(|t| t.refresh_token),
         Some("new-refresh".to_string())
     );
 
-    std::fs::remove_dir_all(&dir).ok();
+    OAuthFile::delete(auth.spec().id).ok();
 }
 
 /// A stand-in for the token endpoint that answers every request with `status`
@@ -652,6 +906,19 @@ async fn token_endpoint(
     status: &'static str,
     body: &'static str,
 ) -> (String, Arc<Mutex<Vec<String>>>) {
+    token_endpoint_returning(status, move || body.to_string()).await
+}
+
+/// A stand-in for the token endpoint that answers every request with `status`
+/// and whatever `body` builds, for a response that can only be written once the
+/// request has been seen.
+async fn token_endpoint_returning<F>(
+    status: &'static str,
+    body: F,
+) -> (String, Arc<Mutex<Vec<String>>>)
+where
+    F: Fn() -> String + Send + 'static,
+{
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind fake endpoint");
@@ -668,6 +935,7 @@ async fn token_endpoint(
             recorded.lock().await.push(exchange);
 
             tokio::time::sleep(Duration::from_millis(50)).await;
+            let body = body();
             let response = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\
                  Content-Length: {length}\r\nConnection: close\r\n\r\n{body}",
@@ -759,16 +1027,16 @@ fn decodes_jwt_claims_with_or_without_padding() {
 fn a_token_file_is_written_private_and_leaves_no_staging_file() {
     let dir = temp_dir_for("auth-permissions");
     let path = dir.join("auth_codex.json");
-    let token = CodexToken {
+    let token = OAuthFile {
         id_token: "id".to_string(),
         access_token: "access".to_string(),
         refresh_token: "refresh".to_string(),
-        account_id: "acct".to_string(),
+        account_id: Some("acct".to_string()),
         expires: 1_767_225_600,
     };
 
-    CodexAuth::save_token_to(&path, Some(&token)).unwrap();
-    assert_eq!(CodexAuth::load_token_from(&path).unwrap(), Some(token));
+    let _ = token.save_to(path.clone());
+    assert_eq!(load_token_from(&CODEX, &path).unwrap(), Some(token));
 
     #[cfg(unix)]
     {
@@ -791,15 +1059,17 @@ fn a_token_file_is_written_private_and_leaves_no_staging_file() {
 fn a_new_token_does_not_truncate_the_old_one_in_place() {
     let dir = temp_dir_for("auth-swap");
     let path = dir.join("auth_codex.json");
-    let token = |access: &str| CodexToken {
+    let token = |access: &str| OAuthFile {
         id_token: "id".to_string(),
         access_token: access.to_string(),
         refresh_token: "refresh".to_string(),
-        account_id: "acct".to_string(),
+        account_id: Some("acct".to_string()),
         expires: 1_767_225_600,
     };
 
-    CodexAuth::save_token_to(&path, Some(&token("first"))).unwrap();
+    let first = token("first");
+    let _ = first.save_to(path.clone());
+
     // A refresh rotates the refresh token, so a save interrupted by a crash
     // must not leave a truncated file where a working token used to be. The
     // new token is written beside the old one and swapped in, which a hard
@@ -807,14 +1077,15 @@ fn a_new_token_does_not_truncate_the_old_one_in_place() {
     let earlier = dir.join("earlier.json");
     std::fs::hard_link(&path, &earlier).unwrap();
 
-    CodexAuth::save_token_to(&path, Some(&token("second"))).unwrap();
+    let second = token("second");
+    let _ = second.save_to(path.clone());
 
     assert_eq!(
         std::fs::read_to_string(&earlier).unwrap(),
         serde_json::to_string_pretty(&token("first")).unwrap()
     );
     assert_eq!(
-        CodexAuth::load_token_from(&path).unwrap(),
+        load_token_from(&CODEX, &path).unwrap(),
         Some(token("second"))
     );
 
@@ -825,11 +1096,11 @@ fn a_new_token_does_not_truncate_the_old_one_in_place() {
 fn rewriting_a_token_replaces_a_loose_file_rather_than_keeping_its_mode() {
     let dir = temp_dir_for("auth-replace");
     let path = dir.join("auth_codex.json");
-    let token = CodexToken {
+    let token = OAuthFile {
         id_token: "id".to_string(),
         access_token: "access".to_string(),
         refresh_token: "refresh".to_string(),
-        account_id: "acct".to_string(),
+        account_id: Some("acct".to_string()),
         expires: 1_767_225_600,
     };
 
@@ -841,7 +1112,7 @@ fn rewriting_a_token_replaces_a_loose_file_rather_than_keeping_its_mode() {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
 
-    CodexAuth::save_token_to(&path, Some(&token)).unwrap();
+    let _ = token.save_to(path.clone());
 
     #[cfg(unix)]
     {
@@ -849,7 +1120,7 @@ fn rewriting_a_token_replaces_a_loose_file_rather_than_keeping_its_mode() {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(0o600, mode, "replaced token kept the old mode");
     }
-    assert_eq!(CodexAuth::load_token_from(&path).unwrap(), Some(token));
+    assert_eq!(load_token_from(&CODEX, &path).unwrap(), Some(token));
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -870,12 +1141,7 @@ async fn readers_never_lose_the_account_id_while_the_token_is_being_replaced() {
     // empty-handed, which dropped the account header from a live request.
     // Reads now take a snapshot, so a stored account id is always readable.
     let dir = temp_dir_for("auth-readers");
-    let path = dir.join("auth_codex.json");
-    let auth = std::sync::Arc::new(CodexAuth::at(
-        UNUSED_ENDPOINT,
-        &path,
-        Some(account_token("acct-a")),
-    ));
+    let auth = std::sync::Arc::new(OAuthHandle::at(&CODEX, Some(account_token("acct-a"))));
 
     let writer = {
         let auth = auth.clone();
@@ -902,9 +1168,9 @@ async fn readers_never_lose_the_account_id_while_the_token_is_being_replaced() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-fn account_token(account_id: &str) -> CodexToken {
+fn account_token(account_id: &str) -> OAuthFile {
     let mut token = token_with_exp(expires_in(3600));
-    token.account_id = account_id.to_string();
+    token.account_id = Some(account_id.to_string());
     token
 }
 
@@ -917,8 +1183,284 @@ async fn two_auths_differ_when_their_tokens_differ() {
     // states could look identical whenever a writer held the lock.
     assert_ne!(one, other);
     assert_eq!(one, auth_with(account_token("acct-a")));
-    assert_ne!(
-        one,
-        CodexAuth::at(UNUSED_ENDPOINT, Path::new("other.json"), None)
+    assert_ne!(one, OAuthHandle::at(&CODEX, None));
+}
+
+#[test]
+fn a_stored_account_id_survives_a_refresh_that_returns_no_id_token() {
+    // The refresh response is only an access token, so the id token and the
+    // account in it have to come from what is already stored.
+    let previous = OAuthFile {
+        id_token: "old-id".to_string(),
+        access_token: "old-access".to_string(),
+        refresh_token: "old-refresh".to_string(),
+        account_id: Some("acct-old".to_string()),
+        expires: 0,
+    };
+    let response = OAuthResponse {
+        access_token: "new-access".to_string(),
+        id_token: None,
+        refresh_token: Some("new-refresh".to_string()),
+        expires_in: None,
+    };
+
+    let token = OAuthFile::new(&CODEX, &response, Some(&previous), None).expect("build token");
+
+    assert_eq!(token.id_token, "old-id");
+    assert_eq!(token.account_id.as_deref(), Some("acct-old"));
+    assert_eq!(token.refresh_token, "new-refresh");
+    assert_eq!(token.access_token, "new-access");
+}
+
+#[test]
+fn the_granted_lifetime_is_preferred_over_the_claim() {
+    // xAI sends `expires_in` and a JWT `exp` that can differ by the round trip;
+    // what the endpoint said it granted is the better answer.
+    let access_token = token_with_exp(expires_in(60)).access_token;
+    let response = OAuthResponse {
+        access_token,
+        id_token: Some(String::new()),
+        refresh_token: Some(String::new()),
+        expires_in: Some(3600),
+    };
+
+    let token = OAuthFile::new(&GROK, &response, None, None).expect("build grok token");
+
+    assert!(!token.needs_refresh());
+    assert_eq!(token.expires, expires_in(3600));
+}
+
+#[test]
+fn a_response_that_grants_no_lifetime_falls_back_to_the_claim() {
+    let access_token = token_with_exp(expires_in(3600)).access_token;
+    let response = OAuthResponse {
+        access_token,
+        id_token: Some(String::new()),
+        refresh_token: Some(String::new()),
+        expires_in: None,
+    };
+
+    let token = OAuthFile::new(&GROK, &response, None, None).expect("build grok token");
+
+    assert_eq!(token.expires, expires_in(3600));
+    assert!(!token.needs_refresh());
+}
+
+#[tokio::test]
+async fn a_provider_is_only_matched_by_its_own_name() {
+    // `--login` and the configured kind both go through one lookup, so a name
+    // that is a prefix of another's cannot select the wrong login.
+    assert_eq!(OAuthKind::from_lower_str("codex"), Some(OAuthKind::Codex));
+    assert_eq!(OAuthKind::from_lower_str("GROK"), Some(OAuthKind::Grok));
+    assert_eq!(OAuthKind::names(), "codex, grok");
+
+    for name in ["", "chatgpt", "xai", "grok-cli", "cod"] {
+        assert_eq!(OAuthKind::from_lower_str(name), None, "{name:?} matched");
+    }
+}
+
+#[test]
+fn two_providers_auths_are_never_equal() {
+    // They can hold the same token and still not be interchangeable: they are
+    // different logins to different providers.
+    let token = account_token("acct-1");
+    let codex = OAuthHandle::at(&CODEX, Some(token.clone()));
+    let grok = OAuthHandle::at(&GROK, Some(token));
+
+    assert_ne!(codex, grok);
+}
+
+/// Drive a login the way a browser would: read the URL, send the callback to
+/// the port it names, and hand the code back.
+async fn browser_visits(login: &Login, code: &str) -> String {
+    let redirect = url::Url::parse(&login.redirect_uri).expect("redirect is a url");
+    let port = redirect.port().expect("a loopback port");
+    let state = state_of(&login.oauth.url);
+    let code = code.to_string();
+
+    // The wait is on this task; the callback is sent from another so the two
+    // do not deadlock.
+    let sending = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let target = format!("{}?code={code}&state={state}", redirect.path());
+        let mut stream = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+        stream.write_all(request.as_bytes()).await.expect("write");
+    });
+
+    let got = login.oauth.await_callback().await;
+    sending.await.expect("the browser was never sent");
+    got.expect("the login did not get a code")
+}
+
+#[tokio::test]
+async fn a_grok_login_sends_a_nonce_and_exchanges_with_the_same_redirect() {
+    let _ports = LOGIN_PORTS.lock().await;
+    // xAI checks the nonce it was sent against the id token it returns, so the
+    // whole exchange hinges on the same nonce being in the URL that opened the
+    // login and in the check afterwards.
+    let nonce_cell: Arc<OnceLock<String>> = Arc::new(OnceLock::new());
+    let claims = nonce_cell.clone();
+    let (endpoint, exchanges) = token_endpoint_returning("200 OK", move || {
+        let nonce = claims.get().map(String::as_str).unwrap_or_default();
+        let id_token = id_token_with(&format!(r#"{{"nonce":"{nonce}"}}"#));
+        format!(
+            r#"{{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"id_token":"{id_token}"}}"#
+        )
+    })
+    .await;
+
+    let endpoint: &'static str = Box::leak(endpoint.into_boxed_str());
+    let spec = leak_grok_spec("test-grok-login", endpoint);
+    let auth = OAuthHandle::at(spec, None);
+    let login = auth.begin_login().await.expect("begin grok login");
+
+    let nonce = login
+        .nonce
+        .as_deref()
+        .expect("grok sends a nonce")
+        .to_string();
+    nonce_cell.set(nonce.clone()).ok();
+
+    let url = url::Url::parse(&login.oauth.url).expect("login url is a url");
+    let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+    assert_eq!(params["nonce"], nonce, "the nonce is not in the URL");
+    assert_eq!(params["client_id"], GROK.client_id);
+    assert_eq!(params["scope"], GROK.scope);
+    assert_eq!(params["redirect_uri"], login.redirect_uri);
+
+    // The redirect has to name the port the listener actually got, which is not
+    // necessarily the one grok prefers.
+    let redirect = url::Url::parse(&login.redirect_uri).expect("redirect is a url");
+    assert_eq!(redirect.host_str(), Some(GROK.redirect.host));
+    assert_eq!(redirect.path(), GROK.redirect.path);
+    // Whatever port the listener got, the browser below reaches it, so the two
+    // agree.
+    assert!(redirect.port().is_some_and(|port| port > 0), "{redirect}");
+
+    let code = browser_visits(&login, "code-1").await;
+    auth.finish_login(&login, &code)
+        .await
+        .expect("finish grok login");
+
+    let exchange = exchanges.lock().await.join("\n");
+    assert!(
+        exchange.contains("grant_type=authorization_code"),
+        "{exchange}"
     );
+    assert!(exchange.contains("code=code-1"), "{exchange}");
+    assert!(
+        exchange.contains(&format!("client_id={}", GROK.client_id)),
+        "{exchange}"
+    );
+    // The exchange has to repeat the redirect the authorization was made with,
+    // or the code is not the one the grant was issued for.
+    assert!(
+        exchange.contains(&format!("redirect_uri={}", encoded(&login.redirect_uri))),
+        "{exchange}"
+    );
+    assert!(exchange.contains("code_verifier="), "{exchange}");
+
+    let token = auth.token().expect("a token was stored");
+    assert_eq!(token.access_token, "new-access");
+    assert_eq!(token.refresh_token, "new-refresh");
+    assert_eq!(token.account_id, None, "grok's id token names no account");
+    assert!(!token.needs_refresh());
+    let path = Dirs::auth_file(auth.spec().id).unwrap();
+    assert_eq!(load_token_from(auth.spec(), &path).unwrap(), Some(token));
+
+    OAuthFile::delete(auth.spec().id).ok();
+}
+
+#[tokio::test]
+async fn a_codex_login_sends_no_nonce_and_stores_the_account() {
+    let _ports = LOGIN_PORTS.lock().await;
+    // The other half of the same flow, for the provider that needs no nonce and
+    // whose id token names the account to send back.
+    let body = format!(
+        r#"{{"access_token":"new-access","refresh_token":"new-refresh","id_token":"{}"}}"#,
+        id_token_with(&format!(
+            r#"{{"{}":{{"chatgpt_account_id":"acct-1"}}}}"#,
+            OPENAI_CLAIMS
+        ))
+    );
+    let (endpoint, exchanges) = token_endpoint_returning("200 OK", move || body.clone()).await;
+
+    let endpoint: &'static str = Box::leak(endpoint.into_boxed_str());
+    let spec = leak_codex_spec("test-codex-login", endpoint);
+    let auth = OAuthHandle::at(spec, None);
+    let login = auth.begin_login().await.expect("begin codex login");
+
+    assert_eq!(login.nonce, None, "codex was sent a nonce");
+    let url = url::Url::parse(&login.oauth.url).expect("login url is a url");
+    assert!(
+        !url.query_pairs().any(|(key, _)| key == "nonce"),
+        "the nonce reached the codex authorize url"
+    );
+    assert_eq!(login.redirect_uri, "http://localhost:1455/auth/callback");
+
+    let code = browser_visits(&login, "code-1").await;
+    auth.finish_login(&login, &code)
+        .await
+        .expect("finish codex login");
+
+    let exchange = exchanges.lock().await.join("\n");
+    assert!(exchange.contains("code=code-1"), "{exchange}");
+    assert!(
+        exchange.contains("redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"),
+        "{exchange}"
+    );
+
+    let token = auth.token().expect("a token was stored");
+    assert_eq!(token.account_id.as_deref(), Some("acct-1"));
+
+    OAuthFile::delete(auth.spec().id).ok();
+}
+
+#[tokio::test]
+async fn a_grok_login_takes_another_port_when_its_preferred_one_is_taken() {
+    let _ports = LOGIN_PORTS.lock().await;
+    // Grok's registered port is a preference, so a login still has to work when
+    // something else is on it.
+    let squatter = TcpListener::bind("127.0.0.1:56121")
+        .await
+        .expect("take grok's preferred port");
+    let dir = temp_dir_for("auth-grok-port");
+    let auth = OAuthHandle::at(&GROK, None);
+
+    let login = auth.begin_login().await.expect("begin grok login");
+
+    let redirect = url::Url::parse(&login.redirect_uri).expect("redirect is a url");
+    assert_ne!(
+        redirect.port(),
+        Some(56121),
+        "the login was sent to the port that was taken"
+    );
+    assert!(redirect.port().is_some_and(|port| port > 0));
+
+    drop(squatter);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
+async fn a_codex_login_will_not_move_off_the_port_it_registered() {
+    let _ports = LOGIN_PORTS.lock().await;
+    // Codex registered its redirect on one port. A fallback would send the
+    // browser somewhere the authorization was never made for, so the login has
+    // to fail and say which address was taken.
+    let _squatter = TcpListener::bind("localhost:1455")
+        .await
+        .expect("take codex's registered port");
+    let auth = OAuthHandle::at(&CODEX, None);
+
+    let err = auth
+        .begin_login()
+        .await
+        .expect_err("the codex login moved to another port")
+        .to_string();
+
+    assert!(err.contains("localhost:1455"), "{err}");
+    assert!(err.contains("Another login may be running"), "{err}");
 }

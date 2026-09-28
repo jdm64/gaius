@@ -2,7 +2,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use gaius::auth_codex::CodexAuth;
+use gaius::auth_handle::OAuthHandle;
+use gaius::auth_spec::OAuthKind;
 use gaius::cli_prompt::CliPrompt;
 use gaius::config::Config;
 use gaius::harness::Harness;
@@ -87,23 +88,27 @@ fn print_help() {
     println!();
     println!("  --session <ID>          Load and continue a saved session");
     println!();
-    println!("  --login <PROVIDER>      Log in to a provider (codex) and exit");
+    println!("  --login <PROVIDER>      Log in to a provider and exit");
+    println!(
+        "                        (supported: {})",
+        OAuthKind::names()
+    );
     println!();
     println!("  -V, --version           Print version information");
     println!("  -h, --help              Show this help message");
 }
 
 async fn login(provider: &str) -> Result<(), Box<dyn Error>> {
-    if provider.eq_ignore_ascii_case("codex") {
-        CodexAuth::get()?.login().await?;
-        return Ok(());
-    }
+    let Some(kind) = OAuthKind::from_lower_str(provider) else {
+        return Err(format!(
+            "Unknown provider '{}' to log in to. Supported: {}",
+            provider,
+            OAuthKind::names()
+        )
+        .into());
+    };
 
-    Err(format!(
-        "Unknown provider '{}' to log in to. Supported: codex",
-        provider
-    )
-    .into())
+    OAuthHandle::get(kind)?.login().await
 }
 
 #[tokio::main]

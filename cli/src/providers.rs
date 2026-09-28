@@ -3,7 +3,8 @@
  */
 
 use crate::{
-    auth_codex::CodexAuth,
+    auth_handle::OAuthHandle,
+    auth_spec::OAuthKind,
     config::ProviderConfig,
     models::{ModelDef, TokenPrice},
 };
@@ -14,8 +15,11 @@ use genai::{
 };
 
 use serde_json::Value;
-use std::{env, error::Error, path::PathBuf, sync::Arc, time::Duration};
+use std::{env, error::Error, sync::Arc, time::Duration};
 use url::Url;
+
+const CODEX_RESPONSES: &str = "https://chatgpt.com/backend-api/codex/responses";
+const GROK_RESPONSES: &str = "https://cli-chat-proxy.grok.com/v1/responses";
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProviderDef {
@@ -27,11 +31,11 @@ pub enum ProviderDef {
     },
     Codex {
         name: String,
-        auth: Arc<CodexAuth>,
+        auth: Arc<OAuthHandle>,
     },
     Grok {
         name: String,
-        access_token: String,
+        auth: Arc<OAuthHandle>,
     },
 }
 
@@ -48,21 +52,21 @@ impl Default for ProviderDef {
 
 impl ProviderDef {
     pub fn new(config: &ProviderConfig) -> Result<Self, Box<dyn Error>> {
-        if config.kind.eq_ignore_ascii_case("codex") {
-            Ok(ProviderDef::Codex {
-                name: config.name.clone(),
-                auth: CodexAuth::get()?,
-            })
-        } else if config.kind.eq_ignore_ascii_case("grok") {
-            Self::new_grok(config.name.clone())
-        } else {
-            Ok(ProviderDef::ApiKey {
+        let Some(kind) = OAuthKind::from_lower_str(&config.kind) else {
+            return Ok(ProviderDef::ApiKey {
                 name: config.name.clone(),
                 kind: config.kind.clone(),
                 url: config.url.clone(),
                 key: config.key.clone(),
-            })
-        }
+            });
+        };
+
+        let name = config.name.clone();
+        let auth = OAuthHandle::get(kind)?;
+        Ok(match kind {
+            OAuthKind::Codex => ProviderDef::Codex { name, auth },
+            OAuthKind::Grok => ProviderDef::Grok { name, auth },
+        })
     }
 
     pub fn name(&self) -> &str {
@@ -123,14 +127,14 @@ impl ProviderDef {
         match self {
             ProviderDef::Codex { auth, .. } => Ok(Self::raw_create_client(
                 AdapterKind::OpenAIResp,
-                "https://chatgpt.com/backend-api/codex/responses".to_string(),
+                CODEX_RESPONSES.to_string(),
                 auth.access_token().await?,
                 model,
             )),
-            ProviderDef::Grok { access_token, .. } => Ok(Self::raw_create_client(
+            ProviderDef::Grok { auth, .. } => Ok(Self::raw_create_client(
                 AdapterKind::Xai,
-                "https://cli-chat-proxy.grok.com/v1/responses".to_string(),
-                access_token.clone(),
+                GROK_RESPONSES.to_string(),
+                auth.access_token().await?,
                 model,
             )),
             ProviderDef::ApiKey { kind, url, key, .. } => {
@@ -144,30 +148,6 @@ impl ProviderDef {
                 ))
             }
         }
-    }
-
-    fn new_grok(provider_name: String) -> Result<ProviderDef, Box<dyn Error>> {
-        let home = std::env::var("HOME")?;
-        let auth_path = PathBuf::from(home).join(".grok").join("auth.json");
-        let contents = std::fs::read_to_string(&auth_path)
-            .map_err(|err| format!("Unable to read {}: {}", auth_path.display(), err))?;
-        let auth_json: Value = serde_json::from_str(&contents)?;
-        let token = auth_json
-            .as_object()
-            .and_then(|entries| {
-                entries
-                    .iter()
-                    .find(|(key, _)| key.starts_with("https://auth.x.ai::"))
-            })
-            .and_then(|(_, value)| value.get("key"))
-            .and_then(Value::as_str)
-            .filter(|token| !token.is_empty())
-            .ok_or("Invalid Grok auth.json: no non-empty key for https://auth.x.ai")?;
-
-        Ok(ProviderDef::Grok {
-            name: provider_name,
-            access_token: token.to_string(),
-        })
     }
 
     fn raw_create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
@@ -263,8 +243,9 @@ impl ProviderDef {
     ) -> Result<Vec<ModelDef>, Box<dyn Error>> {
         let request = client.get(url.clone());
         let request = match self {
-            ProviderDef::Codex { auth, .. } => request.bearer_auth(auth.access_token().await?),
-            ProviderDef::Grok { access_token, .. } => request.bearer_auth(access_token),
+            ProviderDef::Codex { auth, .. } | ProviderDef::Grok { auth, .. } => {
+                request.bearer_auth(auth.access_token().await?)
+            }
             ProviderDef::ApiKey { kind, key, .. } => {
                 if kind.eq_ignore_ascii_case("anthropic") {
                     request
