@@ -30,9 +30,12 @@ pub struct Redirect {
 
 impl Redirect {
     pub fn addrs(&self) -> Vec<String> {
-        let mut addrs = vec![format!("{}:{}", self.host, self.port)];
+        // Always bind to the IPv4 loopback so that both the listener and the
+        // test helpers agree on the address family.  The `host` field is only
+        // used for the redirect URI that is sent to the provider.
+        let mut addrs = vec![format!("127.0.0.1:{}", self.port)];
         if self.fallback_port {
-            addrs.push(format!("{}:0", self.host));
+            addrs.push("127.0.0.1:0".to_string());
         }
 
         addrs

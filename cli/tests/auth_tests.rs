@@ -1273,8 +1273,10 @@ fn two_providers_auths_are_never_equal() {
 /// Drive a login the way a browser would: read the URL, send the callback to
 /// the port it names, and hand the code back.
 async fn browser_visits(login: &Login, code: &str) -> String {
+    // Connect to the address the listener actually bound to, not a hardcoded
+    // loopback address, so IPv4 and IPv6 agree on both sides of the socket.
+    let addr = login.oauth.local_addr().expect("listener has an address");
     let redirect = url::Url::parse(&login.redirect_uri).expect("redirect is a url");
-    let port = redirect.port().expect("a loopback port");
     let state = state_of(&login.oauth.url);
     let code = code.to_string();
 
@@ -1283,10 +1285,10 @@ async fn browser_visits(login: &Login, code: &str) -> String {
     let sending = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let target = format!("{}?code={code}&state={state}", redirect.path());
-        let mut stream = TcpStream::connect(("127.0.0.1", port))
+        let mut stream = TcpStream::connect(addr)
             .await
             .expect("connect");
-        let request = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+        let request = format!("GET {target} HTTP/1.1\r\nHost: {addr}\r\n\r\n");
         stream.write_all(request.as_bytes()).await.expect("write");
     });
 
@@ -1450,7 +1452,7 @@ async fn a_codex_login_will_not_move_off_the_port_it_registered() {
     // Codex registered its redirect on one port. A fallback would send the
     // browser somewhere the authorization was never made for, so the login has
     // to fail and say which address was taken.
-    let _squatter = TcpListener::bind("localhost:1455")
+    let _squatter = TcpListener::bind("127.0.0.1:1455")
         .await
         .expect("take codex's registered port");
     let auth = OAuthHandle::at(&CODEX, None);
@@ -1461,6 +1463,6 @@ async fn a_codex_login_will_not_move_off_the_port_it_registered() {
         .expect_err("the codex login moved to another port")
         .to_string();
 
-    assert!(err.contains("localhost:1455"), "{err}");
+    assert!(err.contains("127.0.0.1:1455"), "{err}");
     assert!(err.contains("Another login may be running"), "{err}");
 }
