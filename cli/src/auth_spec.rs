@@ -58,6 +58,7 @@ pub struct OAuthSpec {
     pub redirect: Redirect,
     pub account_id_claim: Option<(&'static str, &'static str)>,
     pub sign_in_msg: &'static str,
+    pub paste_code: bool,
 }
 
 pub const CODEX: OAuthSpec = OAuthSpec {
@@ -81,6 +82,7 @@ pub const CODEX: OAuthSpec = OAuthSpec {
     },
     account_id_claim: Some(("https://api.openai.com/auth", "chatgpt_account_id")),
     sign_in_msg: "Sign in to ChatGPT to use your Codex subscription:",
+    paste_code: false,
 };
 
 /// info pulled from: https://auth.x.ai/.well-known/openid-configuration
@@ -102,6 +104,7 @@ pub const GROK: OAuthSpec = OAuthSpec {
     },
     account_id_claim: None,
     sign_in_msg: "Sign in to xAI to use your Grok subscription:",
+    paste_code: true,
 };
 
 impl OAuthSpec {

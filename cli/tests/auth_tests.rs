@@ -755,6 +755,7 @@ fn leak_codex_spec(id: &'static str, token_url: &'static str) -> &'static OAuthS
         },
         account_id_claim: CODEX.account_id_claim,
         sign_in_msg: CODEX.sign_in_msg,
+        paste_code: false,
     }))
 }
 
@@ -777,6 +778,7 @@ fn leak_grok_spec(id: &'static str, token_url: &'static str) -> &'static OAuthSp
         },
         account_id_claim: GROK.account_id_claim,
         sign_in_msg: GROK.sign_in_msg,
+        paste_code: true,
     }))
 }
 
@@ -1285,9 +1287,7 @@ async fn browser_visits(login: &Login, code: &str) -> String {
     let sending = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let target = format!("{}?code={code}&state={state}", redirect.path());
-        let mut stream = TcpStream::connect(addr)
-            .await
-            .expect("connect");
+        let mut stream = TcpStream::connect(addr).await.expect("connect");
         let request = format!("GET {target} HTTP/1.1\r\nHost: {addr}\r\n\r\n");
         stream.write_all(request.as_bytes()).await.expect("write");
     });
@@ -1465,4 +1465,94 @@ async fn a_codex_login_will_not_move_off_the_port_it_registered() {
 
     assert!(err.contains("127.0.0.1:1455"), "{err}");
     assert!(err.contains("Another login may be running"), "{err}");
+}
+
+/// The code a login takes from what was copied back from the sign-in page,
+/// bounded so a wait that never ends fails the test instead of hanging.
+async fn pasted_code(oauth: &OAuthClient, pasted: &str) -> Result<String, String> {
+    let mut input: &[u8] = pasted.as_bytes();
+    wait_for(oauth.await_code_from(&mut input))
+        .await
+        .expect("the login never took the paste")
+        .map_err(|err| err.to_string())
+}
+
+#[tokio::test]
+async fn the_end_of_the_paste_leaves_the_browser_wait_running() {
+    // stdin ends at once when no terminal is attached. The login must then
+    // carry on waiting for the browser alone, rather than treat the closed
+    // input as the end of the sign-in.
+    let oauth = OAuthClient::new(loopback_url(&CODEX), &["127.0.0.1:0"])
+        .await
+        .expect("bind loopback listener");
+    let port = oauth.local_addr().expect("listener address").port();
+    let state = state_of(&oauth.url);
+    let mut input: &[u8] = b"";
+
+    let (code, _) = tokio::join!(wait_for(oauth.await_code_from(&mut input)), async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let target = format!("/auth/callback?code=code-5&state={state}");
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let request = format!("GET {target} HTTP/1.1\r\nHost: localhost:{port}\r\n\r\n");
+        stream.write_all(request.as_bytes()).await.unwrap();
+    });
+
+    let code = code
+        .expect("the login never finished")
+        .map_err(|err| err.to_string());
+    assert_eq!(code.as_deref(), Ok("code-5"));
+}
+
+#[tokio::test]
+async fn a_grok_login_completes_from_a_pasted_code() {
+    // The whole point of the paste: the code the page showed, copied back
+    // into the client, has to reach the token endpoint the same way a
+    // browser callback does — that request is where the login itself comes
+    // from.
+    let _ports = LOGIN_PORTS.lock().await;
+    let nonce_cell: Arc<OnceLock<String>> = Arc::new(OnceLock::new());
+    let claims = nonce_cell.clone();
+    let (endpoint, exchanges) = token_endpoint_returning("200 OK", move || {
+        let nonce = claims.get().map(String::as_str).unwrap_or_default();
+        let id_token = id_token_with(&format!(r#"{{"nonce":"{nonce}"}}"#));
+        format!(
+            r#"{{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"id_token":"{id_token}"}}"#
+        )
+    })
+    .await;
+
+    let endpoint: &'static str = Box::leak(endpoint.into_boxed_str());
+    let spec = leak_grok_spec("test-grok-paste", endpoint);
+    let auth = OAuthHandle::at(spec, None);
+    let login = auth.begin_login().await.expect("begin grok login");
+    nonce_cell
+        .set(login.nonce.clone().expect("grok sends a nonce"))
+        .ok();
+
+    let code = pasted_code(&login.oauth, "pasted-code-1\n")
+        .await
+        .expect("paste");
+    auth.finish_login(&login, &code)
+        .await
+        .expect("finish grok login");
+
+    let exchange = exchanges.lock().await.join("\n");
+    assert!(
+        exchange.contains("grant_type=authorization_code"),
+        "{exchange}"
+    );
+    assert!(exchange.contains("code=pasted-code-1"), "{exchange}");
+    assert!(
+        exchange.contains(&format!("redirect_uri={}", encoded(&login.redirect_uri))),
+        "{exchange}"
+    );
+    assert!(exchange.contains("code_verifier="), "{exchange}");
+
+    let token = auth.token().expect("a token was stored");
+    assert_eq!(token.access_token, "new-access");
+    assert_eq!(token.refresh_token, "new-refresh");
+    let path = Dirs::auth_file(auth.spec().id).unwrap();
+    assert_eq!(load_token_from(auth.spec(), &path).unwrap(), Some(token));
+
+    OAuthFile::delete(auth.spec().id).ok();
 }

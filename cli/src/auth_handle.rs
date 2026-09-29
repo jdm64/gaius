@@ -110,7 +110,11 @@ impl OAuthHandle {
         println!("{}", login.oauth.url);
         println!();
 
-        let code = login.oauth.await_callback().await?;
+        let code = if self.spec.paste_code {
+            login.oauth.await_code().await?
+        } else {
+            login.oauth.await_callback().await?
+        };
         self.finish_login(&login, &code).await
     }
 

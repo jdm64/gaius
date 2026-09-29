@@ -15,7 +15,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
 use url::{Url, form_urlencoded};
@@ -163,15 +163,54 @@ impl OAuthClient {
     pub async fn await_callback(&self) -> Result<String, Box<dyn Error>> {
         tokio::time::timeout(LOGIN_TIMEOUT, self.callback_code())
             .await
-            .map_err(|_| {
-                format!(
-                    "Timed out after {} seconds waiting for the browser to finish signing in.",
-                    LOGIN_TIMEOUT.as_secs()
-                )
-            })?
+            .map_err(|_| Self::login_timed_out())?
     }
 
-    async fn callback_code(&self) -> Result<String, Box<dyn Error>> {
+    pub async fn await_code(&self) -> Result<String, Box<dyn Error>> {
+        println!("If the page shows a code to copy back instead of redirecting,");
+        println!("paste it here and press Enter:");
+        println!();
+
+        let mut paste = BufReader::new(tokio::io::stdin());
+        tokio::time::timeout(LOGIN_TIMEOUT, self.await_code_from(&mut paste))
+            .await
+            .map_err(|_| Self::login_timed_out())?
+    }
+
+    pub async fn await_code_from<R: AsyncBufRead + Unpin>(
+        &self,
+        paste: &mut R,
+    ) -> Result<String, Box<dyn Error>> {
+        let callback = self.callback_code();
+        tokio::pin!(callback);
+        let mut eof = false;
+
+        loop {
+            if eof {
+                return callback.as_mut().await;
+            }
+
+            let mut line = String::new();
+            tokio::select! {
+                code = &mut callback => return code,
+                read = paste.read_line(&mut line) => match read {
+                    Ok(0) | Err(_) => eof = true,
+                    Ok(_) if line.trim().is_empty() => {}
+                    Ok(_) => return Ok(line.trim().to_string()),
+                }
+            }
+        }
+    }
+
+    pub fn login_timed_out() -> Box<dyn Error> {
+        format!(
+            "Timed out after {} seconds waiting for the browser to finish signing in.",
+            LOGIN_TIMEOUT.as_secs()
+        )
+        .into()
+    }
+
+    pub async fn callback_code(&self) -> Result<String, Box<dyn Error>> {
         loop {
             let (mut stream, _) = self.listener.accept().await?;
             let Some(target) = Self::read_target(&mut stream).await else {
