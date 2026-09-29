@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    auth::{OAuthResponse, now_epoch, random_token},
+    auth_client::{OAuthResponse, now_epoch, random_token},
     auth_handle::TokenError,
     auth_spec::OAuthSpec,
     dirs::Dirs,
@@ -205,7 +205,12 @@ impl OAuthFileRequester {
     }
 
     async fn post_token(&self, form: &[(&str, &str)]) -> Result<OAuthResponse, Box<dyn Error>> {
-        let response = self.http.post(self.spec.token_url).form(&form).send().await?;
+        let response = self
+            .http
+            .post(self.spec.token_url)
+            .form(&form)
+            .send()
+            .await?;
         let status = response.status();
         let body = response.text().await?;
 

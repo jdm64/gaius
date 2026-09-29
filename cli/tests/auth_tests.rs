@@ -1,6 +1,6 @@
 use base64::Engine;
 use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
-use gaius::auth::*;
+use gaius::auth_client::*;
 use gaius::auth_file::{OAuthFile, OAuthFileRequester};
 use gaius::auth_handle::*;
 use gaius::auth_spec::{CODEX, GROK, Nonce, OAuthKind, OAuthSpec, OPENAI_CLAIMS, Redirect};

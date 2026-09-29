@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    auth::{self, random_token},
+    auth_client::{self, random_token},
     auth_file::OAuthFile,
     dirs::Dirs,
 };
@@ -111,7 +111,7 @@ impl OAuthSpec {
             return Ok(previous.and_then(|token| token.account_id.clone()));
         };
 
-        let account_id = auth::decode_jwt(id_token)
+        let account_id = auth_client::decode_jwt(id_token)
             .and_then(|claims| {
                 claims
                     .get(namespace)
@@ -131,7 +131,7 @@ impl OAuthSpec {
     }
 
     pub fn check_nonce(&self, id_token: &str, nonce: &str) -> Result<(), Box<dyn Error>> {
-        let returned = auth::decode_jwt(id_token)
+        let returned = auth_client::decode_jwt(id_token)
             .and_then(|claims| claims.get("nonce")?.as_str().map(String::from));
         if returned.as_deref() != Some(nonce) {
             return Err(format!("{} id token was not issued for this login", self.display).into());

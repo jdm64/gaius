@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    auth::OAuthClient,
+    auth_client::OAuthClient,
     auth_file::{OAuthFile, OAuthFileRequester},
     auth_spec::{OAuthKind, OAuthSpec},
 };

@@ -3,7 +3,7 @@
  */
 
 pub mod agents;
-pub mod auth;
+pub mod auth_client;
 pub mod auth_file;
 pub mod auth_handle;
 pub mod auth_spec;
