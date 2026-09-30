@@ -77,6 +77,15 @@ impl ProviderDef {
         }
     }
 
+    pub fn needs_refresh(&self) -> bool {
+        match self {
+            ProviderDef::Codex { auth, .. } | ProviderDef::Grok { auth, .. } => {
+                auth.token().is_some_and(|token| token.needs_refresh())
+            }
+            ProviderDef::ApiKey { .. } => false,
+        }
+    }
+
     pub fn kind_str(&self) -> &str {
         match self {
             ProviderDef::ApiKey { kind, .. } => kind,

@@ -7,10 +7,15 @@ use genai::{
     Client, Headers,
     chat::{ChatOptions, ChatRequest, ChatResponse, ChatStreamResponse},
 };
-use std::{error::Error, fs, path::PathBuf, sync::OnceLock};
+use std::{
+    error::Error,
+    fs,
+    path::PathBuf,
+    sync::{Mutex, OnceLock},
+};
 
 pub struct LLMClient {
-    client: Client,
+    client: Mutex<Client>,
     model: ModelDef,
     agent: AgentDefinition,
     agents_md: Option<String>,
@@ -19,7 +24,7 @@ pub struct LLMClient {
 impl LLMClient {
     pub fn new(agent: AgentDefinition) -> Self {
         Self {
-            client: Client::default(),
+            client: Mutex::new(Client::default()),
             model: ModelDef::default(),
             agent,
             agents_md: read_agents_md(),
@@ -31,7 +36,7 @@ impl LLMClient {
     }
 
     pub async fn set_model(&mut self, model: ModelDef) -> Result<(), Box<dyn Error>> {
-        self.client = model.create_client().await?;
+        *self.client.lock().unwrap() = model.create_client().await?;
         self.model = model;
         Ok(())
     }
@@ -98,10 +103,19 @@ impl LLMClient {
         }
     }
 
+    async fn refresh_client(&self) -> Result<(), Box<dyn Error>> {
+        if self.model.provider.needs_refresh() {
+            let client = self.model.create_client().await?;
+            *self.client.lock().unwrap() = client;
+        }
+        Ok(())
+    }
+
     pub async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, Box<dyn Error>> {
+        self.refresh_client().await?;
         let chat_options = self.get_chat_opts();
-        let response = self
-            .client
+        let client = self.client.lock().unwrap().clone();
+        let response = client
             .exec_chat(&self.model.id, request, Some(&chat_options))
             .await?;
         Ok(response)
@@ -111,9 +125,10 @@ impl LLMClient {
         &self,
         request: ChatRequest,
     ) -> Result<ChatStreamResponse, Box<dyn Error>> {
+        self.refresh_client().await?;
         let chat_options = self.get_chat_opts();
-        let response = self
-            .client
+        let client = self.client.lock().unwrap().clone();
+        let response = client
             .exec_chat_stream(&self.model.id, request, Some(&chat_options))
             .await?;
         Ok(response)
