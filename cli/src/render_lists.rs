@@ -251,43 +251,16 @@ impl Render {
         info: &SessionInfo,
     ) -> Option<Vec<(&'static str, &'static str)>> {
         let id = info.id.as_deref().unwrap_or("No session");
-        let ctx_toks = info
-            .usage
-            .context_tokens
-            .map_or("N/A".to_string(), |t: i32| t.to_string());
-        let in_toks = info
-            .usage
-            .session_input
-            .map_or("N/A".to_string(), |t: i32| t.to_string());
-        let out_toks = info
-            .usage
-            .session_output
-            .map_or("N/A".to_string(), |t: i32| t.to_string());
-        let ses_turns = info
-            .usage
-            .session_turns
-            .map_or("N/A".to_string(), |t: i32| t.to_string());
-        let ctx_turns = info
-            .usage
-            .context_turns
-            .map_or("N/A".to_string(), |t: i32| t.to_string());
+        let ctx_toks = fmt_token_count(info.usage.context_tokens);
+        let in_toks = fmt_token_count(info.usage.session_input);
+        let out_toks = fmt_token_count(info.usage.session_output);
+        let ses_turns = fmt_optional(info.usage.session_turns, |t| t.to_string());
+        let ctx_turns = fmt_optional(info.usage.context_turns, |t| t.to_string());
 
-        let cost_in = info
-            .usage
-            .cost_in
-            .map_or("N/A".to_string(), |c| format!("${:.6}", c));
-        let cost_read = info
-            .usage
-            .cost_read
-            .map_or("N/A".to_string(), |c| format!("${:.6}", c));
-        let cost_out = info
-            .usage
-            .cost_out
-            .map_or("N/A".to_string(), |c| format!("${:.6}", c));
-        let total_cost = info
-            .usage
-            .total_cost()
-            .map_or("N/A".to_string(), |c| format!("${:.6}", c));
+        let cost_in = fmt_optional(info.usage.cost_in, |c| format!("${:.6}", c));
+        let cost_read = fmt_optional(info.usage.cost_read, |c| format!("${:.6}", c));
+        let cost_out = fmt_optional(info.usage.cost_out, |c| format!("${:.6}", c));
+        let total_cost = fmt_optional(info.usage.total_cost(), |c| format!("${:.6}", c));
 
         let lines = vec![
             Line::from(vec![Span::raw("            ID: "), Span::raw(id)]),
@@ -496,4 +469,28 @@ impl Render {
 
         has_before && has_after
     }
+}
+
+fn fmt_optional<T>(value: Option<T>, format: impl FnOnce(T) -> String) -> String {
+    value.map_or_else(|| "N/A".to_string(), format)
+}
+
+fn fmt_token_count(value: Option<i32>) -> String {
+    value.map_or_else(
+        || "N/A".to_string(),
+        |count| {
+            let digits = count.unsigned_abs().to_string();
+            let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
+            if count < 0 {
+                formatted.push('-');
+            }
+            for (index, digit) in digits.chars().enumerate() {
+                if index > 0 && (digits.len() - index) % 3 == 0 {
+                    formatted.push('_');
+                }
+                formatted.push(digit);
+            }
+            formatted
+        },
+    )
 }
