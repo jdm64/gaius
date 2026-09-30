@@ -29,6 +29,7 @@ pub struct Commands {}
 impl Commands {
     pub fn commands() -> Vec<Command> {
         vec![
+            /* Common */
             Command {
                 name: "new",
                 description: "Clear history and create a new session",
@@ -42,6 +43,11 @@ impl Commands {
                 description: "List and select models",
             },
             Command {
+                name: "reasoning",
+                description: "Set reasoning effort level",
+            },
+            /* Prompt */
+            Command {
                 name: "agents",
                 description: "List and select agents",
             },
@@ -54,8 +60,13 @@ impl Commands {
                 description: "Toggle plan mode on/off",
             },
             Command {
-                name: "reasoning",
-                description: "Set reasoning effort level",
+                name: "rebuild",
+                description: "Reload agents, skills, and AGENTS.md",
+            },
+            /* Session */
+            Command {
+                name: "compact",
+                description: "Compact conversation history into summary",
             },
             Command {
                 name: "fork",
@@ -65,20 +76,9 @@ impl Commands {
                 name: "info",
                 description: "Show session info",
             },
+            /* Display */
             Command {
-                name: "rebuild",
-                description: "Reload agents, skills, and AGENTS.md",
-            },
-            Command {
-                name: "compact",
-                description: "Compact conversation history into summary",
-            },
-            Command {
-                name: "streaming",
-                description: "Toggle streaming mode",
-            },
-            Command {
-                name: "thinking",
+                name: "show-thinking",
                 description: "Toggle rendering of thinking messages",
             },
             Command {
@@ -88,6 +88,10 @@ impl Commands {
             Command {
                 name: "show-diff",
                 description: "Toggle rendering of diff messages",
+            },
+            Command {
+                name: "streaming",
+                description: "Toggle streaming mode",
             },
         ]
     }
