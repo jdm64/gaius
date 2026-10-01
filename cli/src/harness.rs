@@ -356,7 +356,7 @@ impl Harness {
         &mut self,
         request: UserRequest,
         mut on_event: F,
-    ) -> Result<(), Box<dyn std::error::Error>>
+    ) -> Result<(), Box<dyn Error>>
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
@@ -365,40 +365,7 @@ impl Harness {
 
         match request {
             UserRequest::Prompt(text) => self.send_user_message(text, &mut on_event),
-            UserRequest::Skill(name) => {
-                let skill_command = format!("/skill {}", name);
-                self.send_user_message(skill_command, &mut on_event);
-
-                let tc = ToolCall {
-                    call_id: Uuid::new_v4().to_string(),
-                    fn_name: "skill".to_string(),
-                    fn_arguments: json!({ "name": name }),
-                    thought_signatures: None,
-                };
-                let assistant_content = MessageContent::from_tool_calls(vec![tc.clone()]);
-                self.history
-                    .messages
-                    .push(ChatMessage::assistant(assistant_content.clone()));
-
-                if let Some(text) = assistant_content.joined_texts() {
-                    on_event(HarnessEvent::AgentMessage(text));
-                }
-
-                self.send_tool_call_event(&tc, &mut on_event);
-
-                let result = self.tool_engine.load_skill(&name);
-                match result {
-                    ToolResult::Text(text) => {
-                        self.send_tool_result_event(&tc, text, false, &mut on_event)
-                    }
-                    ToolResult::Error(err) => {
-                        self.send_tool_result_event(&tc, err, true, &mut on_event)
-                    }
-                    _ => {
-                        return Err("Tool engine failed to run skill".into());
-                    }
-                }
-            }
+            UserRequest::Skill(name) => self.send_skill_message(name, &mut on_event)?,
         }
 
         loop {
@@ -694,6 +661,42 @@ impl Harness {
                 }
             }
         }
+    }
+
+    fn send_skill_message<F>(&mut self, name: String, mut on_event: F) -> Result<(), Box<dyn Error>>
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        let skill_command = format!("/skill {}", name);
+        self.send_user_message(skill_command, &mut on_event);
+
+        let tc = ToolCall {
+            call_id: Uuid::new_v4().to_string(),
+            fn_name: "skill".to_string(),
+            fn_arguments: json!({ "name": name }),
+            thought_signatures: None,
+        };
+        let assistant_content = MessageContent::from_tool_calls(vec![tc.clone()]);
+        self.history
+            .messages
+            .push(ChatMessage::assistant(assistant_content.clone()));
+
+        if let Some(text) = assistant_content.joined_texts() {
+            on_event(HarnessEvent::AgentMessage(text));
+        }
+
+        self.send_tool_call_event(&tc, &mut on_event);
+
+        let result = self.tool_engine.load_skill(&name);
+        match result {
+            ToolResult::Text(text) => self.send_tool_result_event(&tc, text, false, &mut on_event),
+            ToolResult::Error(err) => self.send_tool_result_event(&tc, err, true, &mut on_event),
+            _ => {
+                return Err("Tool engine failed to run skill".into());
+            }
+        }
+
+        Ok(())
     }
 
     pub fn send_user_message<F>(&mut self, message: String, on_event: &mut F)
