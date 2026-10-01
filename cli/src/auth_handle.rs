@@ -162,6 +162,11 @@ impl OAuthHandle {
         Ok(())
     }
 
+    pub async fn refresh_now(&self) -> Result<(), Box<dyn Error>> {
+        let _guard = self.login_lock.lock().await;
+        self.exchange_token().await
+    }
+
     pub async fn refresh(&self) -> Result<(), Box<dyn Error>> {
         let _guard = self.login_lock.lock().await;
         let current = self.token().ok_or_else(|| self.spec.not_logged_in())?;
@@ -169,6 +174,11 @@ impl OAuthHandle {
             return Ok(());
         }
 
+        self.exchange_token().await
+    }
+
+    async fn exchange_token(&self) -> Result<(), Box<dyn Error>> {
+        let current = self.token().ok_or_else(|| self.spec.not_logged_in())?;
         let client = OAuthFileRequester::new(self.spec)?;
         let token = match client.refresh_token(&current).await {
             Ok(token) => token,

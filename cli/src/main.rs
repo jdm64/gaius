@@ -18,6 +18,7 @@ struct Args {
     prompt: Option<String>,
     session_id: Option<String>,
     login: Option<String>,
+    token_refresh: Option<String>,
 }
 
 fn parse_args() -> Result<Args, Box<dyn Error>> {
@@ -40,18 +41,21 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
     })?;
     let session_id = pargs.opt_value_from_str("--session")?;
     let login = pargs.opt_value_from_str("--login")?;
+    let token_refresh = pargs.opt_value_from_str("--token-refresh")?;
 
-    let specified_modes = [
-        cli_mode,
-        prompt_mode,
-        prompt_file.is_some(),
-        login.is_some(),
+    let specified_modes: Vec<&str> = [
+        ("--cli", cli_mode),
+        ("--prompt", prompt_mode),
+        ("--prompt-file", prompt_file.is_some()),
+        ("--login", login.is_some()),
+        ("--token-refresh", token_refresh.is_some()),
     ]
-    .iter()
-    .filter(|&&specified| specified)
-    .count();
-    if specified_modes > 1 {
-        return Err("--cli, --prompt, --prompt-file and --login are mutually exclusive".into());
+    .into_iter()
+    .filter_map(|(flag, specified)| specified.then_some(flag))
+    .collect();
+
+    if specified_modes.len() > 1 {
+        return Err(format!("{} are mutually exclusive", specified_modes.join(", ")).into());
     }
 
     let prompt = if prompt_mode {
@@ -72,6 +76,7 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
         prompt,
         session_id,
         login,
+        token_refresh,
     })
 }
 
@@ -79,7 +84,7 @@ fn print_help() {
     println!("gaius - LLM agent harness");
     println!();
     println!("USAGE:");
-    println!("  gaius [OPTIONS]");
+    println!("  gaius [OPTIONS | COMMANDS | INFO]");
     println!();
     println!("OPTIONS:");
     println!("  --cli                 Enter simple interactive mode");
@@ -88,27 +93,40 @@ fn print_help() {
     println!();
     println!("  --session <ID>        Load and continue a saved session");
     println!();
-    println!("  --login <PROVIDER>    Log in to a provider and exit");
+    println!("COMMANDS:");
+    println!("  --login <PROVIDER>          Log in to a provider and exit");
+    println!("  --token-refresh <PROVIDER>  Force refresh the saved token and exit");
     println!(
-        "                        (supported: {})",
+        "                              (supported: {})",
         OAuthKind::names()
     );
     println!();
-    println!("  -V, --version         Print version information");
-    println!("  -h, --help            Show this help message");
+    println!("INFO:");
+    println!("  -V, --version  Print version information");
+    println!("  -h, --help     Show this help message");
 }
 
-async fn login(provider: &str) -> Result<(), Box<dyn Error>> {
-    let Some(kind) = OAuthKind::from_lower_str(provider) else {
-        return Err(format!(
-            "Unknown provider '{}' to log in to. Supported: {}",
+fn provider_kind(what: &str, provider: &str) -> Result<OAuthKind, Box<dyn Error>> {
+    OAuthKind::from_lower_str(provider).ok_or_else(|| {
+        format!(
+            "Unknown provider '{}' to {what}. Supported: {}",
             provider,
             OAuthKind::names()
         )
-        .into());
-    };
+        .into()
+    })
+}
 
+async fn login(provider: &str) -> Result<(), Box<dyn Error>> {
+    let kind = provider_kind("log in to", provider)?;
     OAuthHandle::get(kind)?.login().await
+}
+
+async fn token_refresh(provider: &str) -> Result<(), Box<dyn Error>> {
+    let kind = provider_kind("refresh", provider)?;
+    OAuthHandle::get(kind)?.refresh_now().await?;
+    println!("Refreshed the {} token.", kind.spec().display);
+    Ok(())
 }
 
 #[tokio::main]
@@ -117,6 +135,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if let Some(provider) = args.login.as_deref() {
         return login(provider).await;
+    } else if let Some(provider) = args.token_refresh.as_deref() {
+        return token_refresh(provider).await;
     }
 
     let mut config = Config::new();

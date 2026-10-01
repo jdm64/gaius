@@ -662,6 +662,100 @@ async fn refresh_without_login_points_at_login_command() {
     assert!(err.contains("--login codex"), "{}", err);
 }
 
+/// An auth holding a token that is still valid, wired to `endpoint` and to a
+/// token file nothing else uses.
+fn valid_auth(id: &'static str, endpoint: String) -> OAuthHandle {
+    let endpoint: &'static str = Box::leak(endpoint.into_boxed_str());
+    let mut token = token_with_exp(expires_in(3600));
+    token.access_token = "stored-access".to_string();
+    token.refresh_token = "stored-refresh".to_string();
+    token.account_id = Some("acct-1".to_string());
+    let spec = leak_codex_spec(id, endpoint);
+    OAuthHandle::at(spec, Some(token))
+}
+
+#[tokio::test]
+async fn refresh_leaves_a_valid_token_alone() {
+    let (endpoint, exchanges) = token_endpoint(
+        "200 OK",
+        r#"{"access_token":"new-access","refresh_token":"new-refresh"}"#,
+    )
+    .await;
+    let auth = valid_auth("test-refresh-skips", endpoint);
+
+    auth.refresh().await.unwrap();
+
+    assert!(
+        exchanges.lock().await.is_empty(),
+        "a valid token should not be exchanged"
+    );
+    assert_eq!(auth.token().unwrap().access_token, "stored-access");
+}
+
+/// The whole point of the command: get a new access token whether or not the
+/// stored one has expired.
+#[tokio::test]
+async fn refresh_now_exchanges_a_token_that_is_still_valid() {
+    let (endpoint, exchanges) = token_endpoint(
+        "200 OK",
+        r#"{"access_token":"new-access","refresh_token":"new-refresh"}"#,
+    )
+    .await;
+    let auth = valid_auth("test-refresh-now", endpoint);
+    let path = Dirs::auth_file(auth.spec().id).unwrap();
+    auth.token().map(|t| t.save_to(path.clone()));
+
+    assert!(!auth.token().unwrap().needs_refresh());
+    auth.refresh_now().await.unwrap();
+
+    assert_eq!(1, exchanges.lock().await.len(), "should exchange once");
+    let token = auth.token().expect("token");
+    assert_eq!(token.access_token, "new-access");
+    assert_eq!(
+        load_token_from(&CODEX, &path)
+            .unwrap()
+            .map(|t| t.access_token),
+        Some("new-access".to_string())
+    );
+
+    OAuthFile::delete(auth.spec().id).ok();
+}
+
+#[tokio::test]
+async fn refresh_now_without_login_points_at_login_command() {
+    let auth = OAuthHandle::at(&CODEX, None);
+    let err = auth.refresh_now().await.unwrap_err().to_string();
+
+    assert!(err.contains("--login codex"), "{}", err);
+}
+
+/// Forcing is a request the user asked for, so a refusal still drops the spent
+/// credentials rather than leaving a token that cannot be used.
+#[tokio::test]
+async fn a_refused_forced_refresh_drops_the_credentials() {
+    let (endpoint, _) = token_endpoint(
+        "400 Bad Request",
+        r#"{"error":"invalid_grant","error_description":"refresh token expired"}"#,
+    )
+    .await;
+    let auth = valid_auth("test-refresh-now-refused", endpoint);
+    let path = Dirs::auth_file(auth.spec().id).unwrap();
+    auth.token().map(|t| t.save_to(path.clone()));
+
+    assert!(auth.refresh_now().await.is_err());
+    assert!(
+        !auth.is_logged_in(),
+        "a refused grant should log the user out"
+    );
+    assert!(
+        !path.exists(),
+        "{} should have been removed",
+        path.display()
+    );
+
+    OAuthFile::delete(auth.spec().id).ok();
+}
+
 #[test]
 fn only_a_refusal_of_the_credentials_counts_as_permanent() {
     let error = |status, code: Option<&str>| TokenError {
