@@ -82,20 +82,20 @@ fn print_help() {
     println!("  gaius [OPTIONS]");
     println!();
     println!("OPTIONS:");
-    println!("  --cli                   Enter simple interactive mode");
-    println!("  --prompt \"<PROMPT>\"     Run one prompt from quoted argument and exit");
-    println!("  --prompt-file <PATH>    Run one prompt read from file and exit");
+    println!("  --cli                 Enter simple interactive mode");
+    println!("  --prompt \"<PROMPT>\"   Run one prompt from quoted argument and exit");
+    println!("  --prompt-file <PATH>  Run one prompt read from file and exit");
     println!();
-    println!("  --session <ID>          Load and continue a saved session");
+    println!("  --session <ID>        Load and continue a saved session");
     println!();
-    println!("  --login <PROVIDER>      Log in to a provider and exit");
+    println!("  --login <PROVIDER>    Log in to a provider and exit");
     println!(
         "                        (supported: {})",
         OAuthKind::names()
     );
     println!();
-    println!("  -V, --version           Print version information");
-    println!("  -h, --help              Show this help message");
+    println!("  -V, --version         Print version information");
+    println!("  -h, --help            Show this help message");
 }
 
 async fn login(provider: &str) -> Result<(), Box<dyn Error>> {
