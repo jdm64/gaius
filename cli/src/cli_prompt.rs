@@ -173,6 +173,7 @@ impl CliPrompt {
                     Self::get_input("answer> ").ok()
                 }
                 HarnessEvent::TurnStarted(_) => None,
+                HarnessEvent::QueueChanged(_) => None,
                 HarnessEvent::TurnDuration(duration_ms) => {
                     let time = RenderUtil::format_duration(duration_ms);
                     println!("timing> {}", time);

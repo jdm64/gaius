@@ -39,6 +39,11 @@ impl Render {
             }
         }
 
+        if app.snapshot.queued_prompts > 0 {
+            let queued = format!(" {} queued ", app.snapshot.queued_prompts);
+            block = block.title_bottom(Line::from(queued).left_aligned());
+        }
+
         if let Some(turn_started) = app.snapshot.turn_started {
             let elapsed = time_now().saturating_sub(turn_started);
             let time_title = format!(" {} ", RenderUtil::format_duration(elapsed));

@@ -13,7 +13,7 @@ use std::{io::Error, thread};
 use tokio::{
     runtime::Builder,
     sync::{
-        mpsc,
+        mpsc::{self, Receiver, UnboundedSender},
         oneshot::{self, error::RecvError},
     },
 };
@@ -297,12 +297,13 @@ impl HarnessActorHandle {
 
 async fn run_turn(
     harness: &mut Harness,
-    command_rx: &mut mpsc::Receiver<HarnessCommand>,
-    event_tx: &mpsc::UnboundedSender<HarnessActorEvent>,
+    command_rx: &mut Receiver<HarnessCommand>,
+    event_tx: &UnboundedSender<HarnessActorEvent>,
     request: UserRequest,
 ) -> Result<(), String> {
     let info_ref = harness.session_info();
     let cancel_flag = harness.cancel_handle();
+    let prompt_queue = harness.prompt_queue();
 
     let on_event = {
         let event_tx = event_tx.clone();
@@ -339,6 +340,9 @@ async fn run_turn(
                     Some(HarnessCommand::Info { reply_tx }) => {
                         let _ = reply_tx.send(Ok(info_ref.lock().unwrap().clone()));
                     }
+                    Some(HarnessCommand::RunPrompt(prompt)) => {
+                        prompt_queue.push(prompt, event_tx);
+                    }
                     Some(_) => {}
                     None => break Err("Actor channel closed".into()),
                 }
@@ -368,6 +372,7 @@ async fn run_compaction(
 ) -> Result<(), String> {
     let info_ref = harness.session_info();
     let cancel_flag = harness.cancel_handle();
+    let prompt_queue = harness.prompt_queue();
     let event_tx_for_callback = event_tx.clone();
     let mut on_event = move |event: HarnessEvent| -> Option<String> {
         let _ = event_tx_for_callback.send(HarnessActorEvent::Harness(event));
@@ -382,6 +387,9 @@ async fn run_compaction(
                 Some(HarnessCommand::Cancel) => cancel_flag.cancel(),
                 Some(HarnessCommand::Info { reply_tx }) => {
                     let _ = reply_tx.send(Ok(info_ref.lock().unwrap().clone()));
+                }
+                Some(HarnessCommand::RunPrompt(prompt)) => {
+                    prompt_queue.push(prompt, event_tx);
                 }
                 Some(_) => {}
                 None => break Err("Actor channel closed".into()),

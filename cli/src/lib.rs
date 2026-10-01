@@ -21,6 +21,7 @@ pub mod history_replay;
 pub mod input;
 pub mod models;
 pub mod plan_hook;
+pub mod prompt_queue;
 pub mod providers;
 pub mod rate_limit;
 pub mod render;

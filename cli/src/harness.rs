@@ -11,6 +11,7 @@ use crate::{
     history_replay,
     models::ModelDef,
     plan_hook::PlanHook,
+    prompt_queue::PromptQueue,
     rate_limit::is_rate_limit_error,
     render_util::RenderUtil,
     session::Session,
@@ -72,6 +73,7 @@ pub enum HarnessEvent {
     },
     TurnStarted(u64),
     TurnDuration(u64),
+    QueueChanged(usize),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -84,6 +86,7 @@ pub struct HarnessSnapshot {
     pub plan_mode_on: bool,
     pub total_cost: Option<f64>,
     pub turn_started: Option<u64>,
+    pub queued_prompts: usize,
 }
 
 pub struct Harness {
@@ -98,6 +101,7 @@ pub struct Harness {
     last_plan_content: Option<String>,
     plan_mode: bool,
     turn_start: Option<u64>,
+    prompt_queue: PromptQueue,
 }
 
 impl Harness {
@@ -145,6 +149,7 @@ impl Harness {
             plan_mode: false,
             live_info,
             turn_start: None,
+            prompt_queue: PromptQueue::new(),
         };
 
         harness.build_sys_prompt();
@@ -203,6 +208,10 @@ impl Harness {
 
     pub fn cancel_handle(&self) -> CancelHandle {
         self.cancel.clone()
+    }
+
+    pub fn prompt_queue(&self) -> PromptQueue {
+        self.prompt_queue.clone()
     }
 
     pub async fn set_model(&mut self, model: ModelDef) -> Result<(), Box<dyn Error>> {
@@ -296,6 +305,7 @@ impl Harness {
             plan_mode_on: self.plan_mode,
             total_cost: self.token_usage.usage().total_cost(),
             turn_started: self.turn_start,
+            queued_prompts: self.prompt_queue.len(),
         }
     }
 
@@ -319,32 +329,61 @@ impl Harness {
         self.set_cancel(false);
         self.update_session_info();
 
-        match Compact::compact_now(self, on_event).await? {
+        let outcome = match Compact::compact_now(self, on_event).await {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                self.drop_queued_prompts(on_event);
+                return Err(err);
+            }
+        };
+
+        match outcome {
             CompactOutcome::NothingToCompact => {
                 self.send_system_message("Nothing to compact".to_string(), on_event);
             }
             CompactOutcome::Cancelled => {
                 self.send_system_message("Compaction cancelled".to_string(), on_event);
+                self.drop_queued_prompts(on_event);
             }
             // A failure already reported itself with a system message.
-            CompactOutcome::Compacted | CompactOutcome::Failed => {}
+            CompactOutcome::Failed => self.drop_queued_prompts(on_event),
+            CompactOutcome::Compacted => {}
         }
 
         Ok(())
+    }
+
+    fn drop_queued_prompts<F>(&self, on_event: &mut F)
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        let dropped = self.prompt_queue.clear();
+        if dropped > 0 {
+            on_event(HarnessEvent::QueueChanged(0));
+            let plural = if dropped == 1 { "" } else { "s" };
+            on_event(HarnessEvent::SystemMessage(format!(
+                "Dropped {dropped} queued prompt{plural}"
+            )));
+        }
     }
 
     pub async fn run_turn<F>(
         &mut self,
         request: UserRequest,
         mut on_event: F,
-    ) -> Result<(), Box<dyn std::error::Error>>
+    ) -> Result<(), Box<dyn Error>>
     where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
         let start = time_now();
         self.turn_start = Some(start);
         on_event(HarnessEvent::TurnStarted(start));
+
         let result = self.run_turn_with_events(request, &mut on_event).await;
+        if result.is_err() || self.is_cancel() {
+            self.drop_queued_prompts(&mut on_event);
+        }
+
         self.turn_start = None;
         let duration = time_now().saturating_sub(start);
         on_event(HarnessEvent::TurnDuration(duration));
@@ -374,6 +413,12 @@ impl Harness {
                 return Ok(());
             }
 
+            if let Some(prompt) = self.prompt_queue.pop() {
+                on_event(HarnessEvent::QueueChanged(self.prompt_queue.len()));
+                self.send_user_message(prompt, &mut on_event);
+                continue;
+            }
+
             // A cancelled compaction means the user wants out of the turn —
             // sending the request right after would ignore the cancel.
             if Compact::maybe_compact(self, &mut on_event).await? == CompactOutcome::Cancelled {
@@ -396,8 +441,10 @@ impl Harness {
             if stop_requested || tool_calls.is_empty() {
                 if self.is_cancel() {
                     self.send_system_message("Request Cancelled".to_string(), &mut on_event);
+                    return Ok(());
+                } else if self.prompt_queue.is_empty() {
+                    return Ok(());
                 }
-                return Ok(());
             }
         }
     }

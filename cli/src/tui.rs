@@ -118,7 +118,6 @@ pub struct TuiApp {
     pub history_layout: HistoryLayout,
     pub selection: Selection,
     pub actor_busy: bool,
-    pub queued_prompts: usize,
     pub question_answer_tx: Option<oneshot::Sender<String>>,
 }
 
@@ -155,7 +154,6 @@ impl TuiApp {
             history_layout: HistoryLayout::default(),
             selection: Selection::default(),
             actor_busy: false,
-            queued_prompts: 0,
             question_answer_tx: None,
         }
     }
@@ -191,10 +189,12 @@ impl TuiApp {
                         break;
                     };
 
-                    render_reason = if matches!(actor_event, HarnessActorEvent::Harness { .. }) {
-                        RenderReason::HarnessMsg
-                    } else {
-                        RenderReason::UserUI
+                    render_reason = match &actor_event {
+                        HarnessActorEvent::Harness(HarnessEvent::QueueChanged(_)) => {
+                            RenderReason::UserUI
+                        }
+                        HarnessActorEvent::Harness(_) => RenderReason::HarnessMsg,
+                        _ => RenderReason::UserUI,
                     };
 
                     if let Some(snapshot) = self.handle_actor_event(actor_event) {
@@ -313,15 +313,9 @@ impl TuiApp {
         Input::update_prompt_history(self, prompt.clone());
         Input::clear_input(self);
         Input::scroll_history_bottom(self);
-        self.queued_prompts += 1;
-        self.status = if self.actor_busy {
-            format!("Queued prompt ({} pending)", self.queued_prompts)
-        } else {
-            "Waiting for agent...".to_string()
-        };
+        self.status = "Waiting for agent...".to_string();
 
         if let Err(err) = actor.run_prompt(prompt).await {
-            self.queued_prompts = self.queued_prompts.saturating_sub(1);
             self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
             self.status = "Agent request failed".to_string();
         }
@@ -353,11 +347,7 @@ impl TuiApp {
                 self.actor_busy = false;
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
-                self.status = if self.queued_prompts > 0 {
-                    format!("Queued prompt ({} pending)", self.queued_prompts)
-                } else {
-                    "".to_string()
-                };
+                self.status = "".to_string();
                 Some(snapshot)
             }
             HarnessActorEvent::RequestFailed(err, snapshot) => {
@@ -453,7 +443,7 @@ impl TuiApp {
     }
 
     pub fn harness_idle(&self) -> bool {
-        !self.actor_busy && self.queued_prompts == 0
+        !self.actor_busy && self.snapshot.queued_prompts == 0
     }
 
     fn apply_harness_event(&mut self, event: HarnessEvent) {
@@ -521,12 +511,14 @@ impl TuiApp {
             HarnessEvent::AskUser { .. } => {}
             HarnessEvent::TurnStarted(turn_started) => {
                 self.actor_busy = true;
-                self.queued_prompts = self.queued_prompts.saturating_sub(1);
                 self.snapshot.turn_started = Some(turn_started);
                 self.status = "Waiting for agent...".to_string();
             }
             HarnessEvent::TurnDuration(duration_ms) => {
                 self.push_message(TuiMessage::TurnDuration(duration_ms));
+            }
+            HarnessEvent::QueueChanged(count) => {
+                self.snapshot.queued_prompts = count;
             }
         }
     }
@@ -642,6 +634,7 @@ impl TuiApp {
             HarnessEvent::TurnDuration(duration_ms) => {
                 self.push_message(TuiMessage::TurnDuration(duration_ms));
             }
+            HarnessEvent::QueueChanged(_) => {}
         });
     }
 

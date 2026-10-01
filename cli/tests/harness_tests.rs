@@ -3,8 +3,10 @@ use gaius::{
     compact::Compact,
     diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
     harness::{Harness, HarnessEvent},
+    harness_actor::HarnessActorEvent,
     history_replay,
     models::TokenPrice,
+    prompt_queue::PromptQueue,
     rate_limit::{is_rate_limit_error, is_webc_rate_limit},
     token_usage::{TokenUsageLedger, TokenUsageSpan},
 };
@@ -17,6 +19,15 @@ use genai::chat::{
 use genai::webc::Error as WebcError;
 use reqwest::{StatusCode, header::HeaderMap};
 use serde_json::json;
+use tokio::sync::mpsc::{self, UnboundedSender};
+
+/// `PromptQueue::push` reports `QueueChanged` to the actor over this channel.
+fn queue_channel() -> (
+    UnboundedSender<HarnessActorEvent>,
+    mpsc::UnboundedReceiver<HarnessActorEvent>,
+) {
+    mpsc::unbounded_channel()
+}
 
 fn basic_agent() -> AgentDefinition {
     AgentDefinition {
@@ -878,4 +889,77 @@ fn harness_record_usage_emits_event_and_updates_session_info() {
         Some(500)
     );
     assert_eq!(harness.snapshot().total_cost, None);
+}
+
+#[test]
+fn prompt_queue_runs_prompts_in_the_order_they_arrived() {
+    let queue = PromptQueue::new();
+    let (event_tx, mut events) = queue_channel();
+
+    queue.push("first".to_string(), &event_tx);
+    queue.push("second".to_string(), &event_tx);
+
+    assert_eq!(queue.len(), 2);
+    // every push reports the growing queue length to the actor
+    for expected in [1, 2] {
+        match events.try_recv().unwrap() {
+            HarnessActorEvent::Harness(HarnessEvent::QueueChanged(len)) => {
+                assert_eq!(len, expected);
+            }
+            other => panic!("expected QueueChanged({expected}), got {other:?}"),
+        }
+    }
+
+    // drain hands back every waiting prompt in arrival order
+    assert_eq!(queue.pop(), Some("first".to_string()));
+    assert_eq!(queue.pop(), Some("second".to_string()));
+    assert!(queue.is_empty());
+    assert_eq!(queue.pop(), None);
+}
+
+#[test]
+fn prompt_queue_clear_drops_every_waiting_prompt() {
+    let queue = PromptQueue::new();
+    let (event_tx, _events) = queue_channel();
+
+    queue.push("first".to_string(), &event_tx);
+    queue.push("second".to_string(), &event_tx);
+
+    assert_eq!(queue.clear(), 2);
+    assert!(queue.is_empty());
+    assert_eq!(queue.pop(), None);
+    assert_eq!(queue.clear(), 0);
+}
+
+#[test]
+fn harness_counts_prompts_waiting_to_be_sent() {
+    let harness = Harness::new_without_session(basic_agent()).unwrap();
+    let queue = harness.prompt_queue();
+    let (event_tx, _events) = queue_channel();
+
+    queue.push("first".to_string(), &event_tx);
+    queue.push("second".to_string(), &event_tx);
+
+    assert_eq!(queue.len(), 2);
+    assert_eq!(harness.snapshot().queued_prompts, 2);
+
+    queue.clear();
+
+    assert_eq!(queue.len(), 0);
+    assert_eq!(harness.snapshot().queued_prompts, 0);
+}
+
+// The actor has no `&mut` on the harness while a turn is running, so the prompt
+// it receives has to land in the same queue the turn drains.
+#[test]
+fn harness_prompt_queue_handle_shares_the_same_queue() {
+    let harness = Harness::new_without_session(basic_agent()).unwrap();
+    let queue = harness.prompt_queue();
+    let (event_tx, _events) = queue_channel();
+
+    queue.push("while busy".to_string(), &event_tx);
+
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue.pop(), Some("while busy".to_string()));
+    assert_eq!(queue.len(), 0);
 }
