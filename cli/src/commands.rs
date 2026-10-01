@@ -268,9 +268,9 @@ impl Commands {
                     app.status = "Compacting conversation...".to_string();
                     Input::scroll_history_bottom(app);
                     if let Err(err) = actor.compact().await {
-                        app.actor_busy = false;
                         app.status = err;
                     }
+                    app.actor_busy = false;
                 }
                 Input::clear_input(app);
                 InputMode::PromptInput
