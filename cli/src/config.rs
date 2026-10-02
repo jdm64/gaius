@@ -4,8 +4,8 @@
 
 use crate::{
     agents::{AgentDefinition, Agents},
-    auth_handle::OAuthHandle,
-    auth_spec::OAuthKind,
+    auth::handle::OAuthHandle,
+    auth::spec::OAuthKind,
     cli_prompt::CliPrompt,
     client::LLMClient,
     dirs::Dirs,

@@ -5,7 +5,7 @@
 use crate::{
     diff_view::DiffLineKind,
     harness::{Harness, HarnessEvent, HarnessSnapshot, UserRequest},
-    render_util::RenderUtil,
+    render::util::RenderUtil,
     token_usage::format_arrows,
 };
 use std::{

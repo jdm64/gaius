@@ -12,8 +12,8 @@ use crate::{
     harness_actor::{HarnessActorEvent, HarnessActorHandle},
     input::{Input, InputMode},
     render::Render,
-    render_history::DisplayPrefs,
-    render_layout::HistoryLayout,
+    render::history::DisplayPrefs,
+    render::layout::HistoryLayout,
     selection::Selection,
     token_usage::format_arrows,
 };

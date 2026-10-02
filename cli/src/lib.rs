@@ -3,10 +3,7 @@
  */
 
 pub mod agents;
-pub mod auth_client;
-pub mod auth_file;
-pub mod auth_handle;
-pub mod auth_spec;
+pub mod auth;
 pub mod cancel_handle;
 pub mod cli_prompt;
 pub mod client;
@@ -25,11 +22,6 @@ pub mod prompt_queue;
 pub mod providers;
 pub mod rate_limit;
 pub mod render;
-pub mod render_history;
-pub mod render_input;
-pub mod render_layout;
-pub mod render_lists;
-pub mod render_util;
 pub mod selection;
 pub mod session;
 pub mod skills;

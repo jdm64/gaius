@@ -3,9 +3,9 @@
  */
 
 use crate::{
-    auth_client::{OAuthResponse, now_epoch, random_token},
-    auth_handle::TokenError,
-    auth_spec::OAuthSpec,
+    auth::client::{OAuthResponse, now_epoch, random_token},
+    auth::handle::TokenError,
+    auth::spec::OAuthSpec,
     dirs::Dirs,
 };
 use serde::{Deserialize, Serialize};

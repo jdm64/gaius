@@ -2,7 +2,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{input::InputMode, render_util::USER_PROMPT_BAR, tui::TuiApp};
+pub mod history;
+pub mod input;
+pub mod layout;
+pub mod lists;
+pub mod util;
+
+use crate::{input::InputMode, render::util::USER_PROMPT_BAR, tui::TuiApp};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},

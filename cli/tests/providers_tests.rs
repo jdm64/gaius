@@ -1,6 +1,6 @@
-use gaius::auth_file::OAuthFile;
-use gaius::auth_handle::OAuthHandle;
-use gaius::auth_spec::{CODEX, GROK, OAuthSpec};
+use gaius::auth::file::OAuthFile;
+use gaius::auth::handle::OAuthHandle;
+use gaius::auth::spec::{CODEX, GROK, OAuthSpec};
 use gaius::config::ProviderConfig;
 use gaius::providers::ProviderDef;
 use genai::Headers;

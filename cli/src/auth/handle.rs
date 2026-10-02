@@ -3,9 +3,9 @@
  */
 
 use crate::{
-    auth_client::OAuthClient,
-    auth_file::{OAuthFile, OAuthFileRequester},
-    auth_spec::{OAuthKind, OAuthSpec},
+    auth::client::OAuthClient,
+    auth::file::{OAuthFile, OAuthFileRequester},
+    auth::spec::{OAuthKind, OAuthSpec},
 };
 use std::{
     error::Error,

@@ -1,5 +1,5 @@
 use gaius::{
-    auth_file::OAuthFile,
+    auth::file::OAuthFile,
     config::{Config, ProviderConfig},
     dirs::Dirs,
 };

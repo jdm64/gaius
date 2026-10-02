@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use gaius::auth_handle::OAuthHandle;
-use gaius::auth_spec::OAuthKind;
+use gaius::auth::handle::OAuthHandle;
+use gaius::auth::spec::OAuthKind;
 use gaius::cli_prompt::CliPrompt;
 use gaius::config::Config;
 use gaius::harness::Harness;

@@ -13,7 +13,7 @@ use crate::{
     plan_hook::PlanHook,
     prompt_queue::PromptQueue,
     rate_limit::is_rate_limit_error,
-    render_util::RenderUtil,
+    render::util::RenderUtil,
     session::Session,
     skills::{Skill, SkillRepo},
     token_usage::{SessionInfo, TokenUsageLedger},

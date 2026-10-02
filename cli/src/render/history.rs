@@ -5,8 +5,8 @@
 use crate::{
     diff_view::{DiffLineKind, DiffView},
     render::Render,
-    render_layout::LiveTimer,
-    render_util::{RenderUtil, USER_PROMPT_BAR},
+    render::layout::LiveTimer,
+    render::util::{RenderUtil, USER_PROMPT_BAR},
     selection::RowWrapInfo,
     tools::ToolName,
     tui::{TuiApp, TuiMessage},

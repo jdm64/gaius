@@ -10,7 +10,7 @@ use ratatui::{
 };
 use std::io::{self, Write};
 
-use crate::render_util::USER_PROMPT_BAR;
+use crate::render::util::USER_PROMPT_BAR;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct HistoryPoint {

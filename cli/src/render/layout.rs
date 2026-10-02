@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{render::ColorTheme, render_util::RenderUtil, selection::RowWrapInfo};
+use crate::{render::ColorTheme, render::util::RenderUtil, selection::RowWrapInfo};
 use ratatui::{style::Style, text::Line};
 
 /// A duration line whose text must be refreshed while an operation runs.

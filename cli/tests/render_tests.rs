@@ -1,8 +1,8 @@
 use gaius::config::Config;
 use gaius::diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView};
 use gaius::render::Render;
-use gaius::render_history::DisplayPrefs;
-use gaius::render_layout::HistoryLayout;
+use gaius::render::history::DisplayPrefs;
+use gaius::render::layout::HistoryLayout;
 use gaius::selection::{HistoryPoint, HistorySelection, RowWrapInfo, Selection};
 use gaius::tui::{TuiApp, TuiMessage};
 use ratatui::{

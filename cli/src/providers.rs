@@ -3,8 +3,8 @@
  */
 
 use crate::{
-    auth_handle::OAuthHandle,
-    auth_spec::OAuthKind,
+    auth::handle::OAuthHandle,
+    auth::spec::OAuthKind,
     config::ProviderConfig,
     models::{ModelDef, TokenPrice},
 };
