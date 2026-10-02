@@ -1,8 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use gaius::{
-    commands::{Commands, wrap},
+    commands::Commands,
     config::Config,
-    input::{InputMode, PickList, ProviderInfoRow},
+    input::{InputMode, PickList, ProviderInfoRow, wrap},
     tui::TuiApp,
 };
 

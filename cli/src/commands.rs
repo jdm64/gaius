@@ -16,7 +16,7 @@ use crate::{
     tui::{TuiApp, TuiMessage},
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
-use std::{error::Error, mem};
+use std::{error::Error, future::Future, mem};
 
 #[derive(Clone)]
 pub struct Command {
@@ -141,46 +141,32 @@ impl Commands {
     ) -> InputMode {
         match command {
             "new" => {
-                if !app.harness_idle() {
-                    app.status =
-                        "Agent is busy; finish current turn before creating a session".to_string();
-                } else {
-                    match actor.new_session().await {
-                        Ok(snapshot) => {
-                            app.save_snapshot(&snapshot);
-                            app.clear_messages();
-                            Input::scroll_history_bottom(app);
-                            app.status = "New session created".to_string();
-                            app.context_tokens = None;
-                        }
-                        Err(e) => {
-                            app.status = e;
-                        }
+                match when_idle(app, "creating a session", actor.new_session()).await {
+                    Ok(snapshot) => {
+                        app.save_snapshot(&snapshot);
+                        app.clear_messages();
+                        Input::scroll_history_bottom(app);
+                        app.status = "New session created".to_string();
+                        app.context_tokens = None;
                     }
-                };
+                    Err(e) => app.status = e,
+                }
                 Input::clear_input(app);
                 InputMode::PromptInput
             }
             "fork" => {
-                if !app.harness_idle() {
-                    app.status =
-                        "Agent is busy; finish current turn before forking a session".to_string();
-                } else {
-                    match actor.fork_session().await {
-                        Ok(snapshot) => {
-                            app.save_snapshot(&snapshot);
-                            app.push_message(TuiMessage::SystemMessage(format!(
-                                "Session forked: {}",
-                                snapshot.session_id.unwrap_or("<unknown>".to_string()),
-                            )));
-                            app.status = "Forked session".to_string();
-                            Input::scroll_history_bottom(app);
-                        }
-                        Err(e) => {
-                            app.status = e;
-                        }
+                match when_idle(app, "forking a session", actor.fork_session()).await {
+                    Ok(snapshot) => {
+                        app.save_snapshot(&snapshot);
+                        app.push_message(TuiMessage::SystemMessage(format!(
+                            "Session forked: {}",
+                            snapshot.session_id.unwrap_or("<unknown>".to_string()),
+                        )));
+                        app.status = "Forked session".to_string();
+                        Input::scroll_history_bottom(app);
                     }
-                };
+                    Err(e) => app.status = e,
+                }
                 Input::clear_input(app);
                 InputMode::PromptInput
             }
@@ -218,8 +204,8 @@ impl Commands {
                 }
             }
             "rebuild" => {
-                if !app.harness_idle() {
-                    app.status = "Agent is busy; finish current turn before rebuilding".to_string();
+                if let Some(busy) = busy_status(app, "rebuilding") {
+                    app.status = busy;
                 } else {
                     // Reload agents from disk
                     let agents = match Dirs::config_dir() {
@@ -261,8 +247,8 @@ impl Commands {
                 InputMode::PromptInput
             }
             "compact" => {
-                if !app.harness_idle() {
-                    app.status = "Agent is busy; finish current turn before compacting".to_string();
+                if let Some(busy) = busy_status(app, "compacting") {
+                    app.status = busy;
                 } else {
                     app.actor_busy = true;
                     app.status = "Compacting conversation...".to_string();
@@ -287,17 +273,12 @@ impl Commands {
                 }
             },
             "streaming" => {
-                if !app.harness_idle() {
-                    app.status =
-                        "Agent is busy; finish current turn before changing streaming".to_string();
-                } else {
-                    match actor.toggle_streaming().await {
-                        Ok(snapshot) => {
-                            app.save_snapshot(&snapshot);
-                            app.status = format!("Streaming = {}", snapshot.streaming);
-                        }
-                        Err(err) => app.status = err,
+                match when_idle(app, "changing streaming", actor.toggle_streaming()).await {
+                    Ok(snapshot) => {
+                        app.save_snapshot(&snapshot);
+                        app.status = format!("Streaming = {}", snapshot.streaming);
                     }
+                    Err(e) => app.status = e,
                 }
                 Input::clear_input(app);
                 InputMode::PromptInput
@@ -326,17 +307,12 @@ impl Commands {
                 InputMode::PromptInput
             }
             "plan" => {
-                if !app.harness_idle() {
-                    app.status =
-                        "Agent is busy; finish current turn before changing plan mode".to_string();
-                } else {
-                    match actor.toggle_plan_mode().await {
-                        Ok(snapshot) => {
-                            app.save_snapshot(&snapshot);
-                            app.status = format!("Plan mode = {}", snapshot.plan_mode_on);
-                        }
-                        Err(err) => app.status = err,
+                match when_idle(app, "changing plan mode", actor.toggle_plan_mode()).await {
+                    Ok(snapshot) => {
+                        app.save_snapshot(&snapshot);
+                        app.status = format!("Plan mode = {}", snapshot.plan_mode_on);
                     }
+                    Err(e) => app.status = e,
                 }
                 Input::clear_input(app);
                 InputMode::PromptInput
@@ -410,9 +386,8 @@ impl Commands {
                     return InputMode::Session { picker };
                 };
                 if let Some(session_id) = &session.id {
-                    if !app.harness_idle() {
-                        app.status = "Agent is busy; finish current turn before loading a session"
-                            .to_string();
+                    if let Some(busy) = busy_status(app, "loading a session") {
+                        app.status = busy;
                     } else {
                         match actor.load_session(session_id.clone()).await {
                             Ok(snapshot) => {
@@ -575,9 +550,8 @@ impl Commands {
                 picker.move_down();
             }
             KeyCode::Enter => {
-                if !app.harness_idle() {
-                    app.status =
-                        "Agent is busy; finish current turn before changing reasoning".to_string();
+                if let Some(busy) = busy_status(app, "changing reasoning") {
+                    app.status = busy;
                     return InputMode::Reasoning { picker };
                 }
                 let Some(selected) = picker.selected_row() else {
@@ -649,9 +623,8 @@ impl Commands {
                 picker.move_down();
             }
             KeyCode::Enter => {
-                if !app.harness_idle() {
-                    app.status =
-                        "Agent is busy; finish current turn before changing models".to_string();
+                if let Some(busy) = busy_status(app, "changing models") {
+                    app.status = busy;
                     return InputMode::Models { picker };
                 }
                 let Some(selected_model) = picker.selected_row().and_then(|row| match row {
@@ -837,10 +810,6 @@ impl Commands {
         }
     }
 
-    pub fn filtered_model_indices(input: &str, rows: &[ModelPickerRow]) -> Vec<usize> {
-        Input::filter_model_rows(input, rows)
-    }
-
     pub async fn handle_agents_mode(
         app: &mut TuiApp,
         key: event::KeyEvent,
@@ -866,9 +835,8 @@ impl Commands {
                     app.status = "No matching agents".to_string();
                     return InputMode::Agents { picker };
                 };
-                if !app.harness_idle() {
-                    app.status =
-                        "Agent is busy; finish current turn before changing agents".to_string();
+                if let Some(busy) = busy_status(app, "changing agents") {
+                    app.status = busy;
                     return InputMode::Agents { picker };
                 }
                 match actor.set_agent(selected_agent.clone()).await {
@@ -891,10 +859,6 @@ impl Commands {
         InputMode::Agents { picker }
     }
 
-    pub fn filtered_agent_indices(input: &str, agents: &[AgentDefinition]) -> Vec<usize> {
-        Input::filter_agents(input, agents)
-    }
-
     pub async fn handle_skills_mode(
         app: &mut TuiApp,
         key: event::KeyEvent,
@@ -915,9 +879,8 @@ impl Commands {
             }
             KeyCode::Enter if !picker.is_empty() => {
                 if let Some(skill) = picker.selected_row() {
-                    if !app.harness_idle() {
-                        app.status =
-                            "Agent is busy; finish current turn before running a skill".to_string();
+                    if let Some(busy) = busy_status(app, "running a skill") {
+                        app.status = busy;
                         return InputMode::Skills { picker };
                     }
                     match actor.run_skill(skill.name.clone()).await {
@@ -953,12 +916,18 @@ impl Commands {
     }
 }
 
-pub fn wrap(i: i32, n: usize) -> usize {
-    if n > 0 {
-        let m = n as i32;
-        ((i % m + m) % m) as usize
-    } else {
-        i as usize
+pub fn busy_status(app: &TuiApp, action: &str) -> Option<String> {
+    (!app.harness_idle()).then(|| format!("Agent is busy; finish current turn before {action}"))
+}
+
+pub async fn when_idle<T>(
+    app: &TuiApp,
+    action: &str,
+    fut: impl Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    match busy_status(app, action) {
+        Some(status) => Err(status),
+        None => fut.await,
     }
 }
 

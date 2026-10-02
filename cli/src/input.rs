@@ -66,11 +66,11 @@ impl<T> PickList<T> {
     }
 
     pub fn move_up(&mut self) {
-        self.selected = wrap_selection(self.selected as i32 - 1, self.filtered.len());
+        self.selected = wrap(self.selected as i32 - 1, self.filtered.len());
     }
 
     pub fn move_down(&mut self) {
-        self.selected = wrap_selection(self.selected as i32 + 1, self.filtered.len());
+        self.selected = wrap(self.selected as i32 + 1, self.filtered.len());
     }
 
     pub fn replace_filter(&mut self, filtered: Vec<usize>) {
@@ -567,7 +567,7 @@ impl Input {
     }
 }
 
-fn wrap_selection(i: i32, n: usize) -> usize {
+pub fn wrap(i: i32, n: usize) -> usize {
     if n > 0 {
         let m = n as i32;
         ((i % m + m) % m) as usize
