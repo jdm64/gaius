@@ -2,100 +2,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+pub mod agent;
+pub mod file;
+pub mod model;
+pub mod picklist;
+pub mod session;
+
 use crate::{
     agents::AgentDefinition,
-    commands::{Command, Commands, input_changed_key},
+    commands::Command,
     harness_actor::HarnessActorHandle,
+    input::{file::FileEntry, model::ProviderInfoRow, picklist::PickList},
     models::{ModelPickerRow, ReasoningEffort},
     session::Session,
     skills::Skill,
     token_usage::SessionInfo,
     tui::TuiApp,
 };
-use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers};
-use std::{error::Error, path::PathBuf};
-
-const MAX_HISTORY: usize = 16;
-
-fn char_pos_to_byte_index(input: &str, char_pos: usize) -> usize {
-    input
-        .char_indices()
-        .nth(char_pos)
-        .map(|(index, _)| index)
-        .unwrap_or(input.len())
-}
-
-pub struct PickList<T> {
-    pub selected: usize,
-    pub rows: Vec<T>,
-    pub filtered: Vec<usize>,
-}
-
-impl<T> PickList<T> {
-    pub fn new(rows: Vec<T>, filtered: Vec<usize>) -> Self {
-        let mut list = Self {
-            selected: 0,
-            rows,
-            filtered,
-        };
-        list.clamp_selected();
-        list
-    }
-
-    pub fn all(rows: Vec<T>) -> Self {
-        let filtered = (0..rows.len()).collect();
-        Self::new(rows, filtered)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.filtered.is_empty()
-    }
-
-    pub fn selected_row_index(&self) -> Option<usize> {
-        self.filtered.get(self.selected).copied()
-    }
-
-    pub fn selected_row(&self) -> Option<&T> {
-        self.selected_row_index()
-            .and_then(|index| self.rows.get(index))
-    }
-
-    pub fn selected_row_mut(&mut self) -> Option<&mut T> {
-        let index = self.selected_row_index()?;
-        self.rows.get_mut(index)
-    }
-
-    pub fn move_up(&mut self) {
-        self.selected = wrap(self.selected as i32 - 1, self.filtered.len());
-    }
-
-    pub fn move_down(&mut self) {
-        self.selected = wrap(self.selected as i32 + 1, self.filtered.len());
-    }
-
-    pub fn replace_filter(&mut self, filtered: Vec<usize>) {
-        self.filtered = filtered;
-        self.clamp_selected();
-    }
-
-    pub fn replace_rows(&mut self, rows: Vec<T>, filtered: Vec<usize>) {
-        self.rows = rows;
-        self.filtered = filtered;
-        self.clamp_selected();
-    }
-
-    pub fn clamp_selected(&mut self) {
-        self.selected = self.selected.min(self.filtered.len().saturating_sub(1));
-    }
-
-    pub fn visible_row_range(&self, max_visible: usize) -> (usize, usize) {
-        let visible = self.rows.len().clamp(1, max_visible);
-        let selected_row = self.selected_row_index().unwrap_or(0);
-        let start = selected_row.saturating_add(1).saturating_sub(visible);
-        let end = (start + visible).min(self.rows.len());
-        (start, end)
-    }
-}
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::error::Error;
+use std::mem;
 
 pub enum InputMode {
     Exit,
@@ -137,10 +63,207 @@ pub enum InputMode {
     },
 }
 
+impl InputMode {
+    pub async fn handle_mode(
+        app: &mut TuiApp,
+        key: KeyEvent,
+        actor: &HarnessActorHandle,
+    ) -> Result<(), Box<dyn Error>> {
+        let mode = mem::replace(&mut app.mode, Self::PromptInput);
+        app.mode = match mode {
+            Self::PromptInput => Self::handle_prompt_input(app, key, actor).await?,
+            Self::Command { picker } => Self::handle_command(app, key, picker, actor).await,
+            Self::Session { picker } => Self::handle_session(app, key, picker, actor).await,
+            Self::SessionRename { picker } => Self::handle_session_rename(app, key, picker),
+            Self::Models { picker } => Self::handle_models(app, key, picker, actor).await,
+            Self::AddProvider { picker } => Self::handle_provider_add(app, key, picker).await,
+            Self::Agents { picker } => Self::handle_agents(app, key, picker, actor).await,
+            Self::Files { picker } => Self::handle_files(app, key, picker).await,
+            Self::Skills { picker } => Self::handle_skills(app, key, picker, actor).await,
+            Self::Reasoning { picker } => Self::handle_reasoning(app, key, picker, actor).await,
+            Self::Question {
+                title: _,
+                options: _,
+                selected: _,
+            } => Self::PromptInput,
+            Self::SessionInfo { info } => Self::handle_session_info(key, info),
+            Self::Exit => Self::Exit,
+        };
+        Ok(())
+    }
+
+    pub async fn handle_prompt_input(
+        app: &mut TuiApp,
+        key: KeyEvent,
+        actor: &HarnessActorHandle,
+    ) -> Result<Self, Box<dyn Error>> {
+        Input::handle_input_cursor(app, key);
+        match key.code {
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.status = "Cancelling agent...".to_string();
+                actor.cancel().await?;
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Ok(Self::Exit);
+            }
+            KeyCode::Backspace | KeyCode::Delete => {
+                return Ok(Self::mode_for_input(app));
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Ok(Self::mode_for_input(app));
+            }
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Ok(Self::mode_for_input(app));
+            }
+            KeyCode::Up if app.input_cursor == 0 => {
+                let len = app.prompt_history.len();
+                if len > 0 {
+                    app.prompt_history_idx = match app.prompt_history_idx {
+                        None => Some(0),
+                        Some(i) if i + 1 < len => Some(i + 1),
+                        Some(i) => Some(i),
+                    };
+                    if let Some(idx) = app.prompt_history_idx {
+                        app.input = app.prompt_history[idx].clone();
+                    }
+                }
+                return Ok(Self::mode_for_input(app));
+            }
+            KeyCode::Down if app.input_cursor == 0 => {
+                app.prompt_history_idx = match app.prompt_history_idx {
+                    None => None,
+                    Some(0) => None,
+                    Some(i) => Some(i - 1),
+                };
+                if let Some(idx) = app.prompt_history_idx {
+                    app.input = app.prompt_history[idx].clone();
+                } else {
+                    Input::clear_input(app);
+                }
+                return Ok(Self::mode_for_input(app));
+            }
+            KeyCode::Tab => {
+                let agent = app.agents.next_agent(app.snapshot.agent_name.as_str());
+                let next_agent = agent.cloned();
+                if let Some(agent) = next_agent {
+                    if !app.harness_idle() {
+                        app.status =
+                            "Agent is busy; finish current turn before changing agents".to_string();
+                    } else {
+                        let name = agent.name.clone();
+                        match actor.set_agent(agent).await {
+                            Ok(snapshot) => {
+                                app.save_snapshot(&snapshot);
+                                app.snapshot.agent_name = name;
+                            }
+                            Err(err) => app.status = err,
+                        }
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                let prompt = app.input.trim().to_string();
+                if prompt.is_empty() {
+                    return Ok(Self::PromptInput);
+                }
+
+                if let Some(command) = prompt.trim().strip_prefix('/') {
+                    return Ok(Command::execute(app, actor, command).await);
+                }
+
+                app.queue_prompt(prompt, actor).await?;
+            }
+            KeyCode::Char(_) => {
+                return Ok(Self::mode_for_input(app));
+            }
+            _ => {}
+        };
+
+        Ok(Self::PromptInput)
+    }
+
+    pub async fn handle_command(
+        app: &mut TuiApp,
+        key: KeyEvent,
+        mut picker: PickList<Command>,
+        actor: &HarnessActorHandle,
+    ) -> InputMode {
+        Input::handle_input_cursor(app, key);
+        match key.code {
+            KeyCode::Esc => return InputMode::PromptInput,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return InputMode::Exit;
+            }
+            KeyCode::Up => {
+                picker.move_up();
+            }
+            KeyCode::Down => {
+                picker.move_down();
+            }
+            KeyCode::Enter if !picker.is_empty() => {
+                let command = picker.selected_row().map(|row| row.name);
+                if let Some(command) = command {
+                    return Command::execute(app, actor, command).await;
+                }
+            }
+            KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_) => {
+                picker.replace_filter(Command::filter_commands(&app.input, &picker.rows));
+                if picker.is_empty() {
+                    return InputMode::PromptInput;
+                }
+            }
+            _ => {}
+        }
+
+        InputMode::Command { picker }
+    }
+
+    pub fn command_mode_for_input(app: &TuiApp) -> Option<Self> {
+        let input = app.input.trim();
+
+        if let Some(query) = Self::get_file_query(&app.input, app.input_cursor) {
+            let files = Self::list_files();
+            let filtered = Self::filter_files(&query, &files);
+
+            return Some(Self::Files {
+                picker: PickList::new(files, filtered),
+            });
+        }
+
+        if input.starts_with('/') {
+            let commands = Command::list();
+            let filtered = Command::filter_commands(input, &commands);
+
+            if !filtered.is_empty() {
+                return Some(Self::Command {
+                    picker: PickList::new(commands, filtered),
+                });
+            }
+        }
+
+        None
+    }
+
+    pub fn mode_for_input(app: &TuiApp) -> Self {
+        Self::command_mode_for_input(app).unwrap_or(Self::PromptInput)
+    }
+
+    pub fn input_changed_key(key: KeyEvent) -> bool {
+        matches!(
+            key.code,
+            KeyCode::Backspace | KeyCode::Delete | KeyCode::Char('u') | KeyCode::Char('k')
+        ) && key.modifiers.contains(KeyModifiers::CONTROL)
+            || matches!(key.code, KeyCode::Backspace | KeyCode::Delete)
+            || matches!(key.code, KeyCode::Char(_))
+                && !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+    }
+}
+
 pub struct Input {}
 
 impl Input {
-    pub fn handle_input_cursor(app: &mut TuiApp, key: event::KeyEvent) {
+    pub fn handle_input_cursor(app: &mut TuiApp, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
                 Self::clear_input(app);
@@ -177,301 +300,6 @@ impl Input {
             }
             _ => {}
         }
-    }
-
-    pub async fn handle_prompt_input(
-        app: &mut TuiApp,
-        key: KeyEvent,
-        actor: &HarnessActorHandle,
-    ) -> Result<InputMode, Box<dyn Error>> {
-        Self::handle_input_cursor(app, key);
-        match key.code {
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.status = "Cancelling agent...".to_string();
-                actor.cancel().await?;
-            }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(InputMode::Exit);
-            }
-            KeyCode::Backspace | KeyCode::Delete => {
-                return Ok(Self::mode_for_input(app));
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(Self::mode_for_input(app));
-            }
-            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(Self::mode_for_input(app));
-            }
-            KeyCode::Up if app.input_cursor == 0 => {
-                let len = app.prompt_history.len();
-                if len > 0 {
-                    app.prompt_history_idx = match app.prompt_history_idx {
-                        None => Some(0),
-                        Some(i) if i + 1 < len => Some(i + 1),
-                        Some(i) => Some(i),
-                    };
-                    if let Some(idx) = app.prompt_history_idx {
-                        app.input = app.prompt_history[idx].clone();
-                    }
-                }
-                return Ok(Self::mode_for_input(app));
-            }
-            KeyCode::Down if app.input_cursor == 0 => {
-                app.prompt_history_idx = match app.prompt_history_idx {
-                    None => None,
-                    Some(0) => None,
-                    Some(i) => Some(i - 1),
-                };
-                if let Some(idx) = app.prompt_history_idx {
-                    app.input = app.prompt_history[idx].clone();
-                } else {
-                    Self::clear_input(app);
-                }
-                return Ok(Self::mode_for_input(app));
-            }
-            KeyCode::Tab => {
-                let agent = app.agents.next_agent(app.snapshot.agent_name.as_str());
-                let next_agent = agent.cloned();
-                if let Some(agent) = next_agent {
-                    if !app.harness_idle() {
-                        app.status =
-                            "Agent is busy; finish current turn before changing agents".to_string();
-                    } else {
-                        let name = agent.name.clone();
-                        match actor.set_agent(agent).await {
-                            Ok(snapshot) => {
-                                app.save_snapshot(&snapshot);
-                                app.snapshot.agent_name = name;
-                            }
-                            Err(err) => app.status = err,
-                        }
-                    }
-                }
-            }
-            KeyCode::Enter => {
-                let prompt = app.input.trim().to_string();
-                if prompt.is_empty() {
-                    return Ok(InputMode::PromptInput);
-                }
-
-                if let Some(command) = prompt.trim().strip_prefix('/') {
-                    return Ok(Commands::execute_command(app, actor, command).await);
-                }
-
-                app.queue_prompt(prompt, actor).await?;
-            }
-            KeyCode::Char(_) => {
-                return Ok(Self::mode_for_input(app));
-            }
-            _ => {}
-        };
-
-        Ok(InputMode::PromptInput)
-    }
-
-    pub fn update_prompt_history(app: &mut TuiApp, prompt: String) {
-        if prompt.is_empty() {
-            return;
-        }
-
-        if let Some(idx) = app.prompt_history_idx
-            && idx < app.prompt_history.len()
-        {
-            app.prompt_history[idx] = prompt.clone();
-            if idx != 0 {
-                app.prompt_history.swap(0, idx);
-            }
-        } else {
-            app.prompt_history.insert(0, prompt.clone());
-        }
-
-        if app.prompt_history.len() > MAX_HISTORY {
-            app.prompt_history.truncate(MAX_HISTORY);
-        }
-
-        app.prompt_history_idx = None;
-
-        if let Err(e) = app.save_prompt_history() {
-            eprintln!("Failed to save prompt history: {}", e);
-        }
-    }
-
-    fn command_mode_for_input(app: &TuiApp) -> Option<InputMode> {
-        let input = app.input.trim();
-
-        if let Some(query) = Input::get_file_query(&app.input, app.input_cursor) {
-            let files = list_files();
-            let filtered = Input::filter_files(&query, &files);
-
-            return Some(InputMode::Files {
-                picker: PickList::new(files, filtered),
-            });
-        }
-
-        if input.starts_with('/') {
-            let commands = Commands::commands();
-            let filtered = Self::filter_commands(input, &commands);
-
-            if !filtered.is_empty() {
-                return Some(InputMode::Command {
-                    picker: PickList::new(commands, filtered),
-                });
-            }
-        }
-
-        None
-    }
-
-    pub fn filter_commands(input: &str, commands: &[Command]) -> Vec<usize> {
-        let query = input
-            .strip_prefix('/')
-            .unwrap_or(input)
-            .trim()
-            .to_lowercase();
-        commands
-            .iter()
-            .enumerate()
-            .filter_map(|(index, cmd)| cmd.name.to_lowercase().contains(&query).then_some(index))
-            .collect()
-    }
-
-    pub fn filter_model_rows(input: &str, rows: &[ModelPickerRow]) -> Vec<usize> {
-        let query = input.trim().to_lowercase();
-        rows.iter()
-            .enumerate()
-            .filter_map(|(index, row)| match row {
-                ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model)
-                    if query.is_empty() || model.id.to_lowercase().contains(&query) =>
-                {
-                    Some(index)
-                }
-                ModelPickerRow::Header(_)
-                | ModelPickerRow::Separator
-                | ModelPickerRow::Model(_)
-                | ModelPickerRow::RecentModel(_) => None,
-            })
-            .collect()
-    }
-
-    pub fn filter_agents(input: &str, agents: &[AgentDefinition]) -> Vec<usize> {
-        let query = input.trim().to_lowercase();
-        agents
-            .iter()
-            .enumerate()
-            .filter_map(|(index, agent)| {
-                (query.is_empty() || agent.name.to_lowercase().contains(&query)).then_some(index)
-            })
-            .collect()
-    }
-
-    pub fn filter_skills(input: &str, skills: &[Skill]) -> Vec<usize> {
-        let query = input.trim().to_lowercase();
-        skills
-            .iter()
-            .enumerate()
-            .filter_map(|(index, skill)| {
-                (query.is_empty()
-                    || skill.name.to_lowercase().contains(&query)
-                    || skill.description.to_lowercase().contains(&query))
-                .then_some(index)
-            })
-            .collect()
-    }
-
-    pub async fn handle_files_mode(
-        app: &mut TuiApp,
-        key: event::KeyEvent,
-        mut picker: PickList<FileEntry>,
-    ) -> InputMode {
-        Input::handle_input_cursor(app, key);
-        match key.code {
-            KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return InputMode::Exit;
-            }
-            KeyCode::Up => {
-                picker.move_up();
-            }
-            KeyCode::Down => {
-                picker.move_down();
-            }
-            KeyCode::Enter => {
-                if let Some(file) = picker.selected_row() {
-                    app.input = Input::replace_file_query(&file.name, &app.input, app.input_cursor);
-                    app.input_cursor = app.input.chars().count();
-                }
-                return InputMode::PromptInput;
-            }
-            _ if input_changed_key(key) => {
-                if let Some(query) = Input::get_file_query(&app.input, app.input_cursor) {
-                    let filtered = Input::filter_files(&query, &picker.rows);
-                    picker.replace_filter(filtered);
-                } else {
-                    return InputMode::PromptInput;
-                }
-            }
-            _ => {}
-        }
-
-        InputMode::Files { picker }
-    }
-
-    pub fn filter_files(input: &str, files: &[FileEntry]) -> Vec<usize> {
-        let query = input
-            .strip_prefix('@')
-            .unwrap_or(input)
-            .trim()
-            .to_lowercase();
-        files
-            .iter()
-            .enumerate()
-            .filter_map(|(index, file)| {
-                (query.is_empty() || file.name.to_lowercase().contains(&query)).then_some(index)
-            })
-            .collect()
-    }
-
-    pub fn get_file_query(input: &str, cursor_pos: usize) -> Option<String> {
-        let cursor_byte = char_pos_to_byte_index(input, cursor_pos);
-        let input_before_cursor = &input[..cursor_byte];
-        let query_start = input_before_cursor
-            .char_indices()
-            .rev()
-            .find_map(|(index, ch)| ch.is_whitespace().then_some(index + ch.len_utf8()))
-            .unwrap_or(0);
-
-        input_before_cursor[query_start..]
-            .strip_prefix('@')
-            .map(ToString::to_string)
-    }
-
-    pub fn replace_file_query(filename: &str, input: &str, cursor_pos: usize) -> String {
-        let cursor_byte = char_pos_to_byte_index(input, cursor_pos);
-        let token_start = input[..cursor_byte]
-            .char_indices()
-            .rev()
-            .find_map(|(index, ch)| ch.is_whitespace().then_some(index + ch.len_utf8()))
-            .unwrap_or(0);
-
-        if !input[token_start..].starts_with('@') {
-            return input.to_string();
-        }
-
-        let token_end = input[cursor_byte..]
-            .char_indices()
-            .find_map(|(index, ch)| ch.is_whitespace().then_some(cursor_byte + index))
-            .unwrap_or(input.len());
-
-        format!(
-            "{}{}{}",
-            &input[..token_start],
-            filename,
-            &input[token_end..]
-        )
-    }
-
-    pub fn mode_for_input(app: &TuiApp) -> InputMode {
-        Self::command_mode_for_input(app).unwrap_or(InputMode::PromptInput)
     }
 
     fn input_len(app: &TuiApp) -> usize {
@@ -564,120 +392,5 @@ impl Input {
 
     pub fn history_page_scroll_amount(app: &TuiApp) -> u16 {
         app.history_page_size.saturating_sub(1).max(1)
-    }
-}
-
-pub fn wrap(i: i32, n: usize) -> usize {
-    if n > 0 {
-        let m = n as i32;
-        ((i % m + m) % m) as usize
-    } else {
-        0
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProviderInfoRow {
-    Name(String),
-    Url(String),
-    Kind(String),
-    Key(String),
-}
-
-impl ProviderInfoRow {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Name(_) => "Name",
-            Self::Url(_) => "URL",
-            Self::Kind(_) => "Kind",
-            Self::Key(_) => "Key",
-        }
-    }
-
-    pub fn value(&self) -> &str {
-        match self {
-            Self::Name(v) | Self::Url(v) | Self::Kind(v) | Self::Key(v) => v,
-        }
-    }
-
-    pub fn set_value(&mut self, new_value: String) {
-        match self {
-            Self::Name(v) => *v = new_value,
-            Self::Url(v) => *v = new_value,
-            Self::Kind(v) => *v = new_value,
-            Self::Key(v) => *v = new_value,
-        }
-    }
-
-    pub fn masked_value(&self) -> String {
-        match self {
-            Self::Key(v) if !v.is_empty() => "*".repeat(v.len()),
-            _ => self.value().to_string(),
-        }
-    }
-}
-
-impl PickList<ProviderInfoRow> {
-    pub fn store_input(&mut self, app: &TuiApp) {
-        if let Some(row) = self.selected_row_mut() {
-            row.set_value(app.input.clone());
-        }
-    }
-
-    pub fn load_input(&mut self, app: &mut TuiApp) {
-        if let Some(row) = self.selected_row() {
-            app.input = row.value().to_string();
-            app.input_cursor = app.input.len();
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FileEntry {
-    pub name: String,
-    pub path: PathBuf,
-}
-
-pub fn list_files() -> Vec<FileEntry> {
-    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let mut entries: Vec<FileEntry> = Vec::new();
-
-    walk_dir(&current_dir, "", &mut entries);
-
-    entries.sort_by(|l, r| l.name.cmp(&r.name));
-    entries
-}
-
-fn walk_dir(path: &PathBuf, relative_path: &str, entries: &mut Vec<FileEntry>) {
-    if let Ok(read_dir) = std::fs::read_dir(path) {
-        for entry in read_dir.filter_map(|e| e.ok()) {
-            let entry_path = entry.path();
-            let name = entry_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
-
-            // Skip ignored directories
-            if [".git", "target", "node_modules", "build", "dist", "bin"]
-                .iter()
-                .any(|&ignored| name == ignored)
-            {
-                continue;
-            }
-
-            let rel_name = if relative_path.is_empty() {
-                name
-            } else {
-                format!("{}/{}", relative_path, name)
-            };
-            entries.push(FileEntry {
-                name: rel_name.clone(),
-                path: entry_path.clone(),
-            });
-            if entry_path.is_dir() {
-                walk_dir(&entry_path, &rel_name, entries);
-            }
-        }
     }
 }

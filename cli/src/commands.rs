@@ -3,20 +3,15 @@
  */
 
 use crate::{
-    agents::{AgentDefinition, Agents},
-    config::ProviderConfig,
+    agents::Agents,
     dirs::Dirs,
     harness_actor::HarnessActorHandle,
-    input::{Input, InputMode, PickList, ProviderInfoRow},
-    models::{ModelPickerRow, Models, ReasoningEffort, RecentModelDef},
-    providers::ProviderDef,
+    input::{Input, InputMode, picklist::PickList},
+    models::ReasoningEffort,
     session::Session,
-    skills::Skill,
-    token_usage::SessionInfo,
     tui::{TuiApp, TuiMessage},
 };
-use crossterm::event::{self, KeyCode, KeyModifiers};
-use std::{error::Error, future::Future, mem};
+use std::future::Future;
 
 #[derive(Clone)]
 pub struct Command {
@@ -24,124 +19,80 @@ pub struct Command {
     pub description: &'static str,
 }
 
-pub struct Commands {}
-
-impl Commands {
-    pub fn commands() -> Vec<Command> {
+impl Command {
+    pub fn list() -> Vec<Self> {
         vec![
             /* Common */
-            Command {
+            Self {
                 name: "new",
                 description: "Clear history and create a new session",
             },
-            Command {
+            Self {
                 name: "sessions",
                 description: "Load and delete sessions",
             },
-            Command {
+            Self {
                 name: "models",
                 description: "List and select models",
             },
-            Command {
+            Self {
                 name: "reasoning",
                 description: "Set reasoning effort level",
             },
             /* Prompt */
-            Command {
+            Self {
                 name: "agents",
                 description: "List and select agents",
             },
-            Command {
+            Self {
                 name: "skills",
                 description: "List available skills",
             },
-            Command {
+            Self {
                 name: "plan",
                 description: "Toggle plan mode on/off",
             },
-            Command {
+            Self {
                 name: "rebuild",
                 description: "Reload agents, skills, and AGENTS.md",
             },
             /* Session */
-            Command {
+            Self {
                 name: "compact",
                 description: "Compact conversation history into summary",
             },
-            Command {
+            Self {
                 name: "fork",
                 description: "Copy the current session with a new id",
             },
-            Command {
+            Self {
                 name: "info",
                 description: "Show session info",
             },
             /* Display */
-            Command {
+            Self {
                 name: "show-thinking",
                 description: "Toggle rendering of thinking messages",
             },
-            Command {
+            Self {
                 name: "show-tokens",
                 description: "Toggle rendering of token info messages",
             },
-            Command {
+            Self {
                 name: "show-diff",
                 description: "Toggle rendering of diff messages",
             },
-            Command {
+            Self {
                 name: "streaming",
                 description: "Toggle streaming mode",
             },
         ]
     }
 
-    pub async fn handle_mode(
-        app: &mut TuiApp,
-        key: event::KeyEvent,
-        actor: &HarnessActorHandle,
-    ) -> Result<(), Box<dyn Error>> {
-        let mode = mem::replace(&mut app.mode, InputMode::PromptInput);
-        app.mode = match mode {
-            InputMode::PromptInput => Input::handle_prompt_input(app, key, actor).await?,
-            InputMode::Command { picker } => {
-                Self::handle_command_mode(app, key, picker, actor).await
-            }
-            InputMode::Session { picker } => {
-                Self::handle_session_mode(app, key, picker, actor).await
-            }
-            InputMode::SessionRename { picker } => {
-                Self::handle_session_rename_mode(app, key, picker)
-            }
-            InputMode::Models { picker } => Self::handle_models_mode(app, key, picker, actor).await,
-            InputMode::AddProvider { picker } => {
-                Self::handle_add_provider_mode(app, key, picker).await
-            }
-            InputMode::Agents { picker } => Self::handle_agents_mode(app, key, picker, actor).await,
-            InputMode::Files { picker } => Input::handle_files_mode(app, key, picker).await,
-            InputMode::Skills { picker } => Self::handle_skills_mode(app, key, picker, actor).await,
-            InputMode::Reasoning { picker } => {
-                Self::handle_reasoning_mode(app, key, picker, actor).await
-            }
-            InputMode::Question {
-                title: _,
-                options: _,
-                selected: _,
-            } => InputMode::PromptInput,
-            InputMode::SessionInfo { info } => Self::handle_session_info_mode(key, info),
-            InputMode::Exit => InputMode::Exit,
-        };
-        Ok(())
-    }
-
-    pub async fn execute_command(
-        app: &mut TuiApp,
-        actor: &HarnessActorHandle,
-        command: &str,
-    ) -> InputMode {
+    pub async fn execute(app: &mut TuiApp, actor: &HarnessActorHandle, command: &str) -> InputMode {
         match command {
             "new" => {
-                match when_idle(app, "creating a session", actor.new_session()).await {
+                match Self::when_idle(app, "creating a session", actor.new_session()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
                         app.clear_messages();
@@ -155,7 +106,7 @@ impl Commands {
                 InputMode::PromptInput
             }
             "fork" => {
-                match when_idle(app, "forking a session", actor.fork_session()).await {
+                match Self::when_idle(app, "forking a session", actor.fork_session()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
                         app.push_message(TuiMessage::SystemMessage(format!(
@@ -180,7 +131,7 @@ impl Commands {
             "models" => {
                 Input::clear_input(app);
                 app.status = "Loading models...".to_string();
-                Self::build_models_picklist(app).await
+                InputMode::build_models(app).await
             }
             "agents" => {
                 let agents = app.config.agents().all().to_vec();
@@ -204,7 +155,7 @@ impl Commands {
                 }
             }
             "rebuild" => {
-                if let Some(busy) = busy_status(app, "rebuilding") {
+                if let Some(busy) = Self::busy_status(app, "rebuilding") {
                     app.status = busy;
                 } else {
                     // Reload agents from disk
@@ -247,7 +198,7 @@ impl Commands {
                 InputMode::PromptInput
             }
             "compact" => {
-                if let Some(busy) = busy_status(app, "compacting") {
+                if let Some(busy) = Self::busy_status(app, "compacting") {
                     app.status = busy;
                 } else {
                     app.actor_busy = true;
@@ -273,7 +224,7 @@ impl Commands {
                 }
             },
             "streaming" => {
-                match when_idle(app, "changing streaming", actor.toggle_streaming()).await {
+                match Self::when_idle(app, "changing streaming", actor.toggle_streaming()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
                         app.status = format!("Streaming = {}", snapshot.streaming);
@@ -307,7 +258,7 @@ impl Commands {
                 InputMode::PromptInput
             }
             "plan" => {
-                match when_idle(app, "changing plan mode", actor.toggle_plan_mode()).await {
+                match Self::when_idle(app, "changing plan mode", actor.toggle_plan_mode()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
                         app.status = format!("Plan mode = {}", snapshot.plan_mode_on);
@@ -328,616 +279,31 @@ impl Commands {
         }
     }
 
-    pub async fn handle_command_mode(
-        app: &mut TuiApp,
-        key: event::KeyEvent,
-        mut picker: PickList<Command>,
-        actor: &HarnessActorHandle,
-    ) -> InputMode {
-        Input::handle_input_cursor(app, key);
-        match key.code {
-            KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return InputMode::Exit;
-            }
-            KeyCode::Up => {
-                picker.move_up();
-            }
-            KeyCode::Down => {
-                picker.move_down();
-            }
-            KeyCode::Enter if !picker.is_empty() => {
-                let command = picker.selected_row().map(|row| row.name);
-                if let Some(command) = command {
-                    return Self::execute_command(app, actor, command).await;
-                }
-            }
-            KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_) => {
-                picker.replace_filter(Input::filter_commands(&app.input, &picker.rows));
-                if picker.is_empty() {
-                    return InputMode::PromptInput;
-                }
-            }
-            _ => {}
-        }
-
-        InputMode::Command { picker }
+    pub fn filter_commands(input: &str, commands: &[Command]) -> Vec<usize> {
+        let query = input
+            .strip_prefix('/')
+            .unwrap_or(input)
+            .trim()
+            .to_lowercase();
+        commands
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cmd)| cmd.name.to_lowercase().contains(&query).then_some(index))
+            .collect()
     }
 
-    pub async fn handle_session_mode(
-        app: &mut TuiApp,
-        key: event::KeyEvent,
-        mut picker: PickList<Session>,
-        actor: &HarnessActorHandle,
-    ) -> InputMode {
-        match key.code {
-            KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return InputMode::Exit;
-            }
-            KeyCode::Up if !picker.is_empty() => {
-                picker.move_up();
-            }
-            KeyCode::Down if !picker.is_empty() => {
-                picker.move_down();
-            }
-            KeyCode::Enter if !picker.is_empty() => {
-                let Some(session) = picker.selected_row() else {
-                    return InputMode::Session { picker };
-                };
-                if let Some(session_id) = &session.id {
-                    if let Some(busy) = busy_status(app, "loading a session") {
-                        app.status = busy;
-                    } else {
-                        match actor.load_session(session_id.clone()).await {
-                            Ok(snapshot) => {
-                                app.save_snapshot(&snapshot);
-                                app.clear_messages();
-                                Input::scroll_history_bottom(app);
-                                app.status = format!("Loaded session: {}", session.display_name());
-                                app.context_tokens = None;
-                                match actor.replay_history().await {
-                                    Ok(snapshot) => app.save_snapshot(&snapshot),
-                                    Err(err) => app.status = err,
-                                }
-                                return InputMode::PromptInput;
-                            }
-                            Err(e) => {
-                                app.status = format!("Error loading session: {}", e);
-                            }
-                        }
-                    }
-                } else {
-                    app.status = "Error loading session: missing session id".to_string();
-                }
-            }
-            KeyCode::Char('d')
-                if key.modifiers.contains(KeyModifiers::CONTROL) && !picker.is_empty() =>
-            {
-                let Some(session) = picker.selected_row() else {
-                    return InputMode::Session { picker };
-                };
-                if let Some(session_id) = &session.id {
-                    let display_name = session.display_name();
-                    if let Err(e) = Session::delete(session_id) {
-                        app.status = format!("Error deleting session: {}", e);
-                    } else {
-                        let sessions = Session::list();
-                        let filtered = (0..sessions.len()).collect();
-                        picker.replace_rows(sessions, filtered);
-                        app.status = format!("Deleted session: {}", display_name);
-                    }
-                } else {
-                    app.status = "Error deleting session: missing session id".to_string();
-                }
-            }
-            KeyCode::Char('e')
-                if key.modifiers.contains(KeyModifiers::CONTROL) && !picker.is_empty() =>
-            {
-                let Some(session) = picker.selected_row() else {
-                    return InputMode::Session { picker };
-                };
-                app.input = session.display_name();
-                app.input_cursor = app.input.chars().count();
-                app.status = "Rename session".to_string();
-                return InputMode::SessionRename { picker };
-            }
-            KeyCode::Char('o')
-                if key.modifiers.contains(KeyModifiers::CONTROL) && !picker.is_empty() =>
-            {
-                let Some(session) = picker.selected_row() else {
-                    return InputMode::Session { picker };
-                };
-                match session.export() {
-                    Ok(path) => {
-                        app.status = format!("Exported session to {}", path);
-                    }
-                    Err(e) => {
-                        app.status = format!("Error exporting session: {}", e);
-                    }
-                }
-            }
-            _ => {}
-        };
-
-        InputMode::Session { picker }
+    pub fn busy_status(app: &TuiApp, action: &str) -> Option<String> {
+        (!app.harness_idle()).then(|| format!("Agent is busy; finish current turn before {action}"))
     }
 
-    pub fn handle_session_rename_mode(
-        app: &mut TuiApp,
-        key: event::KeyEvent,
-        mut picker: PickList<Session>,
-    ) -> InputMode {
-        match key.code {
-            KeyCode::Esc => {
-                Input::clear_input(app);
-                return InputMode::Session { picker };
-            }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return InputMode::Exit;
-            }
-            KeyCode::Enter => {
-                let new_name = app.input.trim().to_string();
-                if new_name.is_empty() {
-                    app.status = "Session name cannot be empty".to_string();
-                    return InputMode::SessionRename { picker };
-                }
-
-                if picker.is_empty() {
-                    app.status = "No session selected".to_string();
-                    Input::clear_input(app);
-                    return InputMode::Session { picker };
-                }
-
-                let selected_id = picker.selected_row().and_then(|session| session.id.clone());
-                let Some(session) = picker.selected_row_mut() else {
-                    app.status = "No session selected".to_string();
-                    Input::clear_input(app);
-                    return InputMode::Session { picker };
-                };
-                match session.rename(new_name.clone()) {
-                    Ok(()) => {
-                        let sessions = Session::list();
-                        let filtered = (0..sessions.len()).collect();
-                        picker.replace_rows(sessions, filtered);
-                        if let Some(selected_id) = selected_id {
-                            picker.selected = picker
-                                .filtered
-                                .iter()
-                                .position(|row_index| {
-                                    picker.rows[*row_index].id.as_deref()
-                                        == Some(selected_id.as_str())
-                                })
-                                .unwrap_or_else(|| {
-                                    picker.selected.min(picker.filtered.len().saturating_sub(1))
-                                });
-                        }
-                        picker.clamp_selected();
-                        Input::clear_input(app);
-                        app.status = format!("Renamed session: {}", new_name);
-                        return InputMode::Session { picker };
-                    }
-                    Err(e) => {
-                        app.status = format!("Error renaming session: {}", e);
-                        return InputMode::SessionRename { picker };
-                    }
-                }
-            }
-            _ => {
-                Input::handle_input_cursor(app, key);
-            }
-        }
-
-        InputMode::SessionRename { picker }
-    }
-
-    pub async fn handle_reasoning_mode(
-        app: &mut TuiApp,
-        key: event::KeyEvent,
-        mut picker: PickList<ReasoningEffort>,
-        actor: &HarnessActorHandle,
-    ) -> InputMode {
-        Input::handle_input_cursor(app, key);
-        match key.code {
-            KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return InputMode::Exit;
-            }
-            KeyCode::Up => {
-                picker.move_up();
-            }
-            KeyCode::Down => {
-                picker.move_down();
-            }
-            KeyCode::Enter => {
-                if let Some(busy) = busy_status(app, "changing reasoning") {
-                    app.status = busy;
-                    return InputMode::Reasoning { picker };
-                }
-                let Some(selected) = picker.selected_row() else {
-                    return InputMode::Reasoning { picker };
-                };
-
-                // Merge the new reasoning effort into the current model.
-                let mut model = app.snapshot.model.clone();
-                model.reasoning = if *selected == ReasoningEffort::Default {
-                    None
-                } else {
-                    Some(selected.clone())
-                };
-
-                match actor.set_model(model.clone()).await {
-                    Ok(snapshot) => {
-                        app.save_snapshot(&snapshot);
-                        app.snapshot.model = model;
-                        let _ = RecentModelDef::add(&app.snapshot.model);
-                        Input::clear_input(app);
-                        app.status = format!("Reasoning effort = {}", selected.label());
-                        return InputMode::PromptInput;
-                    }
-                    Err(err) => app.status = err,
-                }
-            }
-            _ => {}
-        }
-
-        InputMode::Reasoning { picker }
-    }
-
-    fn handle_session_info_mode(key: event::KeyEvent, info: SessionInfo) -> InputMode {
-        match key.code {
-            KeyCode::Esc | KeyCode::Enter => InputMode::PromptInput,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => InputMode::Exit,
-            _ => InputMode::SessionInfo { info },
+    pub async fn when_idle<T>(
+        app: &TuiApp,
+        action: &str,
+        fut: impl Future<Output = Result<T, String>>,
+    ) -> Result<T, String> {
+        match Self::busy_status(app, action) {
+            Some(status) => Err(status),
+            None => fut.await,
         }
     }
-
-    pub async fn handle_models_mode(
-        app: &mut TuiApp,
-        key: event::KeyEvent,
-        mut picker: PickList<ModelPickerRow>,
-        actor: &HarnessActorHandle,
-    ) -> InputMode {
-        Input::handle_input_cursor(app, key);
-        match key.code {
-            KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return InputMode::Exit;
-            }
-            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                Input::clear_input(app);
-                app.status = "Add provider".to_string();
-                let rows = vec![
-                    ProviderInfoRow::Name(String::new()),
-                    ProviderInfoRow::Url(String::new()),
-                    ProviderInfoRow::Kind("openai".to_string()),
-                    ProviderInfoRow::Key(String::new()),
-                ];
-                let picker = PickList::all(rows);
-                return InputMode::AddProvider { picker };
-            }
-            KeyCode::Up => {
-                picker.move_up();
-            }
-            KeyCode::Down => {
-                picker.move_down();
-            }
-            KeyCode::Enter => {
-                if let Some(busy) = busy_status(app, "changing models") {
-                    app.status = busy;
-                    return InputMode::Models { picker };
-                }
-                let Some(selected_model) = picker.selected_row().and_then(|row| match row {
-                    ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model) => {
-                        Some(model)
-                    }
-                    ModelPickerRow::Header(_) | ModelPickerRow::Separator => None,
-                }) else {
-                    app.status = "No matching models".to_string();
-                    return InputMode::Models { picker };
-                };
-
-                match actor.set_model(selected_model.clone()).await {
-                    Ok(snapshot) => {
-                        app.save_snapshot(&snapshot);
-                        app.snapshot.model = selected_model.clone();
-                        let _ = RecentModelDef::add(selected_model);
-                        Input::clear_input(app);
-                        app.status = format!("Selected model: {}", selected_model.label());
-                        return InputMode::PromptInput;
-                    }
-                    Err(err) => app.status = err,
-                }
-            }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let Some(ModelPickerRow::RecentModel(model)) = picker.selected_row().cloned()
-                else {
-                    app.status = "Can only delete recent models".to_string();
-                    return InputMode::Models { picker };
-                };
-                match RecentModelDef::remove(&model) {
-                    Ok(updated_recent) => {
-                        if let Ok(models) = Models::list(&app.config).await {
-                            let recent = RecentModelDef::from_cache(&updated_recent, &models);
-                            let rows = Models::filter_rows(&app.input, &models, &recent);
-                            let filtered = Input::filter_model_rows(&app.input, &rows);
-                            picker.replace_rows(rows, filtered);
-                        }
-                        app.status = format!("Removed from recent models: {}", model.id);
-                    }
-                    Err(err) => {
-                        app.status = format!("Error removing recent model: {}", err);
-                    }
-                }
-            }
-            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.status = "Reloading models...".to_string();
-                match Models::reload(&app.config).await {
-                    Ok(reloaded_models) => {
-                        let recent = RecentModelDef::load(&reloaded_models);
-                        let rows = Models::filter_rows(&app.input, &reloaded_models, &recent);
-                        let filtered = Input::filter_model_rows(&app.input, &rows);
-                        let count = reloaded_models.len();
-                        picker.replace_rows(rows, filtered);
-                        app.status = format!("Reloaded {} models", count);
-                    }
-                    Err(err) => {
-                        app.status = format!("Error reloading models: {}", err);
-                    }
-                }
-            }
-            _ if input_changed_key(key) => {
-                picker.replace_filter(Input::filter_model_rows(&app.input, &picker.rows));
-            }
-            _ => {}
-        };
-
-        InputMode::Models { picker }
-    }
-
-    pub async fn handle_add_provider_mode(
-        app: &mut TuiApp,
-        key: event::KeyEvent,
-        mut picker: PickList<ProviderInfoRow>,
-    ) -> InputMode {
-        match key.code {
-            KeyCode::Esc => {
-                Input::clear_input(app);
-                let result = Self::build_models_picklist(app).await;
-                app.status = "Add provider cancelled".to_string();
-                return result;
-            }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return InputMode::Exit;
-            }
-            KeyCode::Up => {
-                picker.store_input(app);
-                picker.move_up();
-                picker.load_input(app);
-            }
-            KeyCode::Down => {
-                picker.store_input(app);
-                picker.move_down();
-                picker.load_input(app);
-            }
-            KeyCode::Enter => {
-                picker.store_input(app);
-
-                let mut name = String::new();
-                let mut url = String::new();
-                let mut kind = String::new();
-                let mut provider_key = String::new();
-
-                for row in &picker.rows {
-                    match row {
-                        ProviderInfoRow::Name(v) => name = v.clone(),
-                        ProviderInfoRow::Url(v) => url = v.clone(),
-                        ProviderInfoRow::Kind(v) => kind = v.clone(),
-                        ProviderInfoRow::Key(v) => provider_key = v.clone(),
-                    }
-                }
-
-                let provider = ProviderConfig {
-                    name: name.trim().to_string(),
-                    url: url.trim().to_string(),
-                    kind: kind.trim().to_string(),
-                    key: provider_key.trim().to_string(),
-                };
-
-                app.status = "Validating provider...".to_string();
-                let provider_def = match ProviderDef::new(&provider) {
-                    Ok(provider_def) => provider_def,
-                    Err(err) => {
-                        app.status = format!("Error creating provider: {}", err);
-                        return InputMode::AddProvider { picker };
-                    }
-                };
-                match provider_def.list_models().await {
-                    Ok(_) => match app.config.add_provider(provider) {
-                        Ok(()) => match Models::reload(&app.config).await {
-                            Ok(reloaded_models) => {
-                                let recent = RecentModelDef::load(&reloaded_models);
-                                let rows = Models::filter_rows("", &reloaded_models, &recent);
-                                let filtered = Input::filter_model_rows("", &rows);
-                                Input::clear_input(app);
-                                app.status = format!(
-                                    "Added provider; loaded {} models",
-                                    reloaded_models.len()
-                                );
-                                return InputMode::Models {
-                                    picker: PickList::new(rows, filtered),
-                                };
-                            }
-                            Err(err) => {
-                                app.status =
-                                    format!("Added provider, but failed to reload models: {}", err);
-                                Input::clear_input(app);
-                                return InputMode::PromptInput;
-                            }
-                        },
-                        Err(err) => {
-                            app.status = format!("Error adding provider: {}", err);
-                        }
-                    },
-                    Err(err) => {
-                        app.status = format!("Provider validation failed: {}", err);
-                    }
-                }
-            }
-            _ => {
-                Input::handle_input_cursor(app, key);
-            }
-        }
-
-        InputMode::AddProvider { picker }
-    }
-
-    async fn build_models_picklist(app: &mut TuiApp) -> InputMode {
-        match Models::list(&app.config).await {
-            Ok(models) => {
-                let recent = RecentModelDef::load(&models);
-                let rows = Models::filter_rows("", &models, &recent);
-                let filtered = Input::filter_model_rows("", &rows);
-                app.status = format!("Loaded {} models", models.len());
-                InputMode::Models {
-                    picker: PickList::new(rows, filtered),
-                }
-            }
-            Err(err) => {
-                app.status = format!("Error loading models: {}", err);
-                InputMode::PromptInput
-            }
-        }
-    }
-
-    pub async fn handle_agents_mode(
-        app: &mut TuiApp,
-        key: event::KeyEvent,
-        mut picker: PickList<AgentDefinition>,
-        actor: &HarnessActorHandle,
-    ) -> InputMode {
-        Input::handle_input_cursor(app, key);
-        match key.code {
-            KeyCode::Esc => {
-                return InputMode::PromptInput;
-            }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return InputMode::Exit;
-            }
-            KeyCode::Up => {
-                picker.move_up();
-            }
-            KeyCode::Down => {
-                picker.move_down();
-            }
-            KeyCode::Enter => {
-                let Some(selected_agent) = picker.selected_row().cloned() else {
-                    app.status = "No matching agents".to_string();
-                    return InputMode::Agents { picker };
-                };
-                if let Some(busy) = busy_status(app, "changing agents") {
-                    app.status = busy;
-                    return InputMode::Agents { picker };
-                }
-                match actor.set_agent(selected_agent.clone()).await {
-                    Ok(snapshot) => {
-                        app.save_snapshot(&snapshot);
-                        app.snapshot.agent_name = selected_agent.name.clone();
-                        Input::clear_input(app);
-                        app.status = format!("Selected agent: {}", selected_agent.name);
-                        return InputMode::PromptInput;
-                    }
-                    Err(err) => app.status = err,
-                }
-            }
-            _ if input_changed_key(key) => {
-                picker.replace_filter(Input::filter_agents(&app.input, &picker.rows));
-            }
-            _ => {}
-        }
-
-        InputMode::Agents { picker }
-    }
-
-    pub async fn handle_skills_mode(
-        app: &mut TuiApp,
-        key: event::KeyEvent,
-        mut picker: PickList<Skill>,
-        actor: &HarnessActorHandle,
-    ) -> InputMode {
-        Input::handle_input_cursor(app, key);
-        match key.code {
-            KeyCode::Esc => return InputMode::PromptInput,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return InputMode::Exit;
-            }
-            KeyCode::Up if !picker.is_empty() => {
-                picker.move_up();
-            }
-            KeyCode::Down if !picker.is_empty() => {
-                picker.move_down();
-            }
-            KeyCode::Enter if !picker.is_empty() => {
-                if let Some(skill) = picker.selected_row() {
-                    if let Some(busy) = busy_status(app, "running a skill") {
-                        app.status = busy;
-                        return InputMode::Skills { picker };
-                    }
-                    match actor.run_skill(skill.name.clone()).await {
-                        Ok(()) => {
-                            app.status = format!("Ran skill: {}", skill.name);
-                        }
-                        Err(err) => {
-                            app.status = format!("Error running skill: {}", err);
-                        }
-                    }
-                    Input::clear_input(app);
-                    return InputMode::PromptInput;
-                }
-            }
-            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let skills = match actor.reload_skills().await {
-                    Ok(skills) => skills,
-                    Err(err) => {
-                        app.status = format!("Error reloading skills: {}", err);
-                        Vec::new()
-                    }
-                };
-                let filtered = Input::filter_skills(&app.input, &skills);
-                picker.replace_rows(skills, filtered);
-                app.status = format!("Reloaded {} skills", picker.rows.len());
-            }
-            _ if input_changed_key(key) => {
-                picker.replace_filter(Input::filter_skills(&app.input, &picker.rows));
-            }
-            _ => {}
-        }
-        InputMode::Skills { picker }
-    }
-}
-
-pub fn busy_status(app: &TuiApp, action: &str) -> Option<String> {
-    (!app.harness_idle()).then(|| format!("Agent is busy; finish current turn before {action}"))
-}
-
-pub async fn when_idle<T>(
-    app: &TuiApp,
-    action: &str,
-    fut: impl Future<Output = Result<T, String>>,
-) -> Result<T, String> {
-    match busy_status(app, action) {
-        Some(status) => Err(status),
-        None => fut.await,
-    }
-}
-
-pub fn input_changed_key(key: event::KeyEvent) -> bool {
-    matches!(
-        key.code,
-        KeyCode::Backspace | KeyCode::Delete | KeyCode::Char('u') | KeyCode::Char('k')
-    ) && key.modifiers.contains(KeyModifiers::CONTROL)
-        || matches!(key.code, KeyCode::Backspace | KeyCode::Delete)
-        || matches!(key.code, KeyCode::Char(_))
-            && !key.modifiers.contains(KeyModifiers::CONTROL)
-            && !key.modifiers.contains(KeyModifiers::ALT)
 }

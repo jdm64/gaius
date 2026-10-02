@@ -4,16 +4,13 @@
 
 use crate::{
     agents::Agents,
-    commands::Commands,
     config::Config,
     diff_view::DiffView,
     dirs::Dirs,
     harness::{Harness, HarnessEvent, HarnessSnapshot},
     harness_actor::{HarnessActorEvent, HarnessActorHandle},
     input::{Input, InputMode},
-    render::Render,
-    render::history::DisplayPrefs,
-    render::layout::HistoryLayout,
+    render::{Render, history::DisplayPrefs, layout::HistoryLayout},
     selection::Selection,
     token_usage::format_arrows,
 };
@@ -40,6 +37,7 @@ use tokio::{
 
 const STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 15);
 const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 60);
+const MAX_HISTORY: usize = 16;
 
 pub enum RenderReason {
     UserUI,
@@ -298,10 +296,37 @@ impl TuiApp {
         if matches!(self.mode, InputMode::Question { .. }) {
             self.handle_question_key(key);
         } else {
-            Commands::handle_mode(self, key, actor).await?;
+            InputMode::handle_mode(self, key, actor).await?;
         }
 
         Ok(())
+    }
+
+    pub fn update_prompt_history(&mut self, prompt: String) {
+        if prompt.is_empty() {
+            return;
+        }
+
+        if let Some(idx) = self.prompt_history_idx
+            && idx < self.prompt_history.len()
+        {
+            self.prompt_history[idx] = prompt.clone();
+            if idx != 0 {
+                self.prompt_history.swap(0, idx);
+            }
+        } else {
+            self.prompt_history.insert(0, prompt.clone());
+        }
+
+        if self.prompt_history.len() > MAX_HISTORY {
+            self.prompt_history.truncate(MAX_HISTORY);
+        }
+
+        self.prompt_history_idx = None;
+
+        if let Err(e) = self.save_prompt_history() {
+            eprintln!("Failed to save prompt history: {}", e);
+        }
     }
 
     pub async fn queue_prompt(
@@ -310,7 +335,7 @@ impl TuiApp {
         actor: &HarnessActorHandle,
     ) -> Result<(), Box<dyn Error>> {
         self.agents.mark_recent(&self.snapshot.agent_name);
-        Input::update_prompt_history(self, prompt.clone());
+        self.update_prompt_history(prompt.clone());
         Input::clear_input(self);
         Input::scroll_history_bottom(self);
         self.status = "Waiting for agent...".to_string();

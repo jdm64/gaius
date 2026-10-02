@@ -1,4 +1,5 @@
 use gaius::config::{Config, ProviderConfig};
+use gaius::input::model;
 use gaius::models::{CachedModelDef, ModelDef, ModelPickerRow, Models, RecentModelDef};
 use gaius::providers::ProviderDef;
 use serde_json::json;
@@ -244,14 +245,8 @@ fn model_picker_filter_selects_only_model_rows() {
     let recent = vec![model("provider", "beta")];
     let rows = Models::filter_rows("", &available, &recent);
 
-    assert_eq!(
-        gaius::input::Input::filter_model_rows("", &rows),
-        vec![1, 3]
-    );
-    assert_eq!(
-        gaius::input::Input::filter_model_rows("alp", &rows),
-        vec![3]
-    );
+    assert_eq!(model::filter_model_rows("", &rows), vec![1, 3]);
+    assert_eq!(model::filter_model_rows("alp", &rows), vec![3]);
 }
 
 #[test]

@@ -2,18 +2,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use crate::input::{file::FileEntry, model::ProviderInfoRow, picklist::PickList};
 use crate::render::Render;
 use crate::{
     agents::AgentDefinition,
     commands::Command,
-    input::{FileEntry, PickList, ProviderInfoRow},
     models::{ModelPickerRow, ReasoningEffort},
     session::Session,
     skills::Skill,
     token_usage::SessionInfo,
 };
-use ratatui::Frame;
 use ratatui::{
+    Frame,
     layout::Rect,
     style::Style,
     text::{Line, Span},

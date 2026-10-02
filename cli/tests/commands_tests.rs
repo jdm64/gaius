@@ -1,8 +1,11 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use gaius::{
-    commands::Commands,
     config::Config,
-    input::{InputMode, PickList, ProviderInfoRow, wrap},
+    input::{
+        InputMode,
+        model::ProviderInfoRow,
+        picklist::{PickList, wrap},
+    },
     tui::TuiApp,
 };
 
@@ -49,7 +52,7 @@ async fn add_provider_mode_moves_between_fields_and_preserves_values() {
     ];
     let picker = PickList::all(rows);
 
-    let mode = Commands::handle_add_provider_mode(
+    let mode = InputMode::handle_provider_add(
         &mut app,
         KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
         picker,
@@ -81,7 +84,7 @@ async fn add_provider_mode_cancel_returns_to_models() {
     ];
     let picker = PickList::all(rows);
 
-    let mode = Commands::handle_add_provider_mode(
+    let mode = InputMode::handle_provider_add(
         &mut app,
         KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
         picker,
