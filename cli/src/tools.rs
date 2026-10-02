@@ -11,8 +11,8 @@ use serde_json::Value;
 use serde_json::json;
 use std::io::ErrorKind;
 use std::io::Write;
-use std::process::Command;
 use std::time::Duration;
+use tokio::process::Command;
 use url::Url;
 
 #[derive(Debug)]
@@ -283,7 +283,7 @@ impl ToolEngine {
             Some(ToolName::ReadFile) => self.read_file_tool(args),
             Some(ToolName::CreateFile) => self.create_file_tool(args),
             Some(ToolName::EditFile) => self.edit_file_tool(args),
-            Some(ToolName::Bash) => self.bash_tool(args),
+            Some(ToolName::Bash) => self.bash_tool(args).await,
             Some(ToolName::Glob) => self.glob_tool(args),
             Some(ToolName::Grep) => self.grep_tool(args),
             Some(ToolName::Question) => self.question_tool(args),
@@ -453,12 +453,12 @@ impl ToolEngine {
         }
     }
 
-    fn bash_tool(&self, args: &Value) -> ToolResult {
+    async fn bash_tool(&self, args: &Value) -> ToolResult {
         let command = match args.get("command").and_then(|v| v.as_str()) {
             Some(c) => c,
             None => return ToolResult::Error("Missing command".to_string()),
         };
-        match Command::new("bash").arg("-c").arg(command).output() {
+        match Command::new("bash").arg("-c").arg(command).output().await {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
