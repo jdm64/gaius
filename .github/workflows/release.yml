@@ -41,7 +41,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: cli
-          key: ${{ matrix.target }}
 
       - name: Build release
         working-directory: cli
