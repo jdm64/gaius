@@ -6,7 +6,7 @@ use crate::{
     agents::Agents,
     dirs::Dirs,
     harness_actor::HarnessActorHandle,
-    input::{Input, InputMode, picklist::PickList},
+    input::{InputMode, picklist::PickList},
     models::ReasoningEffort,
     session::Session,
     tui::{TuiApp, TuiMessage},
@@ -96,13 +96,13 @@ impl Command {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
                         app.clear_messages();
-                        Input::scroll_history_bottom(app);
-                        app.status = "New session created".to_string();
+                        app.scroll_history_bottom();
+                        app.editor.status = "New session created".to_string();
                         app.context_tokens = None;
                     }
-                    Err(e) => app.status = e,
+                    Err(e) => app.editor.status = e,
                 }
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::PromptInput
             }
             "fork" => {
@@ -113,30 +113,29 @@ impl Command {
                             "Session forked: {}",
                             snapshot.session_id.unwrap_or("<unknown>".to_string()),
                         )));
-                        app.status = "Forked session".to_string();
-                        Input::scroll_history_bottom(app);
+                        app.editor.status = "Forked session".to_string();
+                        app.scroll_history_bottom();
                     }
-                    Err(e) => app.status = e,
+                    Err(e) => app.editor.status = e,
                 }
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::PromptInput
             }
             "sessions" => {
                 let sessions = Session::list();
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::Session {
                     picker: PickList::all(sessions),
                 }
             }
             "models" => {
-                Input::clear_input(app);
-                app.status = "Loading models...".to_string();
-                InputMode::build_models(app).await
+                app.editor.status_clear_input("Loading models...");
+                app.editor.build_models(&app.config).await
             }
             "agents" => {
                 let agents = app.config.agents().all().to_vec();
-                Input::clear_input(app);
-                app.status = format!("Loaded {} agents", agents.len());
+                app.editor
+                    .status_clear_input(&format!("Loaded {} agents", agents.len()));
                 InputMode::Agents {
                     picker: PickList::all(agents),
                 }
@@ -145,18 +144,18 @@ impl Command {
                 let skills = match actor.get_skills().await {
                     Ok(skills) => skills,
                     Err(err) => {
-                        app.status = format!("Error loading skills: {}", err);
+                        app.editor.status = format!("Error loading skills: {}", err);
                         Vec::new()
                     }
                 };
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::Skills {
                     picker: PickList::all(skills),
                 }
             }
             "rebuild" => {
                 if let Some(busy) = Self::busy_status(app, "rebuilding") {
-                    app.status = busy;
+                    app.editor.status = busy;
                 } else {
                     // Reload agents from disk
                     let agents = match Dirs::config_dir() {
@@ -166,14 +165,14 @@ impl Command {
                                 app.agents.all().to_vec()
                             }
                             Err(e) => {
-                                app.status = format!("Error reloading agents: {}", e);
-                                Input::clear_input(app);
+                                app.editor
+                                    .status_clear_input(&format!("Error reloading agents: {}", e));
                                 return InputMode::PromptInput;
                             }
                         },
                         Err(e) => {
-                            app.status = format!("Error getting config dir: {}", e);
-                            Input::clear_input(app);
+                            app.editor
+                                .status_clear_input(&format!("Error getting config dir: {}", e));
                             return InputMode::PromptInput;
                         }
                     };
@@ -189,37 +188,37 @@ impl Command {
                     match actor.rebuild_agent(agent).await {
                         Ok(snapshot) => {
                             app.save_snapshot(&snapshot);
-                            app.status = "Rebuilt agent and system prompt".to_string();
+                            app.editor.status = "Rebuilt agent and system prompt".to_string();
                         }
-                        Err(err) => app.status = err,
+                        Err(err) => app.editor.status = err,
                     }
                 }
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::PromptInput
             }
             "compact" => {
                 if let Some(busy) = Self::busy_status(app, "compacting") {
-                    app.status = busy;
+                    app.editor.status = busy;
                 } else {
                     app.actor_busy = true;
-                    app.status = "Compacting conversation...".to_string();
-                    Input::scroll_history_bottom(app);
+                    app.editor.status = "Compacting conversation...".to_string();
+                    app.scroll_history_bottom();
                     if let Err(err) = actor.compact().await {
-                        app.status = err;
+                        app.editor.status = err;
                     }
                     app.actor_busy = false;
                 }
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::PromptInput
             }
             "info" => match actor.info().await {
                 Ok(info) => {
-                    Input::clear_input(app);
+                    app.editor.clear_input();
                     InputMode::SessionInfo { info }
                 }
                 Err(e) => {
-                    app.status = format!("Error getting session info: {}", e);
-                    Input::clear_input(app);
+                    app.editor
+                        .status_clear_input(&format!("Error getting session info: {}", e));
                     InputMode::PromptInput
                 }
             },
@@ -227,45 +226,45 @@ impl Command {
                 match Self::when_idle(app, "changing streaming", actor.toggle_streaming()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
-                        app.status = format!("Streaming = {}", snapshot.streaming);
+                        app.editor.status = format!("Streaming = {}", snapshot.streaming);
                     }
-                    Err(e) => app.status = e,
+                    Err(e) => app.editor.status = e,
                 }
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::PromptInput
             }
             "thinking" => {
                 app.toggle_thinking();
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::PromptInput
             }
             "reasoning" => {
                 let efforts: Vec<ReasoningEffort> = ReasoningEffort::all().to_vec();
                 let filtered = (0..efforts.len()).collect();
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::Reasoning {
                     picker: PickList::new(efforts, filtered),
                 }
             }
             "show-tokens" => {
                 app.toggle_token_info();
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::PromptInput
             }
             "show-diff" => {
                 app.toggle_diff_view();
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::PromptInput
             }
             "plan" => {
                 match Self::when_idle(app, "changing plan mode", actor.toggle_plan_mode()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
-                        app.status = format!("Plan mode = {}", snapshot.plan_mode_on);
+                        app.editor.status = format!("Plan mode = {}", snapshot.plan_mode_on);
                     }
-                    Err(e) => app.status = e,
+                    Err(e) => app.editor.status = e,
                 }
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::PromptInput
             }
             _ => {
@@ -273,7 +272,7 @@ impl Command {
                     "Unknown command: /{}",
                     command
                 )));
-                Input::clear_input(app);
+                app.editor.clear_input();
                 InputMode::PromptInput
             }
         }

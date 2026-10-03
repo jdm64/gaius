@@ -6,18 +6,17 @@ use crate::{
     agents::Agents,
     config::Config,
     diff_view::DiffView,
-    dirs::Dirs,
     harness::{Harness, HarnessEvent, HarnessSnapshot},
     harness_actor::{HarnessActorEvent, HarnessActorHandle},
-    input::{Input, InputMode},
+    input::{InputMode, PromptEditor},
     render::{Render, history::DisplayPrefs, layout::HistoryLayout},
     selection::Selection,
     token_usage::format_arrows,
 };
 use crossterm::{
     event::{
-        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent,
-        KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
+        MouseButton, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -26,18 +25,13 @@ use futures::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend, text::Line};
 use std::{
     error::Error,
-    fs,
     io::{self, Stdout},
     time::Duration,
 };
-use tokio::{
-    sync::oneshot,
-    time::{self, Instant},
-};
+use tokio::time::{self, Instant};
 
 const STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 15);
 const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 60);
-const MAX_HISTORY: usize = 16;
 
 pub enum RenderReason {
     UserUI,
@@ -100,23 +94,17 @@ pub struct TuiApp {
     pub config: Config,
     pub snapshot: HarnessSnapshot,
     pub agents: Agents,
-    pub input: String,
-    pub input_cursor: usize,
+    pub editor: PromptEditor,
     pub history_scroll: u16,
     pub history_page_size: u16,
     pub history_height: u16,
     pub new_lines_below: u16,
     pub messages: Vec<TuiMessage>,
-    pub status: String,
-    pub mode: InputMode,
     pub context_tokens: Option<i32>,
     pub display_prefs: DisplayPrefs,
-    pub prompt_history: Vec<String>,
-    pub prompt_history_idx: Option<usize>,
     pub history_layout: HistoryLayout,
     pub selection: Selection,
     pub actor_busy: bool,
-    pub question_answer_tx: Option<oneshot::Sender<String>>,
 }
 
 impl Default for TuiApp {
@@ -132,34 +120,28 @@ impl TuiApp {
             config,
             snapshot: HarnessSnapshot::default(),
             agents,
-            input: String::new(),
-            input_cursor: 0,
+            editor: PromptEditor::new(),
             history_scroll: 0,
             history_page_size: 1,
             history_height: 0,
             new_lines_below: 0,
             messages: Vec::new(),
-            status: "".to_string(),
-            mode: InputMode::PromptInput,
             context_tokens: None,
             display_prefs: DisplayPrefs {
                 thinking: false,
                 token_info: true,
                 diff_view: true,
             },
-            prompt_history: Vec::new(),
-            prompt_history_idx: None,
             history_layout: HistoryLayout::default(),
             selection: Selection::default(),
             actor_busy: false,
-            question_answer_tx: None,
         }
     }
 
     pub async fn run(&mut self, harness: Harness) -> Result<HarnessSnapshot, Box<dyn Error>> {
         self.agents = self.config.agents().clone();
         self.load_history(&harness);
-        if let Err(e) = self.load_prompt_history() {
+        if let Err(e) = self.editor.load_prompt_history() {
             eprintln!("Failed to load prompt history: {}", e);
         }
         let mut latest_snapshot = harness.snapshot();
@@ -204,7 +186,7 @@ impl TuiApp {
                 }
             }
 
-            if let InputMode::Exit = self.mode {
+            if let InputMode::Exit = self.editor.mode {
                 break;
             }
 
@@ -256,11 +238,11 @@ impl TuiApp {
                 match mouse.kind {
                     MouseEventKind::ScrollUp => {
                         self.selection.selection = None;
-                        Input::scroll_history_up(self, 3);
+                        self.scroll_history_up(3);
                     }
                     MouseEventKind::ScrollDown => {
                         self.selection.selection = None;
-                        Input::scroll_history_down(self, 3);
+                        self.scroll_history_down(3);
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
                         self.selection.mouse_down(mouse);
@@ -270,7 +252,7 @@ impl TuiApp {
                     }
                     MouseEventKind::Up(MouseButton::Left) => {
                         if let Some(status) = self.selection.mouse_up(mouse) {
-                            self.status = status;
+                            self.editor.status = status;
                         }
                     }
                     _ => {}
@@ -283,50 +265,25 @@ impl TuiApp {
 
         match key.code {
             KeyCode::PageUp => {
-                Input::scroll_history_up(self, Input::history_page_scroll_amount(self));
+                let amount = self.history_page_scroll_amount();
+                self.scroll_history_up(amount);
                 return Ok(());
             }
             KeyCode::PageDown => {
-                Input::scroll_history_down(self, Input::history_page_scroll_amount(self));
+                let amount = self.history_page_scroll_amount();
+                self.scroll_history_down(amount);
                 return Ok(());
             }
             _ => {}
         }
 
-        if matches!(self.mode, InputMode::Question { .. }) {
-            self.handle_question_key(key);
+        if matches!(self.editor.mode, InputMode::Question { .. }) {
+            self.editor.handle_question_key(key);
         } else {
             InputMode::handle_mode(self, key, actor).await?;
         }
 
         Ok(())
-    }
-
-    pub fn update_prompt_history(&mut self, prompt: String) {
-        if prompt.is_empty() {
-            return;
-        }
-
-        if let Some(idx) = self.prompt_history_idx
-            && idx < self.prompt_history.len()
-        {
-            self.prompt_history[idx] = prompt.clone();
-            if idx != 0 {
-                self.prompt_history.swap(0, idx);
-            }
-        } else {
-            self.prompt_history.insert(0, prompt.clone());
-        }
-
-        if self.prompt_history.len() > MAX_HISTORY {
-            self.prompt_history.truncate(MAX_HISTORY);
-        }
-
-        self.prompt_history_idx = None;
-
-        if let Err(e) = self.save_prompt_history() {
-            eprintln!("Failed to save prompt history: {}", e);
-        }
     }
 
     pub async fn queue_prompt(
@@ -335,14 +292,13 @@ impl TuiApp {
         actor: &HarnessActorHandle,
     ) -> Result<(), Box<dyn Error>> {
         self.agents.mark_recent(&self.snapshot.agent_name);
-        self.update_prompt_history(prompt.clone());
-        Input::clear_input(self);
-        Input::scroll_history_bottom(self);
-        self.status = "Waiting for agent...".to_string();
+        self.editor.update_prompt_history(prompt.clone());
+        self.editor.status_clear_input("Waiting for agent...");
+        self.scroll_history_bottom();
 
         if let Err(err) = actor.run_prompt(prompt).await {
             self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
-            self.status = "Agent request failed".to_string();
+            self.editor.status = "Agent request failed".to_string();
         }
 
         Ok(())
@@ -359,9 +315,9 @@ impl TuiApp {
                 options,
                 answer_tx,
             } => {
-                Input::clear_input(self);
-                self.question_answer_tx = Some(answer_tx);
-                self.mode = InputMode::Question {
+                self.editor.clear_input();
+                self.editor.answer_tx = Some(answer_tx);
+                self.editor.mode = InputMode::Question {
                     title,
                     options,
                     selected: 0,
@@ -372,7 +328,7 @@ impl TuiApp {
                 self.actor_busy = false;
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
-                self.status = "".to_string();
+                self.editor.status = "".to_string();
                 Some(snapshot)
             }
             HarnessActorEvent::RequestFailed(err, snapshot) => {
@@ -380,7 +336,7 @@ impl TuiApp {
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
                 self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
-                self.status = "Agent request failed".to_string();
+                self.editor.status = "Agent request failed".to_string();
                 Some(snapshot)
             }
             HarnessActorEvent::HistoryReplayed(events) => {
@@ -390,76 +346,6 @@ impl TuiApp {
                 }
                 None
             }
-        }
-    }
-
-    fn handle_question_key(&mut self, key: KeyEvent) {
-        let mode = std::mem::replace(&mut self.mode, InputMode::PromptInput);
-        let InputMode::Question {
-            title,
-            options,
-            mut selected,
-        } = mode
-        else {
-            self.mode = mode;
-            return;
-        };
-
-        match key.code {
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.answer_question(String::new());
-                self.mode = InputMode::Exit;
-            }
-            KeyCode::Esc | KeyCode::Tab => {
-                self.answer_question(String::new());
-                Input::clear_input(self);
-                self.mode = InputMode::PromptInput;
-            }
-            KeyCode::Enter => {
-                let answer = options.get(selected).cloned().unwrap_or_default();
-                let details = self.input.trim().to_string();
-                let response = [answer, details]
-                    .iter()
-                    .filter(|part| !part.is_empty())
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                self.answer_question(response);
-                Input::clear_input(self);
-                self.mode = InputMode::PromptInput;
-            }
-            KeyCode::Up => {
-                selected = selected.saturating_sub(1);
-                self.mode = InputMode::Question {
-                    title,
-                    options,
-                    selected,
-                };
-            }
-            KeyCode::Down => {
-                if selected + 1 < options.len() {
-                    selected += 1;
-                }
-                self.mode = InputMode::Question {
-                    title,
-                    options,
-                    selected,
-                };
-            }
-            _ => {
-                Input::handle_input_cursor(self, key);
-                self.mode = InputMode::Question {
-                    title,
-                    options,
-                    selected,
-                };
-            }
-        }
-    }
-
-    fn answer_question(&mut self, answer: String) {
-        if let Some(answer_tx) = self.question_answer_tx.take() {
-            let _ = answer_tx.send(answer);
         }
     }
 
@@ -537,7 +423,7 @@ impl TuiApp {
             HarnessEvent::TurnStarted(turn_started) => {
                 self.actor_busy = true;
                 self.snapshot.turn_started = Some(turn_started);
-                self.status = "Waiting for agent...".to_string();
+                self.editor.status = "Waiting for agent...".to_string();
             }
             HarnessEvent::TurnDuration(duration_ms) => {
                 self.push_message(TuiMessage::TurnDuration(duration_ms));
@@ -669,18 +555,37 @@ impl TuiApp {
     }
 
     pub fn toggle_thinking(&mut self) {
-        self.status = self.display_prefs.toggle_thinking();
+        self.editor.status = self.display_prefs.toggle_thinking();
         self.history_layout.invalidate_from(0);
     }
 
     pub fn toggle_token_info(&mut self) {
-        self.status = self.display_prefs.toggle_token_info();
+        self.editor.status = self.display_prefs.toggle_token_info();
         self.history_layout.invalidate_from(0);
     }
 
     pub fn toggle_diff_view(&mut self) {
-        self.status = self.display_prefs.toggle_diff_view();
+        self.editor.status = self.display_prefs.toggle_diff_view();
         self.history_layout.invalidate_from(0);
+    }
+
+    pub fn scroll_history_bottom(&mut self) {
+        self.history_scroll = 0;
+        self.new_lines_below = 0;
+    }
+
+    pub fn scroll_history_up(&mut self, amount: u16) {
+        self.history_scroll = self.history_scroll.saturating_add(amount);
+    }
+
+    pub fn scroll_history_down(&mut self, amount: u16) {
+        self.history_scroll = self.history_scroll.saturating_sub(amount);
+        let dismissed = amount.min(self.new_lines_below);
+        self.new_lines_below = self.new_lines_below.saturating_sub(dismissed);
+    }
+
+    pub fn history_page_scroll_amount(&mut self) -> u16 {
+        self.history_page_size.saturating_sub(1).max(1)
     }
 
     pub fn push_message(&mut self, message: TuiMessage) {
@@ -713,26 +618,6 @@ impl TuiApp {
             self.set_dirty_from(idx);
             break;
         }
-    }
-
-    pub fn load_prompt_history(&mut self) -> Result<(), Box<dyn Error>> {
-        let path = Dirs::prompt_history_file()?;
-        if path.exists() {
-            let contents = fs::read_to_string(&path)?;
-            self.prompt_history = serde_json::from_str(&contents).unwrap_or_default();
-        }
-        self.prompt_history_idx = None;
-        Ok(())
-    }
-
-    pub fn save_prompt_history(&self) -> Result<(), Box<dyn Error>> {
-        let path = Dirs::prompt_history_file()?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let contents = serde_json::to_string_pretty(&self.prompt_history)?;
-        fs::write(path, contents)?;
-        Ok(())
     }
 }
 

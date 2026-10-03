@@ -32,13 +32,13 @@ impl Render {
             .borders(Borders::ALL)
             .style(Style::default().bg(self.theme.inputbox))
             .padding(Padding::horizontal(1));
-        if !app.status.is_empty() {
-            if matches!(&app.mode, InputMode::Question { .. }) {
+        if !app.editor.status.is_empty() {
+            if matches!(&app.editor.mode, InputMode::Question { .. }) {
                 block = block
                     .title_bottom(" Waiting for user... ".to_string())
                     .title_alignment(HorizontalAlignment::Right);
             } else {
-                block = block.title(format!(" {} ", app.status));
+                block = block.title(format!(" {} ", app.editor.status));
             }
         }
 
@@ -58,7 +58,7 @@ impl Render {
             .wrap(Wrap { trim: false });
         frame.render_widget(input, area);
 
-        let cursor = app.input_cursor + 2;
+        let cursor = app.editor.cursor + 2;
         let (row, col) = (cursor / width, cursor % width);
         let cursor_x = area.x.saturating_add(2).saturating_add(col as u16);
         let cursor_y = area

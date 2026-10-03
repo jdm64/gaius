@@ -4,9 +4,9 @@
 
 use crate::{
     commands::Command,
-    config::ProviderConfig,
+    config::{Config, ProviderConfig},
     harness_actor::HarnessActorHandle,
-    input::{Input, InputMode, picklist::PickList},
+    input::{InputMode, PromptEditor, picklist::PickList},
     models::{ModelPickerRow, Models, ReasoningEffort, RecentModelDef},
     providers::ProviderDef,
     tui::TuiApp,
@@ -20,15 +20,14 @@ impl InputMode {
         mut picker: PickList<ModelPickerRow>,
         actor: &HarnessActorHandle,
     ) -> Self {
-        Input::handle_input_cursor(app, key);
+        app.editor.handle_input_cursor(key);
         match key.code {
             KeyCode::Esc => return Self::PromptInput,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Self::Exit;
             }
             KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                Input::clear_input(app);
-                app.status = "Add provider".to_string();
+                app.editor.status_clear_input("Add provider");
                 let rows = vec![
                     ProviderInfoRow::Name(String::new()),
                     ProviderInfoRow::Url(String::new()),
@@ -46,7 +45,7 @@ impl InputMode {
             }
             KeyCode::Enter => {
                 if let Some(busy) = Command::busy_status(app, "changing models") {
-                    app.status = busy;
+                    app.editor.status = busy;
                     return Self::Models { picker };
                 }
                 let Some(selected_model) = picker.selected_row().and_then(|row| match row {
@@ -55,7 +54,7 @@ impl InputMode {
                     }
                     ModelPickerRow::Header(_) | ModelPickerRow::Separator => None,
                 }) else {
-                    app.status = "No matching models".to_string();
+                    app.editor.status = "No matching models".to_string();
                     return Self::Models { picker };
                 };
 
@@ -64,52 +63,55 @@ impl InputMode {
                         app.save_snapshot(&snapshot);
                         app.snapshot.model = selected_model.clone();
                         let _ = RecentModelDef::add(selected_model);
-                        Input::clear_input(app);
-                        app.status = format!("Selected model: {}", selected_model.label());
+                        app.editor.status_clear_input(&format!(
+                            "Selected model: {}",
+                            selected_model.label()
+                        ));
                         return Self::PromptInput;
                     }
-                    Err(err) => app.status = err,
+                    Err(err) => app.editor.status = err,
                 }
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let Some(ModelPickerRow::RecentModel(model)) = picker.selected_row().cloned()
                 else {
-                    app.status = "Can only delete recent models".to_string();
+                    app.editor.status = "Can only delete recent models".to_string();
                     return Self::Models { picker };
                 };
                 match RecentModelDef::remove(&model) {
                     Ok(updated_recent) => {
                         if let Ok(models) = Models::list(&app.config).await {
                             let recent = RecentModelDef::from_cache(&updated_recent, &models);
-                            let rows = Models::filter_rows(&app.input, &models, &recent);
-                            let filtered = filter_model_rows(&app.input, &rows);
+                            let rows = Models::filter_rows(&app.editor.input, &models, &recent);
+                            let filtered = filter_model_rows(&app.editor.input, &rows);
                             picker.replace_rows(rows, filtered);
                         }
-                        app.status = format!("Removed from recent models: {}", model.id);
+                        app.editor.status = format!("Removed from recent models: {}", model.id);
                     }
                     Err(err) => {
-                        app.status = format!("Error removing recent model: {}", err);
+                        app.editor.status = format!("Error removing recent model: {}", err);
                     }
                 }
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.status = "Reloading models...".to_string();
+                app.editor.status = "Reloading models...".to_string();
                 match Models::reload(&app.config).await {
                     Ok(reloaded_models) => {
                         let recent = RecentModelDef::load(&reloaded_models);
-                        let rows = Models::filter_rows(&app.input, &reloaded_models, &recent);
-                        let filtered = filter_model_rows(&app.input, &rows);
+                        let rows =
+                            Models::filter_rows(&app.editor.input, &reloaded_models, &recent);
+                        let filtered = filter_model_rows(&app.editor.input, &rows);
                         let count = reloaded_models.len();
                         picker.replace_rows(rows, filtered);
-                        app.status = format!("Reloaded {} models", count);
+                        app.editor.status = format!("Reloaded {} models", count);
                     }
                     Err(err) => {
-                        app.status = format!("Error reloading models: {}", err);
+                        app.editor.status = format!("Error reloading models: {}", err);
                     }
                 }
             }
-            _ if Self::input_changed_key(key) => {
-                picker.replace_filter(filter_model_rows(&app.input, &picker.rows));
+            _ if PromptEditor::input_changed_key(key) => {
+                picker.replace_filter(filter_model_rows(&app.editor.input, &picker.rows));
             }
             _ => {}
         };
@@ -124,26 +126,25 @@ impl InputMode {
     ) -> Self {
         match key.code {
             KeyCode::Esc => {
-                Input::clear_input(app);
-                let result = Self::build_models(app).await;
-                app.status = "Add provider cancelled".to_string();
+                let result = app.editor.build_models(&app.config).await;
+                app.editor.status_clear_input("Add provider cancelled");
                 return result;
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Self::Exit;
             }
             KeyCode::Up => {
-                picker.store_input(app);
+                picker.store_input(&app.editor);
                 picker.move_up();
-                picker.load_input(app);
+                picker.load_input(&mut app.editor);
             }
             KeyCode::Down => {
-                picker.store_input(app);
+                picker.store_input(&app.editor);
                 picker.move_down();
-                picker.load_input(app);
+                picker.load_input(&mut app.editor);
             }
             KeyCode::Enter => {
-                picker.store_input(app);
+                picker.store_input(&app.editor);
 
                 let mut name = String::new();
                 let mut url = String::new();
@@ -166,11 +167,11 @@ impl InputMode {
                     key: provider_key.trim().to_string(),
                 };
 
-                app.status = "Validating provider...".to_string();
+                app.editor.status = "Validating provider...".to_string();
                 let provider_def = match ProviderDef::new(&provider) {
                     Ok(provider_def) => provider_def,
                     Err(err) => {
-                        app.status = format!("Error creating provider: {}", err);
+                        app.editor.status = format!("Error creating provider: {}", err);
                         return Self::AddProvider { picker };
                     }
                 };
@@ -181,33 +182,33 @@ impl InputMode {
                                 let recent = RecentModelDef::load(&reloaded_models);
                                 let rows = Models::filter_rows("", &reloaded_models, &recent);
                                 let filtered = filter_model_rows("", &rows);
-                                Input::clear_input(app);
-                                app.status = format!(
+                                app.editor.status_clear_input(&format!(
                                     "Added provider; loaded {} models",
                                     reloaded_models.len()
-                                );
+                                ));
                                 return Self::Models {
                                     picker: PickList::new(rows, filtered),
                                 };
                             }
                             Err(err) => {
-                                app.status =
-                                    format!("Added provider, but failed to reload models: {}", err);
-                                Input::clear_input(app);
+                                app.editor.status_clear_input(&format!(
+                                    "Added provider, but failed to reload models: {}",
+                                    err
+                                ));
                                 return Self::PromptInput;
                             }
                         },
                         Err(err) => {
-                            app.status = format!("Error adding provider: {}", err);
+                            app.editor.status = format!("Error adding provider: {}", err);
                         }
                     },
                     Err(err) => {
-                        app.status = format!("Provider validation failed: {}", err);
+                        app.editor.status = format!("Provider validation failed: {}", err);
                     }
                 }
             }
             _ => {
-                Input::handle_input_cursor(app, key);
+                app.editor.handle_input_cursor(key);
             }
         }
 
@@ -220,7 +221,7 @@ impl InputMode {
         mut picker: PickList<ReasoningEffort>,
         actor: &HarnessActorHandle,
     ) -> Self {
-        Input::handle_input_cursor(app, key);
+        app.editor.handle_input_cursor(key);
         match key.code {
             KeyCode::Esc => return Self::PromptInput,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -234,7 +235,7 @@ impl InputMode {
             }
             KeyCode::Enter => {
                 if let Some(busy) = Command::busy_status(app, "changing reasoning") {
-                    app.status = busy;
+                    app.editor.status = busy;
                     return Self::Reasoning { picker };
                 }
                 let Some(selected) = picker.selected_row() else {
@@ -254,11 +255,13 @@ impl InputMode {
                         app.save_snapshot(&snapshot);
                         app.snapshot.model = model;
                         let _ = RecentModelDef::add(&app.snapshot.model);
-                        Input::clear_input(app);
-                        app.status = format!("Reasoning effort = {}", selected.label());
+                        app.editor.status_clear_input(&format!(
+                            "Reasoning effort = {}",
+                            selected.label()
+                        ));
                         return Self::PromptInput;
                     }
-                    Err(err) => app.status = err,
+                    Err(err) => app.editor.status = err,
                 }
             }
             _ => {}
@@ -266,21 +269,23 @@ impl InputMode {
 
         Self::Reasoning { picker }
     }
+}
 
-    pub async fn build_models(app: &mut TuiApp) -> Self {
-        match Models::list(&app.config).await {
+impl PromptEditor {
+    pub async fn build_models(&mut self, config: &Config) -> InputMode {
+        match Models::list(config).await {
             Ok(models) => {
                 let recent = RecentModelDef::load(&models);
                 let rows = Models::filter_rows("", &models, &recent);
                 let filtered = filter_model_rows("", &rows);
-                app.status = format!("Loaded {} models", models.len());
-                Self::Models {
+                self.status = format!("Loaded {} models", models.len());
+                InputMode::Models {
                     picker: PickList::new(rows, filtered),
                 }
             }
             Err(err) => {
-                app.status = format!("Error loading models: {}", err);
-                Self::PromptInput
+                self.status = format!("Error loading models: {}", err);
+                InputMode::PromptInput
             }
         }
     }
@@ -328,16 +333,16 @@ impl ProviderInfoRow {
 }
 
 impl PickList<ProviderInfoRow> {
-    pub fn store_input(&mut self, app: &TuiApp) {
+    pub fn store_input(&mut self, editor: &PromptEditor) {
         if let Some(row) = self.selected_row_mut() {
-            row.set_value(app.input.clone());
+            row.set_value(editor.input.clone());
         }
     }
 
-    pub fn load_input(&mut self, app: &mut TuiApp) {
+    pub fn load_input(&mut self, editor: &mut PromptEditor) {
         if let Some(row) = self.selected_row() {
-            app.input = row.value().to_string();
-            app.input_cursor = app.input.len();
+            editor.input = row.value().to_string();
+            editor.cursor = editor.input.len();
         }
     }
 }

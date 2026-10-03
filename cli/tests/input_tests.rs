@@ -1,102 +1,104 @@
 use gaius::config::Config;
 use gaius::input::picklist::PickList;
-use gaius::input::{Input, InputMode, file};
+use gaius::input::{PromptEditor, file};
 use gaius::tui::TuiApp;
 
 #[test]
 fn edits_input_at_cursor() {
-    let mut app = TuiApp::new(Config::new());
-    Input::insert_input_char(&mut app, 'a');
-    Input::insert_input_char(&mut app, 'c');
+    let app = TuiApp::new(Config::new());
+    let mut editor = app.editor;
+    editor.insert_input_char('a');
+    editor.insert_input_char('c');
 
-    Input::move_input_cursor_left(&mut app);
-    Input::insert_input_char(&mut app, 'b');
+    editor.move_input_cursor_left();
+    editor.insert_input_char('b');
 
-    assert_eq!(app.input, "abc");
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(editor.input, "abc");
+    assert_eq!(editor.cursor, 2);
 
-    Input::delete_input_char_before_cursor(&mut app);
+    editor.delete_input_char_before_cursor();
 
-    assert_eq!(app.input, "ac");
-    assert_eq!(app.input_cursor, 1);
+    assert_eq!(editor.input, "ac");
+    assert_eq!(editor.cursor, 1);
 
-    Input::delete_input_char_at_cursor(&mut app);
+    editor.delete_input_char_at_cursor();
 
-    assert_eq!(app.input, "a");
-    assert_eq!(app.input_cursor, 1);
+    assert_eq!(editor.input, "a");
+    assert_eq!(editor.cursor, 1);
 }
 
 #[test]
 fn moves_input_cursor_home_and_end() {
-    let mut app = TuiApp::new(Config::new());
+    let app = TuiApp::new(Config::new());
+    let mut editor = app.editor;
     for ch in "prompt".chars() {
-        Input::insert_input_char(&mut app, ch);
+        editor.insert_input_char(ch);
     }
 
-    Input::move_input_cursor_home(&mut app);
-    assert_eq!(app.input_cursor, 0);
+    editor.move_input_cursor_home();
+    assert_eq!(editor.cursor, 0);
 
-    Input::move_input_cursor_end(&mut app);
-    assert_eq!(app.input_cursor, 6);
+    editor.move_input_cursor_end();
+    assert_eq!(editor.cursor, 6);
 }
 
 #[test]
 fn edits_multibyte_input_at_cursor() {
     let mut app = TuiApp::new(Config::new());
     for ch in "aéc".chars() {
-        Input::insert_input_char(&mut app, ch);
+        app.editor.insert_input_char(ch);
     }
 
-    Input::move_input_cursor_left(&mut app);
-    Input::insert_input_char(&mut app, 'b');
-    Input::move_input_cursor_left(&mut app);
-    Input::delete_input_char_before_cursor(&mut app);
+    app.editor.move_input_cursor_left();
+    app.editor.insert_input_char('b');
+    app.editor.move_input_cursor_left();
+    app.editor.delete_input_char_before_cursor();
 
-    assert_eq!(app.input, "abc");
-    assert_eq!(app.input_cursor, 1);
+    assert_eq!(app.editor.input, "abc");
+    assert_eq!(app.editor.cursor, 1);
 }
 
 #[test]
 fn deletes_input_to_start_and_end() {
     let mut app = TuiApp::new(Config::new());
     for ch in "abcdef".chars() {
-        Input::insert_input_char(&mut app, ch);
+        app.editor.insert_input_char(ch);
     }
 
-    Input::move_input_cursor_left(&mut app);
-    Input::move_input_cursor_left(&mut app);
-    Input::delete_input_to_start(&mut app);
+    app.editor.move_input_cursor_left();
+    app.editor.move_input_cursor_left();
+    app.editor.delete_input_to_start();
 
-    assert_eq!(app.input, "ef");
-    assert_eq!(app.input_cursor, 0);
+    assert_eq!(app.editor.input, "ef");
+    assert_eq!(app.editor.cursor, 0);
 
-    Input::move_input_cursor_end(&mut app);
-    Input::move_input_cursor_left(&mut app);
-    Input::delete_input_to_end(&mut app);
+    app.editor.move_input_cursor_end();
+    app.editor.move_input_cursor_left();
+    app.editor.delete_input_to_end();
 
-    assert_eq!(app.input, "e");
-    assert_eq!(app.input_cursor, 1);
+    assert_eq!(app.editor.input, "e");
+    assert_eq!(app.editor.cursor, 1);
 }
 
 #[test]
 fn deletes_multibyte_input_to_start_and_end() {
     let mut app = TuiApp::new(Config::new());
     for ch in "aé文z".chars() {
-        Input::insert_input_char(&mut app, ch);
+        app.editor.insert_input_char(ch);
     }
 
-    Input::move_input_cursor_left(&mut app);
-    Input::move_input_cursor_left(&mut app);
-    Input::delete_input_to_start(&mut app);
+    app.editor.move_input_cursor_left();
+    app.editor.move_input_cursor_left();
+    app.editor.delete_input_to_start();
 
-    assert_eq!(app.input, "文z");
-    assert_eq!(app.input_cursor, 0);
+    assert_eq!(app.editor.input, "文z");
+    assert_eq!(app.editor.cursor, 0);
 
-    Input::move_input_cursor_right(&mut app);
-    Input::delete_input_to_end(&mut app);
+    app.editor.move_input_cursor_right();
+    app.editor.delete_input_to_end();
 
-    assert_eq!(app.input, "文");
-    assert_eq!(app.input_cursor, 1);
+    assert_eq!(app.editor.input, "文");
+    assert_eq!(app.editor.cursor, 1);
 }
 
 #[test]
@@ -105,19 +107,19 @@ fn scrolls_history_with_saturating_offsets() {
 
     assert_eq!(app.history_scroll, 0);
 
-    Input::scroll_history_up(&mut app, 5);
+    app.scroll_history_up(5);
     assert_eq!(app.history_scroll, 5);
 
-    Input::scroll_history_down(&mut app, 2);
+    app.scroll_history_down(2);
     assert_eq!(app.history_scroll, 3);
 
-    Input::scroll_history_down(&mut app, 10);
+    app.scroll_history_down(10);
     assert_eq!(app.history_scroll, 0);
 
     // Scrolling up sets the offset; only an explicit force returns to the bottom.
-    Input::scroll_history_up(&mut app, 4);
+    app.scroll_history_up(4);
     assert_eq!(app.history_scroll, 4);
-    Input::scroll_history_bottom(&mut app);
+    app.scroll_history_bottom();
     assert_eq!(app.history_scroll, 0);
 }
 
@@ -164,7 +166,7 @@ fn pick_list_handles_empty_filters() {
 fn file_query_get_and_replace() {
     let empty_query = "no file";
     assert_eq!(
-        InputMode::get_file_query(empty_query, empty_query.len()),
+        PromptEditor::get_file_query(empty_query, empty_query.len()),
         None
     );
 
@@ -173,7 +175,7 @@ fn file_query_get_and_replace() {
         empty_query
     );
 
-    assert_eq!(InputMode::get_file_query("@", 1), Some("".to_string()));
+    assert_eq!(PromptEditor::get_file_query("@", 1), Some("".to_string()));
 
     assert_eq!(
         file::replace_file_query("myfile.txt", "@", 1),
@@ -182,7 +184,7 @@ fn file_query_get_and_replace() {
 
     let input = "@one.txt foo @two.txt bar @three.txt";
     assert_eq!(
-        InputMode::get_file_query(input, 8),
+        PromptEditor::get_file_query(input, 8),
         Some("one.txt".to_string())
     );
 
@@ -192,7 +194,7 @@ fn file_query_get_and_replace() {
     );
 
     assert_eq!(
-        InputMode::get_file_query(input, 21),
+        PromptEditor::get_file_query(input, 21),
         Some("two.txt".to_string())
     );
 
@@ -202,7 +204,7 @@ fn file_query_get_and_replace() {
     );
 
     assert_eq!(
-        InputMode::get_file_query(input, input.len()),
+        PromptEditor::get_file_query(input, input.len()),
         Some("three.txt".to_string())
     );
 
@@ -212,7 +214,7 @@ fn file_query_get_and_replace() {
     );
 
     assert_eq!(
-        InputMode::get_file_query("text @foo text", 8),
+        PromptEditor::get_file_query("text @foo text", 8),
         Some("fo".to_string())
     );
 
@@ -222,7 +224,7 @@ fn file_query_get_and_replace() {
     );
 
     assert_eq!(
-        InputMode::get_file_query("text @é文 text", 8),
+        PromptEditor::get_file_query("text @é文 text", 8),
         Some("é文".to_string())
     );
 

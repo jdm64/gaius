@@ -290,8 +290,8 @@ fn draw_history_applies_selection_highlight_to_selected_cells() {
 fn draw_input_expands_height_for_wrapped_prompt() {
     let render = Render::new();
     let mut app = TuiApp::new(Config::new());
-    app.input = "abcdefghijklmnopq".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.editor.input = "abcdefghijklmnopq".to_string();
+    app.editor.cursor = app.editor.input.chars().count();
     let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
 
     terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
@@ -353,8 +353,8 @@ fn render_diff_view_includes_headers_lines_and_missing_newline_marker() {
 fn draw_input_places_cursor_on_next_wrapped_line_at_boundary() {
     let render = Render::new();
     let mut app = TuiApp::new(Config::new());
-    app.input = "abcdefghijklmno".to_string();
-    app.input_cursor = 14;
+    app.editor.input = "abcdefghijklmno".to_string();
+    app.editor.cursor = 14;
     let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
 
     terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();

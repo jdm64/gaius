@@ -108,8 +108,8 @@ impl Render {
         let area = frame.area();
         let input_width = area.width.saturating_sub(4).max(1);
 
-        let question_lines = self.question_lines(&app.mode, input_width);
-        let input_prompt = self.input_prompt_lines(app.input.clone(), input_width);
+        let question_lines = self.question_lines(&app.editor.mode, input_width);
+        let input_prompt = self.input_prompt_lines(app.editor.input.clone(), input_width);
         let input_start_line = question_lines.len();
 
         let mut input_lines = question_lines;
@@ -136,7 +136,7 @@ impl Render {
             input_width as usize,
         );
 
-        let active_help: Option<Vec<(&'static str, &'static str)>> = match &app.mode {
+        let active_help: Option<Vec<(&'static str, &'static str)>> = match &app.editor.mode {
             InputMode::Command { picker } => self.draw_commands(frame, chunks[1], picker),
             InputMode::Session { picker } => self.draw_sessions(frame, chunks[1], picker, false),
             InputMode::SessionRename { picker } => {
@@ -144,7 +144,7 @@ impl Render {
             }
             InputMode::Models { picker } => self.draw_models(frame, chunks[1], picker),
             InputMode::AddProvider { picker } => {
-                self.draw_add_provider(frame, chunks[1], picker, app.input.as_str())
+                self.draw_add_provider(frame, chunks[1], picker, app.editor.input.as_str())
             }
             InputMode::Agents { picker } => self.draw_agents(frame, chunks[1], picker),
             InputMode::Files { picker } => self.draw_files(frame, chunks[1], picker),

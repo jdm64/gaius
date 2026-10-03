@@ -42,8 +42,8 @@ fn wrap_behaves_correctly() {
 async fn add_provider_mode_moves_between_fields_and_preserves_values() {
     let config = Config::new();
     let mut app = TuiApp::new(config);
-    app.input = "local".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.editor.input = "local".to_string();
+    app.editor.cursor = app.editor.input.chars().count();
     let rows = vec![
         ProviderInfoRow::Name(String::new()),
         ProviderInfoRow::Url(String::new()),
@@ -51,13 +51,8 @@ async fn add_provider_mode_moves_between_fields_and_preserves_values() {
         ProviderInfoRow::Key(String::new()),
     ];
     let picker = PickList::all(rows);
-
-    let mode = InputMode::handle_provider_add(
-        &mut app,
-        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-        picker,
-    )
-    .await;
+    let key = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+    let mode = InputMode::handle_provider_add(&mut app, key, picker).await;
 
     match mode {
         InputMode::AddProvider { picker } => {
@@ -65,8 +60,8 @@ async fn add_provider_mode_moves_between_fields_and_preserves_values() {
             assert_eq!(picker.rows[0].value(), "local");
             assert_eq!(picker.rows[1].value(), "");
             assert_eq!(picker.rows[2].value(), "openai");
-            assert_eq!(app.input, "");
-            assert_eq!(app.input_cursor, 0);
+            assert_eq!(app.editor.input, "");
+            assert_eq!(app.editor.cursor, 0);
         }
         _ => panic!("expected add provider mode"),
     }
@@ -83,14 +78,9 @@ async fn add_provider_mode_cancel_returns_to_models() {
         ProviderInfoRow::Key(String::new()),
     ];
     let picker = PickList::all(rows);
-
-    let mode = InputMode::handle_provider_add(
-        &mut app,
-        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-        picker,
-    )
-    .await;
+    let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+    let mode = InputMode::handle_provider_add(&mut app, key, picker).await;
 
     assert!(matches!(mode, InputMode::Models { .. }));
-    assert_eq!(app.status, "Add provider cancelled");
+    assert_eq!(app.editor.status, "Add provider cancelled");
 }

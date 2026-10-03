@@ -2,10 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{
-    input::{Input, InputMode, picklist::PickList},
-    tui::TuiApp,
-};
+use crate::input::{InputMode, PromptEditor, picklist::PickList};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;
 
@@ -15,17 +12,17 @@ pub struct FileEntry {
     pub path: PathBuf,
 }
 
-impl InputMode {
+impl PromptEditor {
     pub async fn handle_files(
-        app: &mut TuiApp,
+        &mut self,
         key: KeyEvent,
         mut picker: PickList<FileEntry>,
-    ) -> Self {
-        Input::handle_input_cursor(app, key);
+    ) -> InputMode {
+        self.handle_input_cursor(key);
         match key.code {
-            KeyCode::Esc => return Self::PromptInput,
+            KeyCode::Esc => return InputMode::PromptInput,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Self::Exit;
+                return InputMode::Exit;
             }
             KeyCode::Up => {
                 picker.move_up();
@@ -35,23 +32,23 @@ impl InputMode {
             }
             KeyCode::Enter => {
                 if let Some(file) = picker.selected_row() {
-                    app.input = replace_file_query(&file.name, &app.input, app.input_cursor);
-                    app.input_cursor = app.input.chars().count();
+                    self.input = replace_file_query(&file.name, &self.input, self.cursor);
+                    self.cursor = self.input.chars().count();
                 }
-                return Self::PromptInput;
+                return InputMode::PromptInput;
             }
             _ if Self::input_changed_key(key) => {
-                if let Some(query) = Self::get_file_query(&app.input, app.input_cursor) {
+                if let Some(query) = Self::get_file_query(&self.input, self.cursor) {
                     let filtered = Self::filter_files(&query, &picker.rows);
                     picker.replace_filter(filtered);
                 } else {
-                    return Self::PromptInput;
+                    return InputMode::PromptInput;
                 }
             }
             _ => {}
         }
 
-        Self::Files { picker }
+        InputMode::Files { picker }
     }
 
     pub fn filter_files(input: &str, files: &[FileEntry]) -> Vec<usize> {

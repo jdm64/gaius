@@ -6,7 +6,7 @@ use crate::{
     agents::AgentDefinition,
     commands::Command,
     harness_actor::HarnessActorHandle,
-    input::{Input, InputMode, picklist::PickList},
+    input::{InputMode, PromptEditor, picklist::PickList},
     skills::Skill,
     tui::TuiApp,
 };
@@ -19,7 +19,7 @@ impl InputMode {
         mut picker: PickList<AgentDefinition>,
         actor: &HarnessActorHandle,
     ) -> Self {
-        Input::handle_input_cursor(app, key);
+        app.editor.handle_input_cursor(key);
         match key.code {
             KeyCode::Esc => {
                 return Self::PromptInput;
@@ -35,26 +35,28 @@ impl InputMode {
             }
             KeyCode::Enter => {
                 let Some(selected_agent) = picker.selected_row().cloned() else {
-                    app.status = "No matching agents".to_string();
+                    app.editor.status = "No matching agents".to_string();
                     return Self::Agents { picker };
                 };
                 if let Some(busy) = Command::busy_status(app, "changing agents") {
-                    app.status = busy;
+                    app.editor.status = busy;
                     return Self::Agents { picker };
                 }
                 match actor.set_agent(selected_agent.clone()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
                         app.snapshot.agent_name = selected_agent.name.clone();
-                        Input::clear_input(app);
-                        app.status = format!("Selected agent: {}", selected_agent.name);
+                        app.editor.status_clear_input(&format!(
+                            "Selected agent: {}",
+                            selected_agent.name
+                        ));
                         return Self::PromptInput;
                     }
-                    Err(err) => app.status = err,
+                    Err(err) => app.editor.status = err,
                 }
             }
-            _ if Self::input_changed_key(key) => {
-                picker.replace_filter(filter_agents(&app.input, &picker.rows));
+            _ if PromptEditor::input_changed_key(key) => {
+                picker.replace_filter(filter_agents(&app.editor.input, &picker.rows));
             }
             _ => {}
         }
@@ -68,7 +70,7 @@ impl InputMode {
         mut picker: PickList<Skill>,
         actor: &HarnessActorHandle,
     ) -> Self {
-        Input::handle_input_cursor(app, key);
+        app.editor.handle_input_cursor(key);
         match key.code {
             KeyCode::Esc => return Self::PromptInput,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -83,18 +85,18 @@ impl InputMode {
             KeyCode::Enter if !picker.is_empty() => {
                 if let Some(skill) = picker.selected_row() {
                     if let Some(busy) = Command::busy_status(app, "running a skill") {
-                        app.status = busy;
+                        app.editor.status = busy;
                         return Self::Skills { picker };
                     }
                     match actor.run_skill(skill.name.clone()).await {
                         Ok(()) => {
-                            app.status = format!("Ran skill: {}", skill.name);
+                            app.editor.status = format!("Ran skill: {}", skill.name);
                         }
                         Err(err) => {
-                            app.status = format!("Error running skill: {}", err);
+                            app.editor.status = format!("Error running skill: {}", err);
                         }
                     }
-                    Input::clear_input(app);
+                    app.editor.clear_input();
                     return Self::PromptInput;
                 }
             }
@@ -102,16 +104,16 @@ impl InputMode {
                 let skills = match actor.reload_skills().await {
                     Ok(skills) => skills,
                     Err(err) => {
-                        app.status = format!("Error reloading skills: {}", err);
+                        app.editor.status = format!("Error reloading skills: {}", err);
                         Vec::new()
                     }
                 };
-                let filtered = filter_skills(&app.input, &skills);
+                let filtered = filter_skills(&app.editor.input, &skills);
                 picker.replace_rows(skills, filtered);
-                app.status = format!("Reloaded {} skills", picker.rows.len());
+                app.editor.status = format!("Reloaded {} skills", picker.rows.len());
             }
-            _ if Self::input_changed_key(key) => {
-                picker.replace_filter(filter_skills(&app.input, &picker.rows));
+            _ if PromptEditor::input_changed_key(key) => {
+                picker.replace_filter(filter_skills(&app.editor.input, &picker.rows));
             }
             _ => {}
         }
