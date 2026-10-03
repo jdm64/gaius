@@ -44,7 +44,7 @@ impl Render {
                 empty_text: "No matching commands",
                 background: Style::default(),
             },
-            |cmd, _index| ListItem::new(format!("/{} - {}", cmd.name, cmd.description)),
+            |cmd, _index| ListItem::new(format!("/{cmd} - {}", cmd.description())),
         );
         Some(vec![
             ("Type", "filter"),

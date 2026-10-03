@@ -170,8 +170,15 @@ impl InputMode {
                     return Ok(Self::PromptInput);
                 }
 
-                if let Some(command) = prompt.trim().strip_prefix('/') {
-                    return Ok(Command::execute(app, actor, command).await);
+                if let Some(name) = prompt.trim().strip_prefix('/') {
+                    let mode = match Command::from_name(name) {
+                        Some(command) => Command::execute(app, actor, command).await,
+                        None => {
+                            app.editor.status = format!("Unknown command: {name}");
+                            InputMode::PromptInput
+                        }
+                    };
+                    return Ok(mode);
                 }
 
                 app.queue_prompt(prompt, actor).await?;
@@ -204,8 +211,7 @@ impl InputMode {
                 picker.move_down();
             }
             KeyCode::Enter if !picker.is_empty() => {
-                let command = picker.selected_row().map(|row| row.name);
-                if let Some(command) = command {
+                if let Some(command) = picker.selected_row().copied() {
                     return Command::execute(app, actor, command).await;
                 }
             }

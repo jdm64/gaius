@@ -13,85 +13,75 @@ use crate::{
 };
 use std::future::Future;
 
-#[derive(Clone)]
-pub struct Command {
-    pub name: &'static str,
-    pub description: &'static str,
+macro_rules! define_commands {
+    ($($variant:ident => $name:literal, $description:literal;)*) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Command {
+            $($variant),*
+        }
+
+        impl std::fmt::Display for Command {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.name())
+            }
+        }
+
+        impl Command {
+            pub const ALL: &'static [Command] = &[$(Command::$variant),*];
+
+            pub fn name(self) -> &'static str {
+                match self {
+                    $(Command::$variant => $name),*
+                }
+            }
+
+            pub fn description(self) -> &'static str {
+                match self {
+                    $(Command::$variant => $description),*
+                }
+            }
+
+            pub fn from_name(name: &str) -> Option<Self> {
+                Self::ALL.iter().copied().find(|cmd| cmd.name() == name)
+            }
+        }
+    };
+}
+
+define_commands! {
+    /* Common */
+    New => "new", "Clear history and create a new session";
+    Sessions => "sessions", "Load and delete sessions";
+    Models => "models", "List and select models";
+    Reasoning => "reasoning", "Set reasoning effort level";
+    /* Prompt */
+    Agents => "agents", "List and select agents";
+    Skills => "skills", "List available skills";
+    Plan => "plan", "Toggle plan mode on/off";
+    Rebuild => "rebuild", "Reload agents, skills, and AGENTS.md";
+    /* Session */
+    Compact => "compact", "Compact conversation history into summary";
+    Fork => "fork", "Copy the current session with a new id";
+    Info => "info", "Show session info";
+    /* Display */
+    ShowThinking => "show-thinking", "Toggle rendering of thinking messages";
+    ShowTokens => "show-tokens", "Toggle rendering of token info messages";
+    ShowDiff => "show-diff", "Toggle rendering of diff messages";
+    Streaming => "streaming", "Toggle streaming mode";
 }
 
 impl Command {
     pub fn list() -> Vec<Self> {
-        vec![
-            /* Common */
-            Self {
-                name: "new",
-                description: "Clear history and create a new session",
-            },
-            Self {
-                name: "sessions",
-                description: "Load and delete sessions",
-            },
-            Self {
-                name: "models",
-                description: "List and select models",
-            },
-            Self {
-                name: "reasoning",
-                description: "Set reasoning effort level",
-            },
-            /* Prompt */
-            Self {
-                name: "agents",
-                description: "List and select agents",
-            },
-            Self {
-                name: "skills",
-                description: "List available skills",
-            },
-            Self {
-                name: "plan",
-                description: "Toggle plan mode on/off",
-            },
-            Self {
-                name: "rebuild",
-                description: "Reload agents, skills, and AGENTS.md",
-            },
-            /* Session */
-            Self {
-                name: "compact",
-                description: "Compact conversation history into summary",
-            },
-            Self {
-                name: "fork",
-                description: "Copy the current session with a new id",
-            },
-            Self {
-                name: "info",
-                description: "Show session info",
-            },
-            /* Display */
-            Self {
-                name: "show-thinking",
-                description: "Toggle rendering of thinking messages",
-            },
-            Self {
-                name: "show-tokens",
-                description: "Toggle rendering of token info messages",
-            },
-            Self {
-                name: "show-diff",
-                description: "Toggle rendering of diff messages",
-            },
-            Self {
-                name: "streaming",
-                description: "Toggle streaming mode",
-            },
-        ]
+        Self::ALL.to_vec()
     }
 
-    pub async fn execute(app: &mut TuiApp, actor: &HarnessActorHandle, command: &str) -> InputMode {
+    pub async fn execute(
+        app: &mut TuiApp,
+        actor: &HarnessActorHandle,
+        command: Command,
+    ) -> InputMode {
         match command {
-            "new" => {
+            Self::New => {
                 match Self::when_idle(app, "creating a session", actor.new_session()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
@@ -105,7 +95,7 @@ impl Command {
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
-            "fork" => {
+            Self::Fork => {
                 match Self::when_idle(app, "forking a session", actor.fork_session()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
@@ -121,18 +111,18 @@ impl Command {
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
-            "sessions" => {
+            Self::Sessions => {
                 let sessions = Session::list();
                 app.editor.clear_input();
                 InputMode::Session {
                     picker: PickList::all(sessions),
                 }
             }
-            "models" => {
+            Self::Models => {
                 app.editor.status_clear_input("Loading models...");
                 app.editor.build_models(&app.config).await
             }
-            "agents" => {
+            Self::Agents => {
                 let agents = app.config.agents().all().to_vec();
                 app.editor
                     .status_clear_input(&format!("Loaded {} agents", agents.len()));
@@ -140,7 +130,7 @@ impl Command {
                     picker: PickList::all(agents),
                 }
             }
-            "skills" => {
+            Self::Skills => {
                 let skills = match actor.get_skills().await {
                     Ok(skills) => skills,
                     Err(err) => {
@@ -153,7 +143,7 @@ impl Command {
                     picker: PickList::all(skills),
                 }
             }
-            "rebuild" => {
+            Self::Rebuild => {
                 if let Some(busy) = Self::busy_status(app, "rebuilding") {
                     app.editor.status = busy;
                 } else {
@@ -196,7 +186,7 @@ impl Command {
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
-            "compact" => {
+            Self::Compact => {
                 if let Some(busy) = Self::busy_status(app, "compacting") {
                     app.editor.status = busy;
                 } else {
@@ -211,7 +201,7 @@ impl Command {
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
-            "info" => match actor.info().await {
+            Self::Info => match actor.info().await {
                 Ok(info) => {
                     app.editor.clear_input();
                     InputMode::SessionInfo { info }
@@ -222,7 +212,7 @@ impl Command {
                     InputMode::PromptInput
                 }
             },
-            "streaming" => {
+            Self::Streaming => {
                 match Self::when_idle(app, "changing streaming", actor.toggle_streaming()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
@@ -233,12 +223,12 @@ impl Command {
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
-            "thinking" => {
+            Self::ShowThinking => {
                 app.toggle_thinking();
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
-            "reasoning" => {
+            Self::Reasoning => {
                 let efforts: Vec<ReasoningEffort> = ReasoningEffort::all().to_vec();
                 let filtered = (0..efforts.len()).collect();
                 app.editor.clear_input();
@@ -246,17 +236,17 @@ impl Command {
                     picker: PickList::new(efforts, filtered),
                 }
             }
-            "show-tokens" => {
+            Self::ShowTokens => {
                 app.toggle_token_info();
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
-            "show-diff" => {
+            Self::ShowDiff => {
                 app.toggle_diff_view();
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
-            "plan" => {
+            Self::Plan => {
                 match Self::when_idle(app, "changing plan mode", actor.toggle_plan_mode()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
@@ -264,14 +254,6 @@ impl Command {
                     }
                     Err(e) => app.editor.status = e,
                 }
-                app.editor.clear_input();
-                InputMode::PromptInput
-            }
-            _ => {
-                app.push_message(TuiMessage::SystemMessage(format!(
-                    "Unknown command: /{}",
-                    command
-                )));
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
@@ -287,7 +269,7 @@ impl Command {
         commands
             .iter()
             .enumerate()
-            .filter_map(|(index, cmd)| cmd.name.to_lowercase().contains(&query).then_some(index))
+            .filter_map(|(index, cmd)| cmd.name().to_lowercase().contains(&query).then_some(index))
             .collect()
     }
 
