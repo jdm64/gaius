@@ -143,28 +143,10 @@ impl Render {
                     .fg(self.theme.thinking)
                     .add_modifier(Modifier::ITALIC)
                     .add_modifier(Modifier::DIM);
-                let options = Options::default();
-                let lines: Vec<Line> = from_str_with_options(text, &options)
-                    .lines
-                    .into_iter()
-                    .map(|mut line| {
-                        line.spans = line
-                            .spans
-                            .into_iter()
-                            .map(|span| Span::styled(span.content, style.patch(span.style)))
-                            .collect();
-                        Self::owned_line(line)
-                    })
-                    .collect();
-                lines
+                Self::render_markdown(text, Some(text_width), Some(style))
             }
             TuiMessage::AgentMessage(text) | TuiMessage::PlanMessage(text) => {
-                let options = Options::default();
-                from_str_with_options(text, &options)
-                    .lines
-                    .into_iter()
-                    .map(Self::owned_line)
-                    .collect()
+                Self::render_markdown(text, Some(text_width), None)
             }
             TuiMessage::UserPrompt(text) => {
                 let style = self.theme.user_prompt_style();
@@ -260,6 +242,28 @@ impl Render {
         }
     }
 
+    fn render_markdown(text: &str, width: Option<u16>, style: Option<Style>) -> Vec<Line<'static>> {
+        let mut options = Options::default();
+        if let Some(wd) = width {
+            options = options.table_width(wd);
+        }
+        let iter = from_str_with_options(text, &options).lines.into_iter();
+
+        if let Some(st) = style {
+            iter.map(|mut line| {
+                line.spans = line
+                    .spans
+                    .into_iter()
+                    .map(|span| Span::styled(span.content, st.patch(span.style)))
+                    .collect();
+                Self::owned_line(line)
+            })
+            .collect()
+        } else {
+            iter.map(Self::owned_line).collect()
+        }
+    }
+
     fn render_diff_view(diff: &DiffView) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         let header_style = Style::default().add_modifier(Modifier::BOLD);
@@ -322,13 +326,7 @@ impl Render {
             }
             Some(ToolName::Plan) => {
                 let md = RenderUtil::plan_to_md(args);
-                let options = Options::default();
-                let rendered_lines: Vec<Line> = from_str_with_options(&md, &options)
-                    .lines
-                    .into_iter()
-                    .map(Self::owned_line)
-                    .collect();
-
+                let rendered_lines = Self::render_markdown(&md, None, None);
                 lines.push(Line::raw(" "));
                 lines.extend(rendered_lines);
                 lines.push(Line::raw(" "));
