@@ -1,5 +1,4 @@
-use gaius::skills::SkillRepo;
-use gaius::tools::{ToolEngine, ToolName, ToolResult};
+use gaius::{skills::SkillRepo, tool_engine::ToolEngine, tool_engine::ToolResult, tools::ToolName};
 use serde_json::json;
 use std::sync::{Mutex, OnceLock};
 

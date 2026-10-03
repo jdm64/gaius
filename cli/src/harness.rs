@@ -17,7 +17,7 @@ use crate::{
     session::Session,
     skills::{Skill, SkillRepo},
     token_usage::{SessionInfo, TokenUsageLedger},
-    tools::{ToolEngine, ToolResult},
+    tool_engine::{ToolEngine, ToolResult},
 };
 use futures::StreamExt;
 use genai::chat::{

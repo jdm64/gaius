@@ -26,5 +26,6 @@ pub mod selection;
 pub mod session;
 pub mod skills;
 pub mod token_usage;
+pub mod tool_engine;
 pub mod tools;
 pub mod tui;
