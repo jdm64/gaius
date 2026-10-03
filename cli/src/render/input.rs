@@ -3,10 +3,10 @@
  */
 
 use crate::{
-    harness::time_now,
     input::InputMode,
     render::{Render, util::RenderUtil},
     tui::TuiApp,
+    util::time_now,
 };
 use ratatui::{
     Frame,

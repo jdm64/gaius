@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::harness::time_now;
+use crate::util::time_now;
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},

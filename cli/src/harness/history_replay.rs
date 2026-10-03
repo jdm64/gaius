@@ -2,8 +2,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{diff_view::DiffView, harness::HarnessEvent, token_usage::TokenUsageLedger};
+use crate::{
+    diff_view::DiffView,
+    harness::{Harness, HarnessEvent},
+    token_usage::TokenUsageLedger,
+};
 use genai::chat::{ChatMessage, ChatRole, ContentPart, CustomPart};
+
+impl Harness {
+    /// Replay the entire chat history as `HarnessEvent` callbacks, pairing
+    /// assistant tool-calls with their following tool-response messages.
+    ///
+    /// TUI and CLI callers can use this as the single code path for rendering
+    /// both live turns and previously-saved history.
+    pub fn replay_history<F>(&self, on_event: F)
+    where
+        F: FnMut(HarnessEvent),
+    {
+        replay_messages(&self.history.messages, &self.token_usage, on_event);
+        self.update_session_info();
+    }
+}
 
 pub trait MessageExt {
     fn is_tool_error(&self) -> bool;

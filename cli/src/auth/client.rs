@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use crate::util::time_now_sec;
 use base64::{
     Engine as _,
     engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
@@ -9,11 +10,7 @@ use base64::{
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::Value;
-use std::{
-    error::Error,
-    net::SocketAddr,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{error::Error, net::SocketAddr, time::Duration};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
@@ -42,7 +39,7 @@ impl OAuthResponse {
     pub fn expires(&self) -> i64 {
         self.expires_in.map_or_else(
             || self.token_expires(),
-            |expires_in| now_epoch().saturating_add(expires_in.min(i64::MAX as u64) as i64),
+            |expires_in| time_now_sec().saturating_add(expires_in.min(i64::MAX as u64) as i64),
         )
     }
 
@@ -50,7 +47,7 @@ impl OAuthResponse {
         decode_jwt(&self.access_token)
             .and_then(|claims| claims.get("exp")?.as_i64())
             .filter(|exp| *exp >= 0)
-            .unwrap_or(now_epoch() + ASSUMED_LIFETIME.as_secs() as i64)
+            .unwrap_or(time_now_sec() + ASSUMED_LIFETIME.as_secs() as i64)
     }
 }
 
@@ -335,13 +332,6 @@ pub fn random_token(bytes: usize) -> String {
     let mut token = vec![0u8; bytes];
     rand::rng().fill_bytes(&mut token);
     URL_SAFE_NO_PAD.encode(token)
-}
-
-pub fn now_epoch() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }
 
 pub fn decode_jwt(token: &str) -> Option<Value> {

@@ -2,10 +2,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{
-    harness::{Harness, HarnessEvent, time_now},
-    token_usage::TokenUsageLedger,
-};
+use super::{Harness, HarnessEvent};
+use crate::{token_usage::TokenUsageLedger, util::time_now};
 use genai::chat::{ChatMessage, ChatRequest, ChatRole, ContentPart, CustomPart, MessageContent};
 use serde_json::json;
 use std::error::Error;
@@ -40,6 +38,61 @@ pub enum CompactOutcome {
     NothingToCompact,
     Failed,
     Cancelled,
+}
+
+impl Harness {
+    pub async fn compact<F>(&mut self, on_event: &mut F) -> Result<(), Box<dyn Error>>
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        self.set_cancel(false);
+        self.update_session_info();
+
+        let outcome = match Compact::compact_now(self, on_event).await {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                self.drop_queued_prompts(on_event);
+                return Err(err);
+            }
+        };
+
+        match outcome {
+            CompactOutcome::NothingToCompact => {
+                self.send_system_message("Nothing to compact".to_string(), on_event);
+            }
+            CompactOutcome::Cancelled => {
+                self.send_system_message("Compaction cancelled".to_string(), on_event);
+                self.drop_queued_prompts(on_event);
+            }
+            // A failure already reported itself with a system message.
+            CompactOutcome::Failed => self.drop_queued_prompts(on_event),
+            CompactOutcome::Compacted => {}
+        }
+
+        Ok(())
+    }
+
+    pub fn apply_compaction<F>(
+        &mut self,
+        removed: usize,
+        messages: Vec<ChatMessage>,
+        summary_tokens: Option<i32>,
+        on_event: &mut F,
+    ) -> Result<(), Box<dyn Error>>
+    where
+        F: FnMut(HarnessEvent) -> Option<String>,
+    {
+        self.history.messages = messages;
+        self.token_usage.compact(removed, summary_tokens);
+        self.save_history()?;
+        on_event(HarnessEvent::TokenUsage {
+            prompt: None,
+            response: None,
+            total: self.token_usage.total_tokens(),
+            cost: self.token_usage.usage().total_cost(),
+        });
+        Ok(())
+    }
 }
 
 pub struct Compact;

@@ -1,10 +1,11 @@
-use gaius::config::Config;
-use gaius::diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView};
-use gaius::render::Render;
-use gaius::render::history::DisplayPrefs;
-use gaius::render::layout::HistoryLayout;
-use gaius::selection::{HistoryPoint, HistorySelection, RowWrapInfo, Selection};
-use gaius::tui::{TuiApp, TuiMessage};
+use gaius::{
+    config::Config,
+    diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
+    render::{Render, history::DisplayPrefs, layout::HistoryLayout},
+    selection::{HistoryPoint, HistorySelection, RowWrapInfo, Selection},
+    tui::{TuiApp, TuiMessage},
+    util::time_now,
+};
 use ratatui::{
     Terminal,
     backend::TestBackend,
@@ -371,7 +372,7 @@ fn tool_call_duration_renders_on_its_own_line() {
     let msg = TuiMessage::ToolCall {
         name: "bash".to_string(),
         arguments: "{}".to_string(),
-        start_time: gaius::harness::time_now() - 5_000,
+        start_time: time_now() - 5_000,
     };
     let lines = render.render_message(&msg, &default_prefs(), 80);
     assert_eq!(lines.len(), 2, "expected name line + duration line");
@@ -403,7 +404,7 @@ fn live_tool_call_timer_updates_without_new_messages() {
     app.push_message(TuiMessage::ToolCall {
         name: "bash".to_string(),
         arguments: "{}".to_string(),
-        start_time: gaius::harness::time_now() - 5_000,
+        start_time: time_now() - 5_000,
     });
 
     let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();
@@ -445,7 +446,7 @@ fn line_texts(lines: &[Line<'_>]) -> Vec<String> {
 fn compaction_start_renders_rule_with_duration_while_running() {
     let render = Render::new();
     let msg = TuiMessage::CompactionStart {
-        start_time: gaius::harness::time_now() - 3_000,
+        start_time: time_now() - 3_000,
     };
     let lines = render.render_message(&msg, &default_prefs(), 80);
     assert_eq!(lines.len(), 2, "expected rule line + duration line");
@@ -479,7 +480,7 @@ fn live_compaction_timer_updates_without_new_messages() {
     let render = Render::new();
     let mut app = TuiApp::new(Config::new());
     app.push_message(TuiMessage::CompactionStart {
-        start_time: gaius::harness::time_now() - 5_000,
+        start_time: time_now() - 5_000,
     });
 
     let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();

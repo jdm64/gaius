@@ -1,22 +1,18 @@
 use gaius::{
     agents::AgentDefinition,
-    compact::Compact,
     diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
-    harness::{Harness, HarnessEvent},
+    harness::{Harness, HarnessEvent, compact::Compact, history_replay, prompt_queue::PromptQueue},
     harness_actor::HarnessActorEvent,
-    history_replay,
     models::TokenPrice,
-    prompt_queue::PromptQueue,
     rate_limit::{is_rate_limit_error, is_webc_rate_limit},
     token_usage::{TokenUsageLedger, TokenUsageSpan},
 };
-use genai::Error as GenaiError;
-use genai::ModelIden;
-use genai::adapter::AdapterKind;
-use genai::chat::{
-    ChatMessage, ContentPart, CustomPart, MessageContent, ToolCall, ToolResponse, Usage,
-};
 use genai::webc::Error as WebcError;
+use genai::{
+    Error as GenaiError, ModelIden,
+    adapter::AdapterKind,
+    chat::{ChatMessage, ContentPart, CustomPart, MessageContent, ToolCall, ToolResponse, Usage},
+};
 use reqwest::{StatusCode, header::HeaderMap};
 use serde_json::json;
 use tokio::sync::mpsc::{self, UnboundedSender};

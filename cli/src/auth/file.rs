@@ -3,10 +3,13 @@
  */
 
 use crate::{
-    auth::client::{OAuthResponse, now_epoch, random_token},
-    auth::handle::TokenError,
-    auth::spec::OAuthSpec,
+    auth::{
+        client::{OAuthResponse, random_token},
+        handle::TokenError,
+        spec::OAuthSpec,
+    },
     dirs::Dirs,
+    util::time_now_sec,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -155,7 +158,7 @@ impl OAuthFile {
     }
 
     pub fn needs_refresh(&self) -> bool {
-        now_epoch() + REFRESH_SKEW.as_secs() as i64 >= self.expires
+        time_now_sec() + REFRESH_SKEW.as_secs() as i64 >= self.expires
     }
 }
 
