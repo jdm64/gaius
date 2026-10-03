@@ -7,7 +7,6 @@ use crate::{
     render::Render,
     render::layout::LiveTimer,
     render::util::{RenderUtil, USER_PROMPT_BAR},
-    selection::RowWrapInfo,
     tools::ToolName,
     tui::{TuiApp, TuiMessage},
 };
@@ -48,27 +47,15 @@ impl DisplayPrefs {
 
 impl Render {
     pub fn draw_history(&self, app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
-        let text_width = area.width.saturating_sub(2).max(1);
-        let text_height = area.height.saturating_sub(2).max(1);
-        app.history_page_size = text_height;
+        let width = area.width.saturating_sub(2).max(1);
+        let height = area.height.saturating_sub(2).max(1);
 
-        self.sync_history_lines(app, text_width);
+        self.sync_history_lines(app, width);
 
-        let wrapped_height = app.history_layout.visible_lines.len() as u16;
-        let max_scroll = wrapped_height.saturating_sub(text_height);
-        let clamped_scroll = Render::update_scroll_state(app, wrapped_height, max_scroll);
-
-        let start = max_scroll.saturating_sub(clamped_scroll);
-        let lines = self.visible_cached_history_lines(app, start as usize, text_height as usize);
-
-        let lines = app.selection.highlight(
-            lines.0,
-            lines.1,
-            area,
-            text_width,
-            text_height,
-            self.theme.selected,
-        );
+        let lines = app.history.visible_cached_lines(height);
+        let lines =
+            app.selection
+                .highlight(lines.0, lines.1, area, width, height, self.theme.selected);
 
         let snapshot = &app.snapshot;
         let agent_label = if snapshot.plan_mode_on {
@@ -113,43 +100,15 @@ impl Render {
             .wrap(Wrap { trim: false });
         frame.render_widget(history, area);
 
-        app.history_scroll = clamped_scroll;
-
         self.render_lines_below(app, frame, area);
     }
 
-    fn update_scroll_state(app: &mut TuiApp, wrapped_height: u16, max_scroll: u16) -> u16 {
-        let height_growth = if app.history_scroll != 0 && app.history_height != 0 {
-            wrapped_height.saturating_sub(app.history_height)
-        } else {
-            0
-        };
-        if height_growth > 0 {
-            app.history_scroll = app.history_scroll.saturating_add(height_growth);
-        }
-        app.history_height = wrapped_height;
-
-        let clamped_scroll = app.history_scroll.min(max_scroll);
-
-        app.new_lines_below = if clamped_scroll == 0 {
-            0
-        } else if height_growth > 0 {
-            app.new_lines_below
-                .saturating_add(height_growth)
-                .min(clamped_scroll)
-        } else {
-            app.new_lines_below.min(clamped_scroll)
-        };
-
-        clamped_scroll
-    }
-
     fn render_lines_below(&self, app: &mut TuiApp, frame: &mut Frame<'_>, area: Rect) {
-        if app.new_lines_below > 0 && area.height >= 3 {
-            let text = if app.new_lines_below == 1 {
+        if app.history.new_lines > 0 && area.height >= 3 {
+            let text = if app.history.new_lines == 1 {
                 "1 new line".to_string()
             } else {
-                format!("{} new lines", app.new_lines_below)
+                format!("{} new lines", app.history.new_lines)
             };
             let indicator_area = Rect {
                 x: area.x,
@@ -379,10 +338,7 @@ impl Render {
     }
 
     fn sync_history_lines(&self, app: &mut TuiApp, text_width: u16) {
-        let Some(dirty_from) = app
-            .history_layout
-            .update_dirty_from(text_width, &self.theme)
-        else {
+        let Some(dirty_from) = app.history.update_dirty_from(text_width, &self.theme) else {
             return;
         };
         let last_idx = app.messages.len().saturating_sub(1);
@@ -397,63 +353,30 @@ impl Render {
         }
 
         // reset height so scroll doesn't drift
-        if app.history_layout.last_width != text_width {
-            app.history_height = app.history_layout.visible_lines.len() as u16;
-        }
-        app.history_layout.last_width = text_width;
-        app.history_layout.dirty_from = None;
+        app.history.update_width(text_width);
     }
 
     fn full_rerender(&self, app: &mut TuiApp, text_width: u16) {
-        app.history_layout.reset_lines();
+        app.history.reset_lines();
 
         for index in 0..app.messages.len() {
             self.render_message_at(app, index, text_width);
         }
 
-        app.history_layout
+        app.history
             .append_visual_history(0, text_width, &self.theme);
     }
 
     fn rerender_last(&self, app: &mut TuiApp, last_idx: usize, text_width: u16) {
-        app.history_layout.truncate_last_block();
+        app.history.truncate_last_block();
         self.render_message_at(app, last_idx, text_width);
-        app.history_layout.append_visual_history(
-            app.history_layout.last_block_start,
-            text_width,
-            &self.theme,
-        );
-    }
-
-    fn visible_cached_history_lines(
-        &self,
-        app: &TuiApp,
-        start: usize,
-        height: usize,
-    ) -> (Vec<Line<'static>>, Vec<RowWrapInfo>) {
-        let end = start
-            .saturating_add(height)
-            .min(app.history_layout.visible_lines.len());
-        let lines = app.history_layout.visible_lines[start..end].to_vec();
-        let row_info = lines
-            .iter()
-            .enumerate()
-            .map(|(offset, line)| {
-                let visual_index = start + offset;
-                let source_index = app
-                    .history_layout
-                    .line_starts
-                    .partition_point(|&row_start| row_start <= visual_index)
-                    .saturating_sub(1);
-                RowWrapInfo::new(line, source_index)
-            })
-            .collect();
-        (lines, row_info)
+        app.history
+            .append_visual_history(app.history.block_start, text_width, &self.theme);
     }
 
     fn render_message_at(&self, app: &mut TuiApp, index: usize, text_width: u16) {
         let message = &app.messages[index];
-        let block_start = app.history_layout.lines.len();
+        let block_start = app.history.lines.len();
 
         if index > 0 {
             let previous = &app.messages[index - 1];
@@ -468,11 +391,11 @@ impl Render {
                         | TuiMessage::ToolResult { .. }
                 )
             {
-                app.history_layout.lines.push(Line::from(""));
+                app.history.lines.push(Line::from(""));
             }
         }
 
-        let content_offset = app.history_layout.lines.len();
+        let content_offset = app.history.lines.len();
         let rendered = self.render_message(message, &app.display_prefs, text_width);
 
         let live_timer = match message {
@@ -488,17 +411,17 @@ impl Render {
         if let Some((start_time, style)) = live_timer
             && !rendered.is_empty()
         {
-            app.history_layout.live_timers.push(LiveTimer {
+            app.history.timers.push(LiveTimer {
                 line_index: content_offset + rendered.len() - 1,
                 start_time,
                 style,
             });
         }
 
-        app.history_layout
+        app.history
             .lines
             .extend(rendered.into_iter().map(Self::owned_line));
-        app.history_layout.last_block_start = block_start;
+        app.history.block_start = block_start;
     }
 
     /// Horizontal rule with the word "Compaction" centered.

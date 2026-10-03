@@ -410,9 +410,9 @@ fn live_tool_call_timer_updates_without_new_messages() {
     terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
 
     // The active tool call should be tracked as a live timer.
-    assert_eq!(app.history_layout.live_timers.len(), 1);
+    assert_eq!(app.history.timers.len(), 1);
     let timer_text = |app: &TuiApp| {
-        app.history_layout.lines[app.history_layout.live_timers[0].line_index]
+        app.history.lines[app.history.timers[0].line_index]
             .spans
             .iter()
             .map(|s| s.content.as_ref())
@@ -486,9 +486,9 @@ fn live_compaction_timer_updates_without_new_messages() {
     terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
 
     // the running compaction should be tracked as a live timer
-    assert_eq!(app.history_layout.live_timers.len(), 1);
+    assert_eq!(app.history.timers.len(), 1);
     let timer_text = |app: &TuiApp| {
-        app.history_layout.lines[app.history_layout.live_timers[0].line_index]
+        app.history.lines[app.history.timers[0].line_index]
             .spans
             .iter()
             .map(|s| s.content.as_ref())
@@ -535,28 +535,28 @@ fn draw_history_anchors_view_and_shows_new_lines_below_indicator() {
 
     // At the bottom: nothing special.
     terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
-    assert_eq!(app.history_scroll, 0);
-    assert_eq!(app.new_lines_below, 0);
+    assert_eq!(app.history.scroll, 0);
+    assert_eq!(app.history.new_lines, 0);
     assert!(!buffer_contains(&terminal, " new line"));
 
     // Simulate the user scrolling up a few lines.
-    app.history_scroll = 5;
+    app.history.scroll = 5;
     terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
-    assert_eq!(app.new_lines_below, 0);
+    assert_eq!(app.history.new_lines, 0);
 
     // New output while scrolled up must NOT yank the view to the bottom, must
     // keep the same viewport (anchored), and must flag the unread lines below.
     app.push_message(TuiMessage::AgentMessage("new output".to_string()));
     terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
-    assert_ne!(app.history_scroll, 0); // not yanked to the bottom
-    assert_eq!(app.history_scroll, 6); // anchored: grew by exactly one new line
-    assert_eq!(app.new_lines_below, 1);
+    assert_ne!(app.history.scroll, 0); // not yanked to the bottom
+    assert_eq!(app.history.scroll, 6); // anchored: grew by exactly one new line
+    assert_eq!(app.history.new_lines, 1);
     assert!(buffer_contains(&terminal, " new line"));
 
     // Returning to the bottom dismisses the indicator.
-    app.history_scroll = 0;
+    app.history.scroll = 0;
     terminal.draw(|frame| render.draw(&mut app, frame)).unwrap();
-    assert_eq!(app.history_scroll, 0);
-    assert_eq!(app.new_lines_below, 0);
+    assert_eq!(app.history.scroll, 0);
+    assert_eq!(app.history.new_lines, 0);
     assert!(!buffer_contains(&terminal, " new line"));
 }

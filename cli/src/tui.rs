@@ -95,14 +95,10 @@ pub struct TuiApp {
     pub snapshot: HarnessSnapshot,
     pub agents: Agents,
     pub editor: PromptEditor,
-    pub history_scroll: u16,
-    pub history_page_size: u16,
-    pub history_height: u16,
-    pub new_lines_below: u16,
     pub messages: Vec<TuiMessage>,
     pub context_tokens: Option<i32>,
     pub display_prefs: DisplayPrefs,
-    pub history_layout: HistoryLayout,
+    pub history: HistoryLayout,
     pub selection: Selection,
     pub actor_busy: bool,
 }
@@ -121,10 +117,6 @@ impl TuiApp {
             snapshot: HarnessSnapshot::default(),
             agents,
             editor: PromptEditor::new(),
-            history_scroll: 0,
-            history_page_size: 1,
-            history_height: 0,
-            new_lines_below: 0,
             messages: Vec::new(),
             context_tokens: None,
             display_prefs: DisplayPrefs {
@@ -132,7 +124,7 @@ impl TuiApp {
                 token_info: true,
                 diff_view: true,
             },
-            history_layout: HistoryLayout::default(),
+            history: HistoryLayout::default(),
             selection: Selection::default(),
             actor_busy: false,
         }
@@ -238,11 +230,11 @@ impl TuiApp {
                 match mouse.kind {
                     MouseEventKind::ScrollUp => {
                         self.selection.selection = None;
-                        self.scroll_history_up(3);
+                        self.history.scroll_up(3);
                     }
                     MouseEventKind::ScrollDown => {
                         self.selection.selection = None;
-                        self.scroll_history_down(3);
+                        self.history.scroll_down(3);
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
                         self.selection.mouse_down(mouse);
@@ -265,13 +257,13 @@ impl TuiApp {
 
         match key.code {
             KeyCode::PageUp => {
-                let amount = self.history_page_scroll_amount();
-                self.scroll_history_up(amount);
+                let amount = self.history.scroll_size();
+                self.history.scroll_up(amount);
                 return Ok(());
             }
             KeyCode::PageDown => {
-                let amount = self.history_page_scroll_amount();
-                self.scroll_history_down(amount);
+                let amount = self.history.scroll_size();
+                self.history.scroll_down(amount);
                 return Ok(());
             }
             _ => {}
@@ -294,7 +286,7 @@ impl TuiApp {
         self.agents.mark_recent(&self.snapshot.agent_name);
         self.editor.update_prompt_history(prompt.clone());
         self.editor.status_clear_input("Waiting for agent...");
-        self.scroll_history_bottom();
+        self.history.scroll_bottom();
 
         if let Err(err) = actor.run_prompt(prompt).await {
             self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
@@ -551,41 +543,22 @@ impl TuiApp {
 
     pub fn clear_messages(&mut self) {
         self.messages.clear();
-        self.history_layout.clear();
+        self.history.clear();
     }
 
     pub fn toggle_thinking(&mut self) {
         self.editor.status = self.display_prefs.toggle_thinking();
-        self.history_layout.invalidate_from(0);
+        self.history.invalidate_from(0);
     }
 
     pub fn toggle_token_info(&mut self) {
         self.editor.status = self.display_prefs.toggle_token_info();
-        self.history_layout.invalidate_from(0);
+        self.history.invalidate_from(0);
     }
 
     pub fn toggle_diff_view(&mut self) {
         self.editor.status = self.display_prefs.toggle_diff_view();
-        self.history_layout.invalidate_from(0);
-    }
-
-    pub fn scroll_history_bottom(&mut self) {
-        self.history_scroll = 0;
-        self.new_lines_below = 0;
-    }
-
-    pub fn scroll_history_up(&mut self, amount: u16) {
-        self.history_scroll = self.history_scroll.saturating_add(amount);
-    }
-
-    pub fn scroll_history_down(&mut self, amount: u16) {
-        self.history_scroll = self.history_scroll.saturating_sub(amount);
-        let dismissed = amount.min(self.new_lines_below);
-        self.new_lines_below = self.new_lines_below.saturating_sub(dismissed);
-    }
-
-    pub fn history_page_scroll_amount(&mut self) -> u16 {
-        self.history_page_size.saturating_sub(1).max(1)
+        self.history.invalidate_from(0);
     }
 
     pub fn push_message(&mut self, message: TuiMessage) {
@@ -599,12 +572,12 @@ impl TuiApp {
 
         let idx = self.messages.len();
         self.messages.push(message);
-        self.history_layout.begin_message_block(removed_padding);
+        self.history.begin_message_block(removed_padding);
         self.set_dirty_from(idx);
     }
 
     fn set_dirty_from(&mut self, idx: usize) {
-        self.history_layout.invalidate_from(idx);
+        self.history.invalidate_from(idx);
     }
 
     fn finish_last_timer(&mut self) {

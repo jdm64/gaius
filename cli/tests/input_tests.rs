@@ -105,22 +105,22 @@ fn deletes_multibyte_input_to_start_and_end() {
 fn scrolls_history_with_saturating_offsets() {
     let mut app = TuiApp::new(Config::new());
 
-    assert_eq!(app.history_scroll, 0);
+    assert_eq!(app.history.scroll, 0);
 
-    app.scroll_history_up(5);
-    assert_eq!(app.history_scroll, 5);
+    app.history.scroll_up(5);
+    assert_eq!(app.history.scroll, 5);
 
-    app.scroll_history_down(2);
-    assert_eq!(app.history_scroll, 3);
+    app.history.scroll_down(2);
+    assert_eq!(app.history.scroll, 3);
 
-    app.scroll_history_down(10);
-    assert_eq!(app.history_scroll, 0);
+    app.history.scroll_down(10);
+    assert_eq!(app.history.scroll, 0);
 
     // Scrolling up sets the offset; only an explicit force returns to the bottom.
-    app.scroll_history_up(4);
-    assert_eq!(app.history_scroll, 4);
-    app.scroll_history_bottom();
-    assert_eq!(app.history_scroll, 0);
+    app.history.scroll_up(4);
+    assert_eq!(app.history.scroll, 4);
+    app.history.scroll_bottom();
+    assert_eq!(app.history.scroll, 0);
 }
 
 #[test]

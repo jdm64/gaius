@@ -42,7 +42,7 @@ impl InputMode {
                             Ok(snapshot) => {
                                 app.save_snapshot(&snapshot);
                                 app.clear_messages();
-                                app.scroll_history_bottom();
+                                app.history.scroll_bottom();
                                 app.editor.status =
                                     format!("Loaded session: {}", session.display_name());
                                 app.context_tokens = None;

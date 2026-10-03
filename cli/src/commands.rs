@@ -96,7 +96,7 @@ impl Command {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
                         app.clear_messages();
-                        app.scroll_history_bottom();
+                        app.history.scroll_bottom();
                         app.editor.status = "New session created".to_string();
                         app.context_tokens = None;
                     }
@@ -114,7 +114,7 @@ impl Command {
                             snapshot.session_id.unwrap_or("<unknown>".to_string()),
                         )));
                         app.editor.status = "Forked session".to_string();
-                        app.scroll_history_bottom();
+                        app.history.scroll_bottom();
                     }
                     Err(e) => app.editor.status = e,
                 }
@@ -202,7 +202,7 @@ impl Command {
                 } else {
                     app.actor_busy = true;
                     app.editor.status = "Compacting conversation...".to_string();
-                    app.scroll_history_bottom();
+                    app.history.scroll_bottom();
                     if let Err(err) = actor.compact().await {
                         app.editor.status = err;
                     }
