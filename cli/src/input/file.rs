@@ -32,8 +32,15 @@ impl PromptEditor {
             }
             KeyCode::Enter => {
                 if let Some(file) = picker.selected_row() {
+                    let cursor_byte = char_pos_to_byte_index(&self.input, self.cursor);
+                    let token_start = self.input[..cursor_byte]
+                        .char_indices()
+                        .rev()
+                        .find_map(|(index, ch)| ch.is_whitespace().then_some(index + ch.len_utf8()))
+                        .unwrap_or(0);
                     self.input = replace_file_query(&file.name, &self.input, self.cursor);
-                    self.cursor = self.input.chars().count();
+                    self.cursor =
+                        self.input[..token_start].chars().count() + file.name.chars().count();
                 }
                 return InputMode::PromptInput;
             }
