@@ -126,6 +126,53 @@ async fn edit_file_returns_compact_diff_view() {
     }
 }
 
+#[tokio::test]
+async fn glob_returns_relative_paths() {
+    let _guard = cwd_lock().lock().unwrap();
+    let original_dir = std::env::current_dir().unwrap();
+    let dir = std::env::temp_dir().join(format!("gaius-glob-path-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("nested")).unwrap();
+    std::fs::write(dir.join("nested/sample.txt"), "content").unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute("glob", &json!({ "pattern": "*.txt", "path": "nested" }))
+        .await;
+
+    std::env::set_current_dir(original_dir).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    match result {
+        ToolResult::Text(text) => assert_eq!(text, "nested/sample.txt"),
+        other => panic!("Expected relative glob result, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn grep_returns_relative_paths() {
+    let _guard = cwd_lock().lock().unwrap();
+    let original_dir = std::env::current_dir().unwrap();
+    let dir = std::env::temp_dir().join(format!("gaius-grep-path-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("nested")).unwrap();
+    std::fs::write(dir.join("nested/sample.txt"), "match this\n").unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+
+    let result = ToolEngine::new(SkillRepo::default())
+        .execute(
+            "grep",
+            &json!({ "pattern": "match", "path": "nested/sample.txt" }),
+        )
+        .await;
+
+    std::env::set_current_dir(original_dir).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    match result {
+        ToolResult::Text(text) => assert_eq!(text, "nested/sample.txt:1: match this"),
+        other => panic!("Expected relative grep result, got: {other:?}"),
+    }
+}
+
 fn cwd_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))

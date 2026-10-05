@@ -7,7 +7,11 @@ use genai::chat::Tool;
 use glob::glob;
 use regex::Regex;
 use serde_json::Value;
-use std::{io::ErrorKind, io::Write, time::Duration};
+use std::{
+    io::{ErrorKind, Write},
+    path::Path,
+    time::Duration,
+};
 use tokio::process::Command;
 use url::Url;
 
@@ -346,7 +350,13 @@ impl ToolEngine {
             Ok(entries) => {
                 let mut results = Vec::new();
                 for entry in entries.filter_map(Result::ok) {
-                    results.push(entry.to_string_lossy().into_owned());
+                    results.push(
+                        entry
+                            .strip_prefix(&cwd)
+                            .unwrap_or(&entry)
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
                 }
                 ToolResult::Text(results.join("\n"))
             }
@@ -423,16 +433,18 @@ impl ToolEngine {
         ToolResult::Text(results.join("\n"))
     }
 
-    fn grep_file(&self, path: &std::path::Path, regex: &Regex, results: &mut Vec<String>) {
+    fn grep_file(&self, path: &Path, regex: &Regex, results: &mut Vec<String>) {
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => return,
         };
+        let cwd = std::env::current_dir().ok().unwrap_or_default();
         for (line_num, line) in content.lines().enumerate() {
             if regex.is_match(line) {
+                let display_path = path.strip_prefix(&cwd).unwrap_or(path);
                 results.push(format!(
                     "{}:{}: {}",
-                    path.to_string_lossy(),
+                    display_path.to_string_lossy(),
                     line_num + 1,
                     line.trim_start()
                 ));
@@ -442,7 +454,7 @@ impl ToolEngine {
 
     fn grep_directory(
         &self,
-        dir: &std::path::Path,
+        dir: &Path,
         regex: &Regex,
         include_pattern: Option<&str>,
         results: &mut Vec<String>,
