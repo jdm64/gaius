@@ -22,7 +22,10 @@ impl InputMode {
     ) -> Self {
         app.editor.handle_input_cursor(key);
         match key.code {
-            KeyCode::Esc => return Self::PromptInput,
+            KeyCode::Esc => {
+                app.editor.clear_input();
+                return Self::PromptInput;
+            }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Self::Exit;
             }
@@ -223,7 +226,10 @@ impl InputMode {
     ) -> Self {
         app.editor.handle_input_cursor(key);
         match key.code {
-            KeyCode::Esc => return Self::PromptInput,
+            KeyCode::Esc => {
+                app.editor.clear_input();
+                return Self::PromptInput;
+            }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Self::Exit;
             }

@@ -200,7 +200,10 @@ impl InputMode {
     ) -> Self {
         app.editor.handle_input_cursor(key);
         match key.code {
-            KeyCode::Esc => return Self::PromptInput,
+            KeyCode::Esc => {
+                app.editor.clear_input();
+                return Self::PromptInput;
+            }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Self::Exit;
             }
@@ -295,9 +298,6 @@ impl PromptEditor {
 
     pub fn handle_input_cursor(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Esc => {
-                self.clear_input();
-            }
             KeyCode::Backspace => {
                 self.delete_input_char_before_cursor();
             }
