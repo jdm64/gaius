@@ -99,7 +99,7 @@ impl ProviderDef {
         match self {
             ProviderDef::Codex { auth, .. } => {
                 user_agent = format!(
-                    "codex_cli_rs/0.155.0 ({}; {})",
+                    "codex_cli_rs/0.160.1 ({}; {})",
                     env::consts::OS,
                     env::consts::ARCH,
                 );
@@ -110,14 +110,14 @@ impl ProviderDef {
             }
             ProviderDef::Grok { .. } => {
                 user_agent = format!(
-                    "grok-shell/0.2.101 ({}; {})",
+                    "grok-shell/1.0.46 ({}; {})",
                     env::consts::OS,
                     env::consts::ARCH,
                 );
                 headers.merge([
                     ("X-XAI-Token-Auth", "xai-grok-cli".to_string()),
                     ("x-grok-client-identifier", "grok-shell".to_string()),
-                    ("x-grok-client-version", "0.2.101".to_string()),
+                    ("x-grok-client-version", "1.0.46".to_string()),
                 ]);
             }
             _ => {
