@@ -105,10 +105,13 @@ impl OAuthHandle {
 
         println!();
         println!("{}", self.spec.sign_in_msg);
-        println!("Open this URL in a browser to continue:");
+        println!("If a browser doesn't automatically open,");
+        println!("Open this URL to continue:");
         println!();
-        println!("{}", login.short_url);
+        println!("  {}", login.short_url);
         println!();
+
+        let _browser = webbrowser::open(&login.short_url);
 
         let code = if self.spec.paste_code {
             login.oauth.await_code().await?

@@ -26,3 +26,4 @@ tui-markdown = "0.3"
 url = "2.5"
 uuid = { version = "1", features = ["v7"] }
 walkdir = "2"
+webbrowser = "1"
