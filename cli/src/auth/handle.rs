@@ -107,7 +107,7 @@ impl OAuthHandle {
         println!("{}", self.spec.sign_in_msg);
         println!("Open this URL in a browser to continue:");
         println!();
-        println!("{}", login.oauth.url);
+        println!("{}", login.short_url);
         println!();
 
         let code = if self.spec.paste_code {
@@ -125,7 +125,7 @@ impl OAuthHandle {
         let addrs: Vec<&str> = addrs.iter().map(String::as_str).collect();
         let nonce = spec.generate_nonce();
 
-        let oauth = OAuthClient::new(
+        let mut oauth = OAuthClient::new(
             |code_verifier, state, addr| {
                 let redirect_uri = redirect.uri(addr.port());
                 spec.authorize_url(code_verifier, state, &redirect_uri, nonce.as_deref())
@@ -134,12 +134,21 @@ impl OAuthHandle {
         )
         .await?;
 
-        let redirect_uri = redirect.uri(oauth.local_addr()?.port());
+        let addr = oauth.local_addr()?;
+        let host = match addr.ip() {
+            std::net::IpAddr::V4(ip) => ip.to_string(),
+            std::net::IpAddr::V6(ip) => format!("[{ip}]"),
+        };
+        let short_url = format!("http://{host}:{}/oauth/{}", addr.port(), spec.id);
+        oauth.set_short_redirect(format!("/oauth/{}", spec.id), oauth.url.clone());
+        let redirect_uri = redirect.uri(addr.port());
+
         Ok(Login {
             oauth,
             spec,
             nonce,
             redirect_uri,
+            short_url,
         })
     }
 
@@ -249,6 +258,7 @@ pub struct Login {
     pub spec: &'static OAuthSpec,
     pub nonce: Option<String>,
     pub redirect_uri: String,
+    pub short_url: String,
 }
 
 impl std::fmt::Debug for Login {

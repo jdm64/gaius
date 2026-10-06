@@ -352,6 +352,52 @@ fn a_refusal_may_carry_only_a_description() {
 }
 
 #[tokio::test]
+async fn short_oauth_url_redirects_to_the_authorization_url() {
+    let mut oauth = OAuthClient::new(loopback_url(&CODEX), &["127.0.0.1:0"])
+        .await
+        .expect("bind loopback listener");
+    let addr = oauth.local_addr().expect("listener address");
+    let path = "/oauth/codex/";
+    oauth.set_short_redirect(path.to_string(), oauth.url.clone());
+    let expected_location = oauth.url.clone();
+
+    let state = state_of(&expected_location);
+    let server =
+        tokio::spawn(async move { oauth.await_callback().await.map_err(|err| err.to_string()) });
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n");
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 302 Found"), "{response}");
+    assert!(
+        response.contains(&format!("Location: {expected_location}\r\n")),
+        "{response}"
+    );
+
+    let mut callback = TcpStream::connect(addr).await.unwrap();
+    let request = format!(
+        "GET /auth/callback?code=short-url-test&state={state} HTTP/1.1\r\nHost: {addr}\r\n\r\n"
+    );
+    callback.write_all(request.as_bytes()).await.unwrap();
+    let mut callback_response = String::new();
+    callback
+        .read_to_string(&mut callback_response)
+        .await
+        .unwrap();
+    assert!(callback_response.contains("200 OK"), "{callback_response}");
+    assert_eq!(
+        wait_for(server)
+            .await
+            .expect("callback wait timed out")
+            .unwrap()
+            .unwrap(),
+        "short-url-test"
+    );
+}
+
+#[tokio::test]
 async fn loopback_server_returns_the_authorization_code() {
     let (code, responses) =
         loopback_login(&["/favicon.ico", "/auth/callback?code=code-1&state={state}"]).await;

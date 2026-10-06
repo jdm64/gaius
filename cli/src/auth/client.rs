@@ -112,6 +112,7 @@ pub struct OAuthClient {
     state: String,
     pub url: String,
     listener: TcpListener,
+    short_redirect: Option<(String, String)>,
 }
 
 impl OAuthClient {
@@ -129,7 +130,12 @@ impl OAuthClient {
             state,
             url,
             listener,
+            short_redirect: None,
         })
+    }
+
+    pub fn set_short_redirect(&mut self, path: String, location: String) {
+        self.short_redirect = Some((path, location));
     }
 
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
@@ -213,6 +219,12 @@ impl OAuthClient {
             let Some(target) = Self::read_target(&mut stream).await else {
                 continue;
             };
+            if let Some((path, location)) = &self.short_redirect
+                && target.split('?').next() == Some(path.as_str())
+            {
+                Self::respond_redirect(&mut stream, location).await;
+                continue;
+            }
             let Some(callback) = Callback::parse(&target) else {
                 Self::respond(&mut stream, "404 Not Found", "<html>Not found</html>").await;
                 continue;
@@ -289,6 +301,14 @@ impl OAuthClient {
         let request = String::from_utf8_lossy(&request);
         let request_line = request.lines().next()?;
         Some(request_line.split_whitespace().nth(1)?.to_string())
+    }
+
+    async fn respond_redirect(stream: &mut TcpStream, location: &str) {
+        let response = format!(
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        let _ = stream.write_all(response.as_bytes()).await;
+        let _ = stream.flush().await;
     }
 
     async fn respond(stream: &mut TcpStream, status: &str, body: &str) {
