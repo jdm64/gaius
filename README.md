@@ -15,10 +15,27 @@ A LLM agent harness build in Rust, powered by `genai` for provider abstraction.
 
 ## Installation
 
-### Prerequisites
+### Prebuilt binaries
+
+```bash
+# Download most recent stable version
+curl -fsSL https://raw.githubusercontent.com/jdm64/gaius/master/install.sh | sh
+
+# Dwnload the latest continuous build (for example, from the master branch)
+curl -fsSL https://raw.githubusercontent.com/jdm64/gaius/master/install.sh | sh -s -- --build master
+```
+
+### Build from source
 
 - Rust 2024 edition or later
 - Cargo package manager
+
+```bash
+git clone https://github.com/jdm64/gaius.git
+cd gaius/cli
+cargo build
+cargo run
+```
 
 ## Usage
 
@@ -35,7 +52,7 @@ This launches the interactive terminal interface where you can:
 - Switch between different models
 - Manage conversation sessions
 
-### Command-line mode
+### Command-line options
 
 ```bash
 # Enter simple interactive mode
@@ -49,6 +66,9 @@ gaius --prompt-file prompt.txt
 
 # Continue a saved session
 gaius --session <session-id>
+
+# OAuth login to Codex or Grok
+gaius --login <provider>
 
 # Show help
 gaius --help
