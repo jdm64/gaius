@@ -696,9 +696,9 @@ footer {
       <span class="ver">v0.1</span>
     </a>
     <div class="nav-links">
-      <a href="#install">Install</a>
-      <a href="#features">Features</a>
       <a href="#philosophy">Doctrine</a>
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
       <a href="#tools">Tools</a>
       <a href="#commands">Commands</a>
       <a href="https://github.com/jdm64/gaius" rel="noopener">GitHub&nbsp;↗</a>
@@ -746,11 +746,104 @@ footer {
   <div class="scroll-hint" aria-hidden="true">▼ scroll</div>
 </section>
 
+<!-- ==================== PHILOSOPHY ==================== -->
+<section id="philosophy">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="sec-num">01</span>
+      <h2 class="sec-title">Doctrine</h2>
+      <span class="sec-rule"></span>
+    </div>
+
+    <div class="doctrine reveal">
+      <blockquote>
+        The default system prompt is just the tool descriptions.
+        Nothing more. The harness <span class="hl">trusts the model</span>
+      </blockquote>
+    </div>
+
+    <div class="principles">
+      <div class="prin reveal">
+        <h4>Minimal</h4>
+        <p>Simple and understandable is the guiding force in every design decision. No ceremony, no magic.</p>
+      </div>
+      <div class="prin reveal">
+        <h4>Transparent</h4>
+        <p>Functionally transparent by construction. What you see is what you get — prompts, tools, tokens, all of it.</p>
+      </div>
+      <div class="prin reveal">
+        <h4>Yours</h4>
+        <p>No telemetry, no tracking, no accounts. Your providers, your keys, your sessions, your machine.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SCREENSHOT ==================== -->
+<section class="screenshot-section" style="padding: 40px 0; text-align: center;">
+  <div class="wrap">
+    <div class="frame reveal" style="max-width: 773px; margin: 0 auto;">
+      <div class="frame-in">
+        <img src="terminal.png" alt="GAIUS Terminal Interface" width="773" height="562" style="width: 100%; max-width: 773px; height: auto; display: block; image-rendering: auto;">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== FEATURES ==================== -->
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="sec-num">02</span>
+      <h2 class="sec-title">Features</h2>
+      <span class="sec-rule"></span>
+    </div>
+
+    <div class="features-grid">
+      <div class="frame feat reveal"><div class="frame-in">
+        <div class="feat-idx"><span>F/01</span><span class="glyph">◈</span></div>
+        <h3>Multi<span class="acc">-</span>provider</h3>
+        <p>OpenAI, Anthropic, OpenRouter and more through the <code>genai</code> abstraction layer. Swap models mid-session with <code>/models</code>.</p>
+      </div></div>
+
+      <div class="frame feat reveal"><div class="frame-in">
+        <div class="feat-idx"><span>F/02</span><span class="glyph">▲</span></div>
+        <h3>Rust <span class="acc">native</span></h3>
+        <p>Ratatui TUI on tokio. Single binary, instant startup, minimal memory footprint — the Pi-agent experience without the runtime bloat.</p>
+      </div></div>
+
+      <div class="frame feat reveal"><div class="frame-in">
+        <div class="feat-idx"><span>F/03</span><span class="glyph">◉</span></div>
+        <h3>Zero <span class="acc">telemetry</span></h3>
+        <p>No analytics, no tracking, no phone-home. Config and sessions live on your disk and nowhere else.</p>
+      </div></div>
+
+      <div class="frame feat reveal"><div class="frame-in">
+        <div class="feat-idx"><span>F/04</span><span class="glyph">▤</span></div>
+        <h3>Sessions</h3>
+        <p>Save, load, rename and delete conversations. History persisted locally in MessagePack; resume any session by id with <code>--session</code>.</p>
+      </div></div>
+
+      <div class="frame feat reveal"><div class="frame-in">
+        <div class="feat-idx"><span>F/05</span><span class="glyph">✦</span></div>
+        <h3>Agents <span class="acc">&amp;</span> skills</h3>
+        <p>Define custom agents in plain TOML files with their own prompts. Invoke skills on demand. Compose behavior, don't hardcode it.</p>
+      </div></div>
+
+      <div class="frame feat reveal"><div class="frame-in">
+        <div class="feat-idx"><span>F/06</span><span class="glyph">⌗</span></div>
+        <h3>Full <span class="acc">visibility</span></h3>
+        <p>Markdown rendering, live diffs, thinking traces and per-message token accounting — toggleable with commands.</p>
+      </div></div>
+    </div>
+  </div>
+</section>
+
 <!-- ==================== INSTALL ==================== -->
 <section id="install">
   <div class="wrap">
     <div class="sec-head reveal">
-      <span class="sec-num">00</span>
+      <span class="sec-num">03</span>
       <h2 class="sec-title">Install</h2>
       <span class="sec-rule"></span>
     </div>
@@ -828,104 +921,11 @@ footer {
   </div>
 </section>
 
-<!-- ==================== SCREENSHOT ==================== -->
-<section class="screenshot-section" style="padding: 40px 0; text-align: center;">
-  <div class="wrap">
-    <div class="frame reveal" style="max-width: 860px; margin: 0 auto;">
-      <div class="frame-in">
-        <img src="terminal.png" alt="GAIUS Terminal Interface" style="width: 100%; height: auto; display: block;">
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ==================== FEATURES ==================== -->
-<section id="features">
-  <div class="wrap">
-    <div class="sec-head reveal">
-      <span class="sec-num">01</span>
-      <h2 class="sec-title">Features</h2>
-      <span class="sec-rule"></span>
-    </div>
-
-    <div class="features-grid">
-      <div class="frame feat reveal"><div class="frame-in">
-        <div class="feat-idx"><span>F/01</span><span class="glyph">◈</span></div>
-        <h3>Multi<span class="acc">-</span>provider</h3>
-        <p>OpenAI, Anthropic, OpenRouter and more through the <code>genai</code> abstraction layer. Swap models mid-session with <code>/models</code>.</p>
-      </div></div>
-
-      <div class="frame feat reveal"><div class="frame-in">
-        <div class="feat-idx"><span>F/02</span><span class="glyph">▲</span></div>
-        <h3>Rust <span class="acc">native</span></h3>
-        <p>Ratatui TUI on tokio. Single binary, instant startup, minimal memory footprint — the Pi-agent experience without the runtime bloat.</p>
-      </div></div>
-
-      <div class="frame feat reveal"><div class="frame-in">
-        <div class="feat-idx"><span>F/03</span><span class="glyph">◉</span></div>
-        <h3>Zero <span class="acc">telemetry</span></h3>
-        <p>No analytics, no tracking, no phone-home. Config and sessions live on your disk and nowhere else.</p>
-      </div></div>
-
-      <div class="frame feat reveal"><div class="frame-in">
-        <div class="feat-idx"><span>F/04</span><span class="glyph">▤</span></div>
-        <h3>Sessions</h3>
-        <p>Save, load, rename and delete conversations. History persisted locally in MessagePack; resume any session by id with <code>--session</code>.</p>
-      </div></div>
-
-      <div class="frame feat reveal"><div class="frame-in">
-        <div class="feat-idx"><span>F/05</span><span class="glyph">✦</span></div>
-        <h3>Agents <span class="acc">&amp;</span> skills</h3>
-        <p>Define custom agents in plain TOML files with their own prompts. Invoke skills on demand. Compose behavior, don't hardcode it.</p>
-      </div></div>
-
-      <div class="frame feat reveal"><div class="frame-in">
-        <div class="feat-idx"><span>F/06</span><span class="glyph">⌗</span></div>
-        <h3>Full <span class="acc">visibility</span></h3>
-        <p>Markdown rendering, live diffs, thinking traces and per-message token accounting — toggleable with commands.</p>
-      </div></div>
-    </div>
-  </div>
-</section>
-
-<!-- ==================== PHILOSOPHY ==================== -->
-<section id="philosophy">
-  <div class="wrap">
-    <div class="sec-head reveal">
-      <span class="sec-num">02</span>
-      <h2 class="sec-title">Doctrine</h2>
-      <span class="sec-rule"></span>
-    </div>
-
-    <div class="doctrine reveal">
-      <blockquote>
-        The default system prompt is just the tool descriptions.
-        Nothing more. The harness <span class="hl">trusts the model</span>
-      </blockquote>
-    </div>
-
-    <div class="principles">
-      <div class="prin reveal">
-        <h4>Minimal</h4>
-        <p>Simple and understandable is the guiding force in every design decision. No ceremony, no magic.</p>
-      </div>
-      <div class="prin reveal">
-        <h4>Transparent</h4>
-        <p>Functionally transparent by construction. What you see is what you get — prompts, tools, tokens, all of it.</p>
-      </div>
-      <div class="prin reveal">
-        <h4>Yours</h4>
-        <p>No telemetry, no tracking, no accounts. Your providers, your keys, your sessions, your machine.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
 <!-- ==================== TOOLS ==================== -->
 <section id="tools">
   <div class="wrap">
     <div class="sec-head reveal">
-      <span class="sec-num">03</span>
+      <span class="sec-num">04</span>
       <h2 class="sec-title">Tool manifest</h2>
       <span class="sec-rule"></span>
     </div>
@@ -955,7 +955,7 @@ footer {
 <section id="commands">
   <div class="wrap">
     <div class="sec-head reveal">
-      <span class="sec-num">04</span>
+      <span class="sec-num">05</span>
       <h2 class="sec-title">Command manifest</h2>
       <span class="sec-rule"></span>
     </div>
