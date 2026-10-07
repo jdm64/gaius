@@ -3,20 +3,13 @@
  */
 
 use crate::{
-    agents::{AgentDefinition, Agents},
-    auth::handle::OAuthHandle,
-    auth::spec::OAuthKind,
+    agents::Agents,
+    auth::{handle::OAuthHandle, spec::OAuthKind},
     cli_prompt::CliPrompt,
-    client::LLMClient,
     dirs::Dirs,
-    models::{ModelDef, RecentModelDef},
     providers::ProviderDef,
 };
-use futures::StreamExt;
-use genai::{
-    adapter::AdapterKind,
-    chat::{ChatRequest, ChatStreamEvent},
-};
+use genai::adapter::AdapterKind;
 use serde::{Deserialize, Serialize};
 use std::{error::Error, path::PathBuf};
 use url::Url;
@@ -102,7 +95,7 @@ impl Config {
                 continue;
             }
 
-            let (name, url, key, model_id) = if let Some(sub) = sub {
+            let (name, url, key) = if let Some(sub) = sub {
                 let spec = sub.spec();
                 match OAuthHandle::get(sub).map(|auth| auth.is_logged_in()) {
                     Ok(true) => {}
@@ -117,24 +110,17 @@ impl Config {
                     ),
                 }
 
-                let model_id = CliPrompt::get_input("Model: ")?;
-                (
-                    spec.display.to_string(),
-                    String::new(),
-                    String::new(),
-                    model_id,
-                )
+                (spec.display.to_string(), String::new(), String::new())
             } else {
                 let url = CliPrompt::get_input("Url: ")?;
                 let key = CliPrompt::get_input("Key: ")?;
-                let model_id = CliPrompt::get_input("Model: ")?;
                 let name =
                     match Url::parse(&url).map(|u| u.host_str().unwrap_or("default").to_string()) {
                         Ok(name) => name,
                         Err(_) => "default".to_string(),
                     };
 
-                (name, url, key, model_id)
+                (name, url, key)
             };
 
             let provider_config = ProviderConfig {
@@ -143,55 +129,22 @@ impl Config {
                 url,
                 key,
             };
-            let provider_def = match ProviderDef::new(&provider_config) {
-                Ok(provider_def) => provider_def,
-                Err(err) => {
-                    eprintln!("Error: {}", err);
-                    continue;
-                }
-            };
-
-            let model_def = ModelDef {
-                provider: provider_def,
-                id: model_id,
-                context_len: None,
-                pricing: None,
-                reasoning: None,
-            };
-
-            let mut client = LLMClient::new(AgentDefinition::default());
-            if let Err(err) = client.set_model(model_def.clone()).await {
-                eprintln!("Error setting model: {}", err);
+            if let Err(err) = ProviderDef::new(&provider_config) {
+                eprintln!("Error: {}", err);
                 continue;
             }
 
-            match validate_model(&client).await {
-                Ok(()) => {
-                    let model = ModelConfig {
-                        name: model_def.id.clone(),
-                        provider: model_def.provider.name().to_string(),
-                        id: model_def.id.clone(),
-                    };
-                    let config = Config {
-                        provider: vec![provider_config],
-                        model: vec![model],
-                        agents: Agents::load(&Dirs::config_dir()?)?,
-                    };
-                    if let Some(parent) = path.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    std::fs::write(&path, toml::to_string_pretty(&config)?)?;
-                    *self = config;
-
-                    // add to recent list so initial load has a model
-                    RecentModelDef::add(&model_def)?;
-
-                    return Ok(());
-                }
-                Err(err) => {
-                    eprintln!("Provider validation failed: {}", err);
-                }
+            let config = Config {
+                provider: vec![provider_config],
+                model: vec![],
+                agents: Agents::load(&Dirs::config_dir()?)?,
+            };
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
             }
+            std::fs::write(&path, toml::to_string_pretty(&config)?)?;
+            *self = config;
+            return Ok(());
         }
     }
 
@@ -274,24 +227,4 @@ impl ProviderConfig {
 
         Ok(())
     }
-}
-
-async fn validate_model(client: &LLMClient) -> Result<(), Box<dyn Error>> {
-    let request = ChatRequest::from_user("Reply with OK.");
-    let mut response = client.chat_streaming(request).await?;
-
-    let mut stream_end = None;
-    while let Some(event) = response.stream.next().await {
-        match event {
-            Ok(event) => {
-                if let ChatStreamEvent::End(end) = event {
-                    stream_end = Some(end);
-                }
-            }
-            Err(err) => return Err(err.into()),
-        }
-    }
-
-    stream_end.ok_or("Chat stream ended without an end event")?;
-    Ok(())
 }

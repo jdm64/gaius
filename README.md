@@ -83,8 +83,10 @@ gaius --version
 
 When you run `gaius` for the first time, it will guide you through an interactive setup wizard to configure:
 
-- API providers (URLs, API keys)
-- Default model
+- Provider URL
+- API key
+
+Then when the TUI loads use /models command to select a model to use.
 
 ### Configuration file
 

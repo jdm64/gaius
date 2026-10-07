@@ -136,6 +136,12 @@ impl TuiApp {
         let mut actor = HarnessActorHandle::new(harness)?;
         self.save_snapshot(&latest_snapshot);
 
+        if latest_snapshot.model.id.is_empty() {
+            self.push_message(TuiMessage::SystemMessage(
+                "No model selected, use /models to configure a model first".to_string(),
+            ));
+        }
+
         let mut guard = TerminalGuard::enter()?;
         let mut terminal_events = EventStream::new();
         let render = Render::new();

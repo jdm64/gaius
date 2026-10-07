@@ -302,7 +302,11 @@ impl Models {
     ) -> Result<ModelDef, Box<dyn Error>> {
         let configured_models = config.configured_models();
         if configured_models.is_empty() {
-            return Err("Unable to find configured model".into());
+            let msg = format!(
+                "Unable to find configured model. Add at least one model to: {}",
+                Dirs::config_file()?.to_string_lossy()
+            );
+            return Err(msg.into());
         }
 
         if cache.is_empty() {
