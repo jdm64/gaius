@@ -20,6 +20,10 @@ impl Dirs {
         Ok(Self::config_dir()?.join("config.toml"))
     }
 
+    pub fn display_prefs_file() -> Result<PathBuf, Box<dyn Error>> {
+        Ok(Self::cache_dir()?.join("prefs_display.json"))
+    }
+
     ///
     /// --- Data Dirs ---
     ///

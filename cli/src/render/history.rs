@@ -4,6 +4,7 @@
 
 use crate::{
     diff_view::{DiffLineKind, DiffView},
+    dirs::Dirs,
     render::Render,
     render::layout::LiveTimer,
     render::util::{RenderUtil, USER_PROMPT_BAR},
@@ -17,13 +18,26 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Padding, Paragraph, Wrap},
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{self, Value, from_str};
+use std::{error::Error, fs};
 use tui_markdown::{Options, from_str_with_options};
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DisplayPrefs {
     pub thinking: bool,
     pub token_info: bool,
     pub diff_view: bool,
+}
+
+impl Default for DisplayPrefs {
+    fn default() -> Self {
+        Self {
+            thinking: false,
+            token_info: true,
+            diff_view: true,
+        }
+    }
 }
 
 impl DisplayPrefs {
@@ -42,6 +56,25 @@ impl DisplayPrefs {
 
     pub fn toggle_diff_view(&mut self) -> String {
         Self::toggle(&mut self.diff_view, "Diff view")
+    }
+
+    pub fn load() -> Result<Self, Box<dyn Error>> {
+        let path = Dirs::display_prefs_file()?;
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let contents = fs::read_to_string(&path)?;
+        Ok(serde_json::from_str(&contents).unwrap_or_default())
+    }
+
+    pub fn save(&self) -> Result<(), Box<dyn Error>> {
+        let path = Dirs::display_prefs_file()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let contents = serde_json::to_string_pretty(self)?;
+        fs::write(path, contents)?;
+        Ok(())
     }
 }
 

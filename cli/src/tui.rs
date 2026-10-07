@@ -119,11 +119,7 @@ impl TuiApp {
             editor: PromptEditor::new(),
             messages: Vec::new(),
             context_tokens: None,
-            display_prefs: DisplayPrefs {
-                thinking: false,
-                token_info: true,
-                diff_view: true,
-            },
+            display_prefs: DisplayPrefs::load().unwrap_or_default(),
             history: HistoryLayout::default(),
             selection: Selection::default(),
             actor_busy: false,
@@ -548,17 +544,26 @@ impl TuiApp {
 
     pub fn toggle_thinking(&mut self) {
         self.editor.status = self.display_prefs.toggle_thinking();
+        self.save_display_prefs();
         self.history.invalidate_from(0);
     }
 
     pub fn toggle_token_info(&mut self) {
         self.editor.status = self.display_prefs.toggle_token_info();
+        self.save_display_prefs();
         self.history.invalidate_from(0);
     }
 
     pub fn toggle_diff_view(&mut self) {
         self.editor.status = self.display_prefs.toggle_diff_view();
+        self.save_display_prefs();
         self.history.invalidate_from(0);
+    }
+
+    fn save_display_prefs(&self) {
+        if let Err(e) = self.display_prefs.save() {
+            eprintln!("Failed to save display prefs: {}", e);
+        }
     }
 
     pub fn push_message(&mut self, message: TuiMessage) {
