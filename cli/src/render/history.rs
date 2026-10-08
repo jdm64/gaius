@@ -86,9 +86,14 @@ impl Render {
         self.sync_history_lines(app, width);
 
         let lines = app.history.visible_cached_lines(height);
-        let lines =
-            app.selection
-                .highlight(lines.0, lines.1, area, width, height, self.theme.selected);
+        let lines = app.selection.highlight(
+            lines.0,
+            lines.1,
+            area,
+            width,
+            height,
+            self.theme.selected_color(),
+        );
 
         let snapshot = &app.snapshot;
         let agent_label = if snapshot.plan_mode_on {
@@ -149,11 +154,9 @@ impl Render {
                 width: area.width,
                 height: 1,
             };
-            let indicator = Paragraph::new(text).alignment(Alignment::Center).style(
-                Style::default()
-                    .fg(self.theme.header)
-                    .add_modifier(Modifier::DIM),
-            );
+            let indicator = Paragraph::new(text)
+                .alignment(Alignment::Center)
+                .style(self.theme.header_style());
             frame.render_widget(indicator, indicator_area);
         }
     }
@@ -169,25 +172,21 @@ impl Render {
                 if !prefs.thinking {
                     return vec![
                         Line::from(format!("Thinking... {}", text.len()))
-                            .style(Style::default().fg(self.theme.thinking)),
+                            .style(self.theme.thinking_style()),
                     ];
                 }
-                let style = Style::default()
-                    .fg(self.theme.thinking)
-                    .add_modifier(Modifier::ITALIC)
-                    .add_modifier(Modifier::DIM);
+                let style = self.theme.thinking_style();
                 Self::render_markdown(text, Some(text_width), Some(style))
             }
             TuiMessage::AgentMessage(text) | TuiMessage::PlanMessage(text) => {
                 Self::render_markdown(text, Some(text_width), None)
             }
             TuiMessage::UserPrompt(text) => {
-                let style = self.theme.user_prompt_style();
                 vec![
                     self.theme.user_prompt_bar_line(),
                     Line::from(vec![
-                        Span::styled(USER_PROMPT_BAR, style.fg(self.theme.user_bar)),
-                        Span::raw(text.clone()).style(style.italic().bold()),
+                        Span::styled(USER_PROMPT_BAR, self.theme.userbar_style()),
+                        Span::raw(text.clone()).style(self.theme.userbox_style()),
                     ]),
                     self.theme.user_prompt_bar_line(),
                 ]
@@ -197,7 +196,7 @@ impl Render {
                 arguments,
                 start_time,
             } => {
-                let style = Style::default().fg(self.theme.toolcall);
+                let style = self.theme.toolcall_style();
                 let json_args = from_str::<Value>(arguments).unwrap_or_default();
                 let tool_name = ToolName::from_name(name.as_str());
                 let display = tool_name.map_or_else(String::new, |tool| {
@@ -221,12 +220,12 @@ impl Render {
                 result,
                 error,
             } => {
-                let style = Style::default().fg(self.theme.toolcall);
+                let style = self.theme.toolcall_style();
                 let json_args = Value::Null;
                 let tool_name = ToolName::from_name(name.as_str());
                 let mut ret = Vec::new();
                 if *error {
-                    let e_style = Style::default().fg(self.theme.error);
+                    let e_style = self.theme.error_style();
                     let error_lines: Vec<&str> = result.split('\n').collect();
                     for i in error_lines {
                         if !i.is_empty() {
@@ -238,15 +237,11 @@ impl Render {
                 ret
             }
             TuiMessage::SystemMessage(text) => {
-                let style = Style::default()
-                    .fg(self.theme.error)
-                    .add_modifier(Modifier::BOLD);
+                let style = self.theme.error_style().add_modifier(Modifier::BOLD);
                 vec![Line::from(text.clone()).style(style)]
             }
             TuiMessage::CompactionStart { start_time } => {
-                let style = Style::default()
-                    .fg(self.theme.header)
-                    .add_modifier(Modifier::DIM);
+                let style = self.theme.header_style();
                 let mut lines = vec![Self::compaction_rule_line(style, text_width)];
                 if *start_time != 0 {
                     lines.push(RenderUtil::duration_line(*start_time, style));
@@ -257,7 +252,7 @@ impl Render {
                 if !prefs.token_info {
                     return vec![];
                 }
-                let style = Style::default().fg(self.theme.header).dim();
+                let style = self.theme.header_style().dim();
                 vec![Line::from(text.clone()).style(style).right_aligned()]
             }
             TuiMessage::DiffView(diff) => {
@@ -268,7 +263,7 @@ impl Render {
             }
             TuiMessage::TurnDuration(duration_ms) => {
                 let text = RenderUtil::format_duration(*duration_ms);
-                let style = Style::default().fg(self.theme.header).dim();
+                let style = self.theme.header_style();
                 vec![Line::from(text).style(style)]
             }
             TuiMessage::Padding => vec![Line::from("")],
@@ -431,10 +426,10 @@ impl Render {
 
         let live_timer = match message {
             TuiMessage::ToolCall { start_time, .. } if *start_time != 0 => {
-                Some((*start_time, Style::default().fg(self.theme.toolcall)))
+                Some((*start_time, self.theme.toolcall_style()))
             }
             TuiMessage::CompactionStart { start_time } if *start_time != 0 => {
-                Some((*start_time, Style::default().fg(self.theme.header)))
+                Some((*start_time, self.theme.header_style()))
             }
             _ => None,
         };

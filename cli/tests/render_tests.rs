@@ -3,6 +3,7 @@ use gaius::{
     diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
     render::{Render, history::DisplayPrefs, layout::HistoryLayout},
     selection::{HistoryPoint, HistorySelection, RowWrapInfo, Selection},
+    theme::ColorTheme,
     tui::{TuiApp, TuiMessage},
     util::time_now,
 };
@@ -23,14 +24,56 @@ fn default_prefs() -> DisplayPrefs {
 }
 
 pub fn visible_history_lines(
-    render: &Render,
     lines: &[Line<'static>],
     width: u16,
     start: usize,
     height: usize,
 ) -> (Vec<Line<'static>>, Vec<RowWrapInfo>) {
     let layout = HistoryLayout::default();
-    layout.visible_history_lines(lines, width, start, height, &render.theme)
+    //layout.visible_history_lines(lines, width, start, height, &render.theme)
+
+    let mut visible = Vec::with_capacity(height);
+    let mut row_infos = Vec::with_capacity(height);
+    let mut wrapped_index = 0usize;
+    let end = start.saturating_add(height);
+    let theme = ColorTheme::default();
+
+    for (index, line) in lines.iter().enumerate() {
+        let wrapped_lines = layout.visualize_history_line(line, width, &theme);
+        for wrapped in wrapped_lines {
+            let row_info = RowWrapInfo::new(&wrapped, index);
+            if push_visible_line(
+                &mut visible,
+                &mut row_infos,
+                wrapped,
+                row_info,
+                &mut wrapped_index,
+                start,
+                end,
+            ) {
+                return (visible, row_infos);
+            }
+        }
+    }
+
+    (visible, row_infos)
+}
+
+fn push_visible_line(
+    visible: &mut Vec<Line<'static>>,
+    row_infos: &mut Vec<RowWrapInfo>,
+    line: Line<'static>,
+    row_info: RowWrapInfo,
+    wrapped_index: &mut usize,
+    start: usize,
+    end: usize,
+) -> bool {
+    if *wrapped_index >= start && *wrapped_index < end {
+        visible.push(line);
+        row_infos.push(row_info);
+    }
+    *wrapped_index += 1;
+    *wrapped_index >= end
 }
 
 #[test]
@@ -77,7 +120,6 @@ fn markdown_list_has_style() {
 
 #[test]
 fn visible_history_lines_returns_bottom_window() {
-    let render = Render::new();
     let raw = vec![
         Line::from("one"),
         Line::from("two"),
@@ -98,14 +140,13 @@ fn visible_history_lines_returns_bottom_window() {
             owned
         })
         .collect();
-    let (visible, _row_infos) = visible_history_lines(&render, &lines, 20, 2, 2);
+    let (visible, _row_infos) = visible_history_lines(&lines, 20, 2, 2);
 
     assert_eq!(line_texts(&visible), vec!["three", "four"]);
 }
 
 #[test]
 fn visible_history_lines_slices_wrapped_lines() {
-    let render = Render::new();
     let raw = vec![Line::from("abcdef"), Line::from("gh")];
     let lines: Vec<Line<'static>> = raw
         .into_iter()
@@ -121,15 +162,14 @@ fn visible_history_lines_slices_wrapped_lines() {
             owned
         })
         .collect();
-    let (visible, _row_infos) = visible_history_lines(&render, &lines, 2, 1, 3);
+    let (visible, _row_infos) = visible_history_lines(&lines, 2, 1, 3);
 
     assert_eq!(line_texts(&visible), vec!["cd", "ef", "gh"]);
 }
 
 #[test]
 fn visible_history_lines_handles_empty_history() {
-    let render = Render::new();
-    let (visible, _row_infos) = visible_history_lines(&render, &[], 20, 0, 5);
+    let (visible, _row_infos) = visible_history_lines(&[], 20, 0, 5);
 
     assert!(visible.is_empty());
 }
@@ -143,7 +183,7 @@ fn visible_history_lines_pads_user_prompts_to_width() {
         80,
     );
 
-    let (visible, _row_infos) = visible_history_lines(&render, &lines, 10, 0, 3);
+    let (visible, _row_infos) = visible_history_lines(&lines, 10, 0, 3);
 
     assert_eq!(visible.len(), 3);
     assert_eq!(visible[0].width(), 10);

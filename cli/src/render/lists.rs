@@ -92,7 +92,7 @@ impl Render {
         picker: &PickList<ModelPickerRow>,
     ) -> Option<Vec<(&'static str, &'static str)>> {
         let display_rows = Self::model_display_rows(picker);
-        let header_color = self.theme.header;
+        let header_style = self.theme.header_style();
         self.draw_indexed_pick_list(
             frame,
             area,
@@ -106,7 +106,7 @@ impl Render {
             },
             |row, _index| match row {
                 ModelPickerRow::Header(label) => {
-                    ListItem::new(label.as_str()).style(Style::default().fg(header_color))
+                    ListItem::new(Line::from(Span::styled(label.as_str(), header_style)))
                 }
                 ModelPickerRow::Separator => ListItem::new(""),
                 ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model) => {
@@ -365,11 +365,8 @@ impl Render {
                 .iter()
                 .map(|row_index| {
                     let row_index = *row_index;
-                    let mut item = row_item(&picker.rows[row_index], row_index);
-                    if row_index == selected_row {
-                        item = item.style(Style::default().bg(self.theme.selected));
-                    }
-                    item
+                    row_item(&picker.rows[row_index], row_index)
+                        .style(self.theme.selected_style(row_index == selected_row))
                 })
                 .collect()
         };

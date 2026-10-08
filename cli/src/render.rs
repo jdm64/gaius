@@ -8,84 +8,14 @@ pub mod layout;
 pub mod lists;
 pub mod util;
 
-use crate::{input::InputMode, render::util::USER_PROMPT_BAR, tui::TuiApp};
+use crate::{input::InputMode, theme::ColorTheme, tui::TuiApp};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
-    text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
 pub const INPUT_HEIGHT: u16 = 3;
-
-pub struct ColorTheme {
-    pub header: Color,
-    pub selected: Color,
-    pub thinking: Color,
-    pub user_bar: Color,
-    pub user_box: Color,
-    pub inputbox: Color,
-    pub toolcall: Color,
-    pub error: Color,
-}
-
-impl Default for ColorTheme {
-    fn default() -> Self {
-        ColorTheme {
-            header: Color::Yellow,
-            selected: Color::Magenta,
-            thinking: Color::LightBlue,
-            user_bar: Color::Magenta,
-            user_box: Color::Rgb(64, 64, 64),
-            inputbox: Color::Rgb(64, 0, 64),
-            toolcall: Color::Cyan,
-            error: Color::Red,
-        }
-    }
-}
-
-impl ColorTheme {
-    pub fn format_user_prompt_line(&self, mut line: Line<'static>, width: u16) -> Line<'static> {
-        let bar_style = self.user_prompt_style().fg(self.user_bar);
-        line.spans
-            .insert(0, Span::styled(USER_PROMPT_BAR, bar_style));
-        let width = width.max(1) as usize;
-        let used = line.width();
-        if used < width {
-            line.spans.push(Span::styled(
-                " ".repeat(width - used),
-                self.user_prompt_style(),
-            ));
-        }
-        line
-    }
-
-    pub fn user_prompt_bar_line(&self) -> Line<'static> {
-        let style = self.user_prompt_style();
-        Line::from(vec![Span::styled(USER_PROMPT_BAR, style.fg(self.user_bar))])
-    }
-
-    pub fn user_prompt_style(&self) -> Style {
-        Style::default().bg(self.user_box)
-    }
-
-    pub fn help_spec_to_text(&self, spec: Vec<(&str, &str)>) -> Text<'static> {
-        let mut spans = Vec::new();
-        let style = Style::default().fg(self.header);
-        let dim = Style::default().dim();
-        spans.push(Span::raw("  "));
-        for (i, (label, desc)) in spec.into_iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw("  "));
-            }
-            spans.push(Span::styled(label.to_string(), style));
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(desc.to_string(), dim));
-        }
-        Text::from(Line::from(spans))
-    }
-}
 
 pub struct Render {
     pub theme: ColorTheme,

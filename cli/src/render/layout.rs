@@ -213,41 +213,7 @@ impl HistoryLayout {
         }
     }
 
-    pub fn visible_history_lines(
-        &self,
-        lines: &[Line<'static>],
-        width: u16,
-        start: usize,
-        height: usize,
-        theme: &ColorTheme,
-    ) -> (Vec<Line<'static>>, Vec<RowWrapInfo>) {
-        let mut visible = Vec::with_capacity(height);
-        let mut row_infos = Vec::with_capacity(height);
-        let mut wrapped_index = 0usize;
-        let end = start.saturating_add(height);
-
-        for (index, line) in lines.iter().enumerate() {
-            let wrapped_lines = self.visualize_history_line(line, width, theme);
-            for wrapped in wrapped_lines {
-                let row_info = RowWrapInfo::new(&wrapped, index);
-                if Self::push_visible_line(
-                    &mut visible,
-                    &mut row_infos,
-                    wrapped,
-                    row_info,
-                    &mut wrapped_index,
-                    start,
-                    end,
-                ) {
-                    return (visible, row_infos);
-                }
-            }
-        }
-
-        (visible, row_infos)
-    }
-
-    fn visualize_history_line(
+    pub fn visualize_history_line(
         &self,
         line: &Line<'static>,
         width: u16,
@@ -263,23 +229,6 @@ impl HistoryLayout {
         } else {
             RenderUtil::wrap_line(line, width)
         }
-    }
-
-    fn push_visible_line(
-        visible: &mut Vec<Line<'static>>,
-        row_infos: &mut Vec<RowWrapInfo>,
-        line: Line<'static>,
-        row_info: RowWrapInfo,
-        wrapped_index: &mut usize,
-        start: usize,
-        end: usize,
-    ) -> bool {
-        if *wrapped_index >= start && *wrapped_index < end {
-            visible.push(line);
-            row_infos.push(row_info);
-        }
-        *wrapped_index += 1;
-        *wrapped_index >= end
     }
 
     pub fn begin_message_block(&mut self, removed_padding: bool) {

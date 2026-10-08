@@ -11,7 +11,6 @@ use crate::{
 use ratatui::{
     Frame,
     layout::{HorizontalAlignment, Rect},
-    style::Style,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Padding, Paragraph, Wrap},
 };
@@ -30,7 +29,7 @@ impl Render {
     ) {
         let mut block = Block::default()
             .borders(Borders::ALL)
-            .style(Style::default().bg(self.theme.inputbox))
+            .style(self.theme.inputbox_style())
             .padding(Padding::horizontal(1));
         if !app.editor.status.is_empty() {
             if matches!(&app.editor.mode, InputMode::Question { .. }) {
@@ -111,11 +110,7 @@ impl Render {
 
         lines.push(Line::raw(""));
         for (i, opt) in options.iter().enumerate() {
-            let style = if i == *selected {
-                Style::default().bg(self.theme.selected)
-            } else {
-                Style::default()
-            };
+            let style = self.theme.selected_style(i == *selected);
             let content = format!("{}) {}", i + 1, opt);
             lines.extend(RenderUtil::wrap_line(&Line::styled(content, style), width));
         }

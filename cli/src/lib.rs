@@ -22,6 +22,7 @@ pub mod render;
 pub mod selection;
 pub mod session;
 pub mod skills;
+pub mod theme;
 pub mod token_usage;
 pub mod tool_engine;
 pub mod tools;
