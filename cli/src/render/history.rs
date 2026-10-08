@@ -5,9 +5,12 @@
 use crate::{
     diff_view::{DiffLineKind, DiffView},
     dirs::Dirs,
-    render::Render,
-    render::layout::LiveTimer,
-    render::util::{RenderUtil, USER_PROMPT_BAR},
+    render::{
+        Render,
+        layout::LiveTimer,
+        util::{RenderUtil, USER_PROMPT_BAR},
+    },
+    theme::ColorTheme,
     tools::ToolName,
     tui::{TuiApp, TuiMessage},
 };
@@ -28,6 +31,8 @@ pub struct DisplayPrefs {
     pub thinking: bool,
     pub token_info: bool,
     pub diff_view: bool,
+    #[serde(default = "default_theme", with = "theme_serde")]
+    pub theme: ColorTheme,
 }
 
 impl Default for DisplayPrefs {
@@ -36,7 +41,32 @@ impl Default for DisplayPrefs {
             thinking: false,
             token_info: true,
             diff_view: true,
+            theme: ColorTheme::default(),
         }
+    }
+}
+
+fn default_theme() -> ColorTheme {
+    ColorTheme::default()
+}
+
+mod theme_serde {
+    use crate::theme::ColorTheme;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(theme: &ColorTheme, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(theme.name())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<ColorTheme, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let name = String::deserialize(deserializer)?;
+        Ok(ColorTheme::from_name(&name))
     }
 }
 

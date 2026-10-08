@@ -119,7 +119,7 @@ impl TuiApp {
             editor: PromptEditor::new(),
             messages: Vec::new(),
             context_tokens: None,
-            display_prefs: DisplayPrefs::load().unwrap_or_default(),
+            display_prefs: DisplayPrefs::default(),
             history: HistoryLayout::default(),
             selection: Selection::default(),
             actor_busy: false,
@@ -127,6 +127,7 @@ impl TuiApp {
     }
 
     pub async fn run(&mut self, harness: Harness) -> Result<HarnessSnapshot, Box<dyn Error>> {
+        self.display_prefs = DisplayPrefs::load().unwrap_or_default();
         self.agents = self.config.agents().clone();
         self.load_history(&harness);
         if let Err(e) = self.editor.load_prompt_history() {
@@ -144,7 +145,7 @@ impl TuiApp {
 
         let mut guard = TerminalGuard::enter()?;
         let mut terminal_events = EventStream::new();
-        let render = Render::new();
+        let mut render = Render::new();
         let mut render_reason;
         let mut last_render: Instant = Instant::now();
         let mut next_render: Option<Instant> = Some(last_render + STREAM_FRAME_INTERVAL);
@@ -566,7 +567,7 @@ impl TuiApp {
         self.history.invalidate_from(0);
     }
 
-    fn save_display_prefs(&self) {
+    pub fn save_display_prefs(&self) {
         if let Err(e) = self.display_prefs.save() {
             eprintln!("Failed to save display prefs: {}", e);
         }

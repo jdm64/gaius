@@ -64,6 +64,9 @@ pub enum InputMode {
     Reasoning {
         picker: PickList<ReasoningEffort>,
     },
+    Theme {
+        picker: PickList<String>,
+    },
 }
 
 impl InputMode {
@@ -84,6 +87,7 @@ impl InputMode {
             Self::Files { picker } => app.editor.handle_files(key, picker).await,
             Self::Skills { picker } => Self::handle_skills(app, key, picker, actor).await,
             Self::Reasoning { picker } => Self::handle_reasoning(app, key, picker, actor).await,
+            Self::Theme { picker } => Self::handle_theme(app, key, picker),
             Self::Question {
                 title: _,
                 options: _,
@@ -228,6 +232,35 @@ impl InputMode {
         }
 
         Self::Command { picker }
+    }
+
+    pub fn handle_theme(app: &mut TuiApp, key: KeyEvent, mut picker: PickList<String>) -> Self {
+        match key.code {
+            KeyCode::Esc => {
+                return Self::PromptInput;
+            }
+            KeyCode::Up => {
+                picker.move_up();
+                if let Some(name) = picker.selected_row() {
+                    app.display_prefs.theme = crate::theme::ColorTheme::from_name(name);
+                }
+            }
+            KeyCode::Down => {
+                picker.move_down();
+                if let Some(name) = picker.selected_row() {
+                    app.display_prefs.theme = crate::theme::ColorTheme::from_name(name);
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(name) = picker.selected_row() {
+                    app.editor.status = format!("Theme: {name}");
+                }
+                app.save_display_prefs();
+                return Self::PromptInput;
+            }
+            _ => {}
+        }
+        Self::Theme { picker }
     }
 }
 

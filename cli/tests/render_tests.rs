@@ -20,6 +20,7 @@ fn default_prefs() -> DisplayPrefs {
         thinking: false,
         token_info: true,
         diff_view: true,
+        theme: ColorTheme::default(),
     }
 }
 
@@ -297,7 +298,7 @@ fn selected_history_text_returns_none_for_empty_selection() {
 
 #[test]
 fn draw_history_applies_selection_highlight_to_selected_cells() {
-    let render = Render::new();
+    let mut render = Render::new();
     let mut app = TuiApp::new(Config::new());
     app.push_message(TuiMessage::AgentMessage("abcdef".to_string()));
     app.selection.selection = Some(HistorySelection {
@@ -329,7 +330,7 @@ fn draw_history_applies_selection_highlight_to_selected_cells() {
 
 #[test]
 fn draw_input_expands_height_for_wrapped_prompt() {
-    let render = Render::new();
+    let mut render = Render::new();
     let mut app = TuiApp::new(Config::new());
     app.editor.input = "abcdefghijklmnopq".to_string();
     app.editor.cursor = app.editor.input.chars().count();
@@ -392,7 +393,7 @@ fn render_diff_view_includes_headers_lines_and_missing_newline_marker() {
 
 #[test]
 fn draw_input_places_cursor_on_next_wrapped_line_at_boundary() {
-    let render = Render::new();
+    let mut render = Render::new();
     let mut app = TuiApp::new(Config::new());
     app.editor.input = "abcdefghijklmno".to_string();
     app.editor.cursor = 14;
@@ -439,7 +440,7 @@ fn live_tool_call_timer_updates_without_new_messages() {
     use std::thread;
     use std::time::Duration as StdDuration;
 
-    let render = Render::new();
+    let mut render = Render::new();
     let mut app = TuiApp::new(Config::new());
     app.push_message(TuiMessage::ToolCall {
         name: "bash".to_string(),
@@ -517,7 +518,7 @@ fn live_compaction_timer_updates_without_new_messages() {
     use std::thread;
     use std::time::Duration as StdDuration;
 
-    let render = Render::new();
+    let mut render = Render::new();
     let mut app = TuiApp::new(Config::new());
     app.push_message(TuiMessage::CompactionStart {
         start_time: time_now() - 5_000,
@@ -563,7 +564,7 @@ fn buffer_contains(terminal: &Terminal<TestBackend>, needle: &str) -> bool {
 
 #[test]
 fn draw_history_anchors_view_and_shows_new_lines_below_indicator() {
-    let render = Render::new();
+    let mut render = Render::new();
     let mut app = TuiApp::new(Config::new());
 
     // Plenty of short single-line messages so the history is taller than the

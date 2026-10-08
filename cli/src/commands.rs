@@ -9,6 +9,7 @@ use crate::{
     input::{InputMode, picklist::PickList},
     models::ReasoningEffort,
     session::Session,
+    theme::ColorTheme,
     tui::{TuiApp, TuiMessage},
 };
 use std::future::Future;
@@ -64,6 +65,7 @@ define_commands! {
     Fork => "fork", "Copy the current session with a new id";
     Info => "info", "Show session info";
     /* Display */
+    Theme => "theme", "Select the color theme";
     ShowThinking => "show-thinking", "Toggle rendering of thinking messages";
     ShowTokens => "show-tokens", "Toggle rendering of token info messages";
     ShowDiff => "show-diff", "Toggle rendering of diff messages";
@@ -227,6 +229,14 @@ impl Command {
                 app.toggle_thinking();
                 app.editor.clear_input();
                 InputMode::PromptInput
+            }
+            Self::Theme => {
+                app.editor.clear_input();
+                InputMode::Theme {
+                    picker: PickList::all(
+                        ColorTheme::names().iter().map(|n| n.to_string()).collect(),
+                    ),
+                }
             }
             Self::Reasoning => {
                 let efforts: Vec<ReasoningEffort> = ReasoningEffort::all().to_vec();

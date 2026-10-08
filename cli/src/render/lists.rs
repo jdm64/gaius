@@ -293,6 +293,31 @@ impl Render {
         Some(vec![("Esc|Enter", "close")])
     }
 
+    pub fn draw_theme(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        picker: &PickList<String>,
+    ) -> Option<Vec<(&'static str, &'static str)>> {
+        self.draw_pick_list(
+            frame,
+            area,
+            picker,
+            PickListRenderSpec {
+                title: "Themes",
+                max_width: 30,
+                empty_text: "No themes",
+                background: Style::default(),
+            },
+            |name, _| ListItem::new(name.as_str()),
+        );
+        Some(vec![
+            ("Up/Down", "select"),
+            ("Enter", "apply"),
+            ("Esc", "cancel"),
+        ])
+    }
+
     pub fn draw_reasoning(
         &self,
         frame: &mut Frame<'_>,

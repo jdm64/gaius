@@ -8,7 +8,9 @@ use ratatui::{
     text::{Line, Span, Text},
 };
 
+#[derive(Clone)]
 pub struct ColorTheme {
+    name: &'static str,
     header: Color,
     selected: Color,
     thinking: Color,
@@ -22,6 +24,7 @@ pub struct ColorTheme {
 impl Default for ColorTheme {
     fn default() -> Self {
         ColorTheme {
+            name: "default",
             header: Color::Yellow,
             selected: Color::Magenta,
             thinking: Color::LightBlue,
@@ -35,6 +38,44 @@ impl Default for ColorTheme {
 }
 
 impl ColorTheme {
+    pub const NAMES: [&'static str; 3] = ["default", "ocean", "forest"];
+
+    pub fn names() -> &'static [&'static str] {
+        &Self::NAMES
+    }
+
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "ocean" => Self {
+                name: "ocean",
+                header: Color::LightCyan,
+                selected: Color::Blue,
+                thinking: Color::Cyan,
+                user_bar: Color::Blue,
+                user_box: Color::Rgb(0, 32, 64),
+                inputbox: Color::Rgb(0, 0, 64),
+                toolcall: Color::LightCyan,
+                error: Color::Red,
+            },
+            "forest" => Self {
+                name: "forest",
+                header: Color::LightGreen,
+                selected: Color::Green,
+                thinking: Color::LightGreen,
+                user_bar: Color::Green,
+                user_box: Color::Rgb(0, 48, 0),
+                inputbox: Color::Rgb(0, 32, 0),
+                toolcall: Color::Yellow,
+                error: Color::Red,
+            },
+            _ => Self::default(),
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
     pub fn userbox_style(&self) -> Style {
         Style::default().bg(self.user_box).italic().bold()
     }

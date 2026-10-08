@@ -34,7 +34,9 @@ impl Render {
         }
     }
 
-    pub fn draw(&self, app: &mut TuiApp, frame: &mut Frame<'_>) {
+    pub fn draw(&mut self, app: &mut TuiApp, frame: &mut Frame<'_>) {
+        self.theme = app.display_prefs.theme.clone();
+
         let area = frame.area();
         let input_width = area.width.saturating_sub(4).max(1);
 
@@ -83,6 +85,7 @@ impl Render {
             InputMode::SessionInfo { info } => self.draw_session_info(frame, chunks[1], info),
             InputMode::Question { .. } => Some(Self::question_help()),
             InputMode::Reasoning { picker } => self.draw_reasoning(frame, chunks[1], picker),
+            InputMode::Theme { picker } => self.draw_theme(frame, chunks[1], picker),
         };
 
         let help_items = active_help.unwrap_or(vec![("Ctrl+C", "quit"), ("Ctrl+D", "cancel")]);
