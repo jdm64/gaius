@@ -1,16 +1,8 @@
-use gaius::config::Config;
-use gaius::diff_view::DiffView;
-use gaius::tui::{TuiApp, TuiMessage, wrapped_line_count};
-
-#[test]
-fn counts_wrapped_history_lines() {
-    let lines = vec![
-        ratatui::text::Line::from("12345"),
-        ratatui::text::Line::from("123456"),
-    ];
-    assert_eq!(wrapped_line_count(&lines, 5), 3);
-    assert_eq!(wrapped_line_count(&lines, 0), 11);
-}
+use gaius::{
+    config::Config,
+    diff_view::DiffView,
+    tui::{TuiApp, TuiMessage},
+};
 
 #[test]
 fn build_tui_app_messages_with_all_variants() {

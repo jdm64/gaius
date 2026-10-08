@@ -22,7 +22,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use futures::StreamExt;
-use ratatui::{Terminal, backend::CrosstermBackend, text::Line};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
     error::Error,
     io::{self, Stdout},
@@ -603,13 +603,4 @@ impl TuiApp {
             break;
         }
     }
-}
-
-pub fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> u16 {
-    let width = width.max(1) as usize;
-    lines.iter().fold(0u16, |total, line| {
-        let line_width = line.width();
-        let wrapped = (line_width / width) + usize::from(line_width % width != 0);
-        total.saturating_add(wrapped.max(1) as u16)
-    })
 }
