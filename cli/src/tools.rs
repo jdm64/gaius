@@ -63,7 +63,7 @@ impl ToolName {
             ToolName::Bash => &["command"],
             ToolName::Glob => &["path", "pattern"],
             ToolName::Grep => &["path", "include", "pattern"],
-            ToolName::Question => &["title"],
+            ToolName::Question => &["prompt"],
             ToolName::Plan => &[],
             ToolName::Skill => &["name"],
             ToolName::WebFetch => &["url"],
@@ -199,7 +199,7 @@ impl ToolName {
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
-                        "title": {
+                        "prompt": {
                             "type": "string",
                             "description": "The question or prompt to show the user"
                         },
@@ -209,7 +209,7 @@ impl ToolName {
                             "description": "Optional list of choices for the user"
                         }
                     },
-                    "required": ["title"]
+                    "required": ["prompt"]
                 })),
             ToolName::Plan => Tool::new(self.as_str())
                 .with_description("Create a structured markdown formatted plan")
