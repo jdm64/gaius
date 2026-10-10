@@ -32,14 +32,19 @@ impl ToolEngine {
         Self { skill_repo }
     }
 
-    pub fn build_tools(&self) -> Vec<Tool> {
-        ToolName::ALL.iter().map(|tool| tool.genai_tool()).collect()
-    }
-
-    pub fn build_tools_without_plan(&self) -> Vec<Tool> {
+    pub fn build_tools(&self, plan_mode: bool) -> Vec<Tool> {
+        let has_skills = !self.skill_repo.is_empty();
         ToolName::ALL
             .iter()
-            .filter(|tool| **tool != ToolName::Plan)
+            .filter(|tool| {
+                if **tool == ToolName::Plan {
+                    plan_mode
+                } else if **tool == ToolName::Skill {
+                    has_skills
+                } else {
+                    true
+                }
+            })
             .map(|tool| tool.genai_tool())
             .collect()
     }

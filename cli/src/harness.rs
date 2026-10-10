@@ -177,12 +177,7 @@ impl Harness {
     }
 
     fn build_sys_prompt(&mut self) {
-        self.history.tools = if self.plan_mode {
-            Some(self.tool_engine.build_tools())
-        } else {
-            Some(self.tool_engine.build_tools_without_plan())
-        };
-
+        self.history.tools = Some(self.tool_engine.build_tools(self.plan_mode));
         self.history.system = self
             .client
             .sys_prompt(&self.tool_engine.skill_repo, self.plan_mode)
@@ -241,7 +236,6 @@ impl Harness {
         let (history, token_usage) = self.session.load()?;
         self.history = history;
         self.token_usage = token_usage;
-        self.history.tools = Some(self.tool_engine.build_tools());
         self.last_plan_content = None;
         self.update_session_info();
         self.build_sys_prompt();

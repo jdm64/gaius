@@ -1,4 +1,8 @@
-use gaius::{skills::SkillRepo, tool_engine::ToolEngine, tool_engine::ToolResult, tools::ToolName};
+use gaius::{
+    skills::{Skill, SkillRepo},
+    tool_engine::{ToolEngine, ToolResult},
+    tools::ToolName::{self},
+};
 use serde_json::json;
 use std::sync::{Mutex, OnceLock};
 
@@ -371,26 +375,18 @@ async fn webfetch_rejects_unsupported_scheme() {
 
 #[test]
 fn test_build_tools_without_plan() {
-    let skill_repo = SkillRepo::default();
-    let engine = ToolEngine::new(skill_repo);
+    let engine = ToolEngine::new(SkillRepo::default());
+    let tools = engine.build_tools(false);
 
-    let tools = engine.build_tools_without_plan();
+    assert_eq!(tools.len(), ToolName::ALL.len() - 2);
 
-    // Should have all tools except Plan
-    assert_eq!(tools.len(), ToolName::ALL.len() - 1);
-
-    // Verify that Plan is not included but all other tools are
     let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-    assert!(
-        !tool_names.contains(&"plan"),
-        "build_tools_without_plan should not include the Plan tool"
-    );
-
     for tool_name in &ToolName::ALL {
-        if *tool_name == ToolName::Plan {
+        if *tool_name == ToolName::Plan || *tool_name == ToolName::Skill {
             assert!(
                 !tool_names.contains(&tool_name.as_str()),
-                "Plan tool should be absent"
+                "Tool {} should be absent",
+                tool_name.as_str()
             );
         } else {
             assert!(
@@ -400,4 +396,14 @@ fn test_build_tools_without_plan() {
             );
         }
     }
+
+    let mut skill_repo = SkillRepo::default();
+    skill_repo.insert(Skill {
+        name: "test-skill".into(),
+        description: "description".into(),
+        body: "body".into(),
+    });
+    let engine = ToolEngine::new(skill_repo);
+    let tools = engine.build_tools(true);
+    assert_eq!(tools.len(), ToolName::ALL.len());
 }
