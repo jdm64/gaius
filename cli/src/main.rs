@@ -144,9 +144,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let agent = config.agents().default_agent().clone();
     let mut harness = if args.prompt.is_some() && args.session_id.is_none() {
-        Harness::new_without_session(agent)?
+        Harness::new_without_session(&config, agent)?
     } else {
-        Harness::new(agent, args.session_id)?
+        Harness::new(&config, agent, args.session_id)?
     };
 
     let models_cache = Models::list(&config).await?;

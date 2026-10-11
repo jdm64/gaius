@@ -25,11 +25,33 @@ pub enum ToolResult {
 
 pub struct ToolEngine {
     pub skill_repo: SkillRepo,
+    max_output: usize,
+    max_output_split: usize,
 }
 
 impl ToolEngine {
-    pub fn new(skill_repo: SkillRepo) -> Self {
-        Self { skill_repo }
+    pub fn new(skill_repo: SkillRepo, max_output: usize, max_output_split: usize) -> Self {
+        Self {
+            skill_repo,
+            max_output,
+            max_output_split,
+        }
+    }
+
+    pub fn truncate_output(&self, output: String) -> String {
+        let max = self.max_output;
+        let count = output.chars().count();
+        if count <= max {
+            return output;
+        }
+        let start_count = max.saturating_mul(self.max_output_split.min(100)) / 100;
+        let end_count = max.saturating_sub(start_count);
+        let start: String = output.chars().take(start_count).collect();
+        let end: String = output.chars().skip(count - end_count).collect();
+        format!(
+            "[Warning: tool output truncated.]\\n{start}\\n[... {} characters truncated ...]\\n{end}",
+            count - max
+        )
     }
 
     pub fn build_tools(&self, plan_mode: bool) -> Vec<Tool> {

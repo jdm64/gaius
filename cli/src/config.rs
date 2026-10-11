@@ -14,6 +14,13 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, path::PathBuf};
 use url::Url;
 
+const fn default_tool_max_output() -> usize {
+    30_000
+}
+const fn default_tool_max_output_split() -> usize {
+    60
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -22,6 +29,8 @@ pub struct Config {
     model: Vec<ModelConfig>,
     #[serde(skip)]
     agents: Agents,
+    #[serde(default)]
+    tools: ToolsConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -41,6 +50,23 @@ pub struct ModelConfig {
     pub id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolsConfig {
+    #[serde(default = "default_tool_max_output")]
+    pub max_output: usize,
+    #[serde(default = "default_tool_max_output_split")]
+    pub max_output_split: usize,
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            max_output: default_tool_max_output(),
+            max_output_split: default_tool_max_output_split(),
+        }
+    }
+}
+
 pub struct ConfiguredModel {
     pub provider: ProviderConfig,
     pub model: ModelConfig,
@@ -58,6 +84,7 @@ impl Config {
             provider: vec![],
             model: vec![],
             agents: Agents::default(),
+            tools: ToolsConfig::default(),
         }
     }
 
@@ -138,6 +165,7 @@ impl Config {
                 provider: vec![provider_config],
                 model: vec![],
                 agents: Agents::load(&Dirs::config_dir()?)?,
+                tools: ToolsConfig::default(),
             };
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -196,6 +224,10 @@ impl Config {
 
     pub fn agents(&self) -> &Agents {
         &self.agents
+    }
+
+    pub fn tools_config(&self) -> &ToolsConfig {
+        &self.tools
     }
 }
 

@@ -1,5 +1,6 @@
 use gaius::{
     agents::AgentDefinition,
+    config::Config,
     diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
     harness::{Harness, HarnessEvent, compact::Compact, history_replay, prompt_queue::PromptQueue},
     harness_actor::HarnessActorEvent,
@@ -41,14 +42,14 @@ fn replay_events(messages: Vec<ChatMessage>) -> Vec<HarnessEvent> {
 
 #[test]
 fn interactive_harness_starts_with_session_id() {
-    let harness = Harness::new(basic_agent(), None).unwrap();
+    let harness = Harness::new(&Config::default(), basic_agent(), None).unwrap();
 
     assert!(harness.session_id().is_some());
 }
 
 #[test]
 fn harness_without_session_starts_without_session_id() {
-    let harness = Harness::new_without_session(basic_agent()).unwrap();
+    let harness = Harness::new_without_session(&Config::default(), basic_agent()).unwrap();
 
     assert!(harness.session_id().is_none());
 }
@@ -854,7 +855,7 @@ fn side_usage_accumulates_cost() {
 
 #[test]
 fn harness_record_usage_emits_event_and_updates_session_info() {
-    let mut harness = Harness::new_without_session(basic_agent()).unwrap();
+    let mut harness = Harness::new_without_session(&Config::default(), basic_agent()).unwrap();
     let mut events = Vec::new();
 
     harness.record_side_usage(
@@ -929,7 +930,7 @@ fn prompt_queue_clear_drops_every_waiting_prompt() {
 
 #[test]
 fn harness_counts_prompts_waiting_to_be_sent() {
-    let harness = Harness::new_without_session(basic_agent()).unwrap();
+    let harness = Harness::new_without_session(&Config::default(), basic_agent()).unwrap();
     let queue = harness.prompt_queue();
     let (event_tx, _events) = queue_channel();
 
@@ -949,7 +950,7 @@ fn harness_counts_prompts_waiting_to_be_sent() {
 // it receives has to land in the same queue the turn drains.
 #[test]
 fn harness_prompt_queue_handle_shares_the_same_queue() {
-    let harness = Harness::new_without_session(basic_agent()).unwrap();
+    let harness = Harness::new_without_session(&Config::default(), basic_agent()).unwrap();
     let queue = harness.prompt_queue();
     let (event_tx, _events) = queue_channel();
 

@@ -38,7 +38,7 @@ fn allows_glob_patterns_with_literal_characters() {
 
 #[tokio::test]
 async fn plan_tool_returns_plan_text() {
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute(
             "plan",
             &json!({
@@ -57,7 +57,7 @@ async fn plan_tool_returns_plan_text() {
 
 #[tokio::test]
 async fn plan_tool_renders_arbitrary_fields() {
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute(
             "plan",
             &json!({
@@ -76,7 +76,7 @@ async fn plan_tool_renders_arbitrary_fields() {
 
 #[tokio::test]
 async fn plan_tool_requires_content() {
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute("plan", &json!({ "goal": "Refactor auth" }))
         .await;
 
@@ -98,7 +98,7 @@ async fn edit_file_returns_compact_diff_view() {
     std::env::set_current_dir(&dir).unwrap();
     std::fs::write("sample.txt", "one\ntwo\nthree\nfour\nfive\n").unwrap();
 
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute(
             "edit_file",
             &json!({
@@ -140,7 +140,7 @@ async fn glob_returns_relative_paths() {
     std::fs::write(dir.join("nested/sample.txt"), "content").unwrap();
     std::env::set_current_dir(&dir).unwrap();
 
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute("glob", &json!({ "pattern": "*.txt", "path": "nested" }))
         .await;
 
@@ -162,7 +162,7 @@ async fn grep_returns_relative_paths() {
     std::fs::write(dir.join("nested/sample.txt"), "match this\n").unwrap();
     std::env::set_current_dir(&dir).unwrap();
 
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute(
             "grep",
             &json!({ "pattern": "match", "path": "nested/sample.txt" }),
@@ -193,7 +193,7 @@ async fn skill_tool_returns_body_for_existing_skill() {
         body: "Skill instructions here".to_string(),
     });
 
-    let result = ToolEngine::new(repo)
+    let result = ToolEngine::new(repo, 30000, 60)
         .execute(
             "skill",
             &json!({
@@ -212,7 +212,7 @@ async fn skill_tool_returns_body_for_existing_skill() {
 
 #[tokio::test]
 async fn skill_tool_returns_error_for_missing_skill() {
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute(
             "skill",
             &json!({
@@ -231,7 +231,7 @@ async fn skill_tool_returns_error_for_missing_skill() {
 
 #[tokio::test]
 async fn skill_tool_requires_name() {
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute("skill", &json!({}))
         .await;
 
@@ -293,7 +293,7 @@ async fn webfetch_returns_cleaned_html_text() {
          <script>alert('leak')</script>\
          <style>.x{display:none}</style></body></html>",
     );
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute("webfetch", &json!({ "url": url }))
         .await;
 
@@ -318,7 +318,7 @@ async fn webfetch_returns_cleaned_html_text() {
 #[tokio::test]
 async fn webfetch_returns_raw_text_for_non_html() {
     let url = spawn_test_server("200 OK", "application/json", "{\"hello\":\"world\"}");
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute("webfetch", &json!({ "url": url }))
         .await;
 
@@ -333,7 +333,7 @@ async fn webfetch_returns_raw_text_for_non_html() {
 #[tokio::test]
 async fn webfetch_returns_error_on_non_success() {
     let url = spawn_test_server("404 Not Found", "text/plain", "not found");
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute("webfetch", &json!({ "url": url }))
         .await;
 
@@ -347,7 +347,7 @@ async fn webfetch_returns_error_on_non_success() {
 
 #[tokio::test]
 async fn webfetch_requires_url() {
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute("webfetch", &json!({}))
         .await;
 
@@ -361,7 +361,7 @@ async fn webfetch_requires_url() {
 
 #[tokio::test]
 async fn webfetch_rejects_unsupported_scheme() {
-    let result = ToolEngine::new(SkillRepo::default())
+    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute("webfetch", &json!({ "url": "file:///etc/passwd" }))
         .await;
 
@@ -375,7 +375,7 @@ async fn webfetch_rejects_unsupported_scheme() {
 
 #[test]
 fn test_build_tools_without_plan() {
-    let engine = ToolEngine::new(SkillRepo::default());
+    let engine = ToolEngine::new(SkillRepo::default(), 30000, 60);
     let tools = engine.build_tools(false);
 
     assert_eq!(tools.len(), ToolName::ALL.len() - 2);
@@ -403,7 +403,7 @@ fn test_build_tools_without_plan() {
         description: "description".into(),
         body: "body".into(),
     });
-    let engine = ToolEngine::new(skill_repo);
+    let engine = ToolEngine::new(skill_repo, 30000, 60);
     let tools = engine.build_tools(true);
     assert_eq!(tools.len(), ToolName::ALL.len());
 }
