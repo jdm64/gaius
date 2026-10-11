@@ -122,31 +122,12 @@ impl InputMode {
             KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Ok(app.editor.mode_for_input());
             }
-            KeyCode::Up if app.editor.cursor == 0 => {
-                let len = app.editor.history.len();
-                if len > 0 {
-                    app.editor.history_idx = match app.editor.history_idx {
-                        None => Some(0),
-                        Some(i) if i + 1 < len => Some(i + 1),
-                        Some(i) => Some(i),
-                    };
-                    if let Some(idx) = app.editor.history_idx {
-                        app.editor.input = app.editor.history[idx].clone();
-                    }
-                }
+            KeyCode::Up => {
+                app.editor.history_up();
                 return Ok(app.editor.mode_for_input());
             }
-            KeyCode::Down if app.editor.cursor == 0 => {
-                app.editor.history_idx = match app.editor.history_idx {
-                    None => None,
-                    Some(0) => None,
-                    Some(i) => Some(i - 1),
-                };
-                if let Some(idx) = app.editor.history_idx {
-                    app.editor.input = app.editor.history[idx].clone();
-                } else {
-                    app.editor.clear_input();
-                }
+            KeyCode::Down => {
+                app.editor.history_down();
                 return Ok(app.editor.mode_for_input());
             }
             KeyCode::Tab => {
@@ -441,6 +422,49 @@ impl PromptEditor {
 
     pub fn move_input_cursor_end(&mut self) {
         self.cursor = self.input_len();
+    }
+
+    pub fn history_up(&mut self) {
+        if self.cursor != 0 && self.cursor < self.input_len() {
+            self.move_input_cursor_home();
+            return;
+        }
+
+        let len = self.history.len();
+        if len > 0 {
+            self.history_idx = match self.history_idx {
+                None => Some(0),
+                Some(i) if i + 1 < len => Some(i + 1),
+                Some(i) => Some(i),
+            };
+            if let Some(idx) = self.history_idx {
+                self.input = self.history[idx].clone();
+            }
+            if self.cursor > 0 {
+                self.move_input_cursor_end();
+            }
+        }
+    }
+
+    pub fn history_down(&mut self) {
+        if self.cursor > 0 && self.cursor < self.input_len() {
+            self.move_input_cursor_end();
+            return;
+        }
+
+        self.history_idx = match self.history_idx {
+            None => None,
+            Some(0) => None,
+            Some(i) => Some(i - 1),
+        };
+        if let Some(idx) = self.history_idx {
+            self.input = self.history[idx].clone();
+            if self.cursor > 0 {
+                self.move_input_cursor_end();
+            }
+        } else {
+            self.clear_input();
+        }
     }
 
     pub fn update_prompt_history(&mut self, prompt: String) {
