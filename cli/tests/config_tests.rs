@@ -152,7 +152,7 @@ fn saving_a_session_creates_the_sessions_directory() {
             .expect("save a session into a home that has no sessions directory");
 
         assert!(sessions.is_dir());
-        let saved = Session::list();
+        let saved = Session::list(None);
         assert_eq!(
             vec!["a-session".to_string()],
             saved

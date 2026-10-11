@@ -70,7 +70,10 @@ impl Render {
                 empty_text: "No sessions",
                 background: Style::default(),
             },
-            |session, _index| ListItem::new(session.display_name()),
+            |session, _index| {
+                let marker = if session.curr { ">" } else { " " };
+                ListItem::new(format!("{marker}{}", session.display_name()))
+            },
         );
         if renaming {
             Some(vec![("Enter", "save"), ("Esc", "cancel")])

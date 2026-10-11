@@ -114,7 +114,7 @@ impl Command {
                 InputMode::PromptInput
             }
             Self::Sessions => {
-                let sessions = Session::list();
+                let sessions = Session::list(app.snapshot.session_id.clone());
                 app.editor.clear_input();
                 InputMode::Session {
                     picker: PickList::all(sessions),

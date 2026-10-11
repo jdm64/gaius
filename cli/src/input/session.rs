@@ -72,7 +72,7 @@ impl InputMode {
                     if let Err(e) = Session::delete(session_id) {
                         app.editor.status = format!("Error deleting session: {}", e);
                     } else {
-                        let sessions = Session::list();
+                        let sessions = Session::list(app.snapshot.session_id.clone());
                         let filtered = (0..sessions.len()).collect();
                         picker.replace_rows(sessions, filtered);
                         app.editor.status = format!("Deleted session: {}", display_name);
@@ -112,42 +112,40 @@ impl InputMode {
 
         Self::Session { picker }
     }
-}
 
-impl PromptEditor {
     pub fn handle_session_rename(
-        &mut self,
+        app: &mut TuiApp,
         key: KeyEvent,
         mut picker: PickList<Session>,
     ) -> InputMode {
         match key.code {
             KeyCode::Esc => {
-                self.clear_input();
+                app.editor.clear_input();
                 return InputMode::Session { picker };
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return InputMode::Exit;
             }
             KeyCode::Enter => {
-                let new_name = self.input.trim().to_string();
+                let new_name = app.editor.input.trim().to_string();
                 if new_name.is_empty() {
-                    self.status = "Session name cannot be empty".to_string();
+                    app.editor.status = "Session name cannot be empty".to_string();
                     return InputMode::SessionRename { picker };
                 }
 
                 if picker.is_empty() {
-                    self.status_clear_input("No session selected");
+                    app.editor.status_clear_input("No session selected");
                     return InputMode::Session { picker };
                 }
 
                 let selected_id = picker.selected_row().and_then(|session| session.id.clone());
                 let Some(session) = picker.selected_row_mut() else {
-                    self.status_clear_input("No session selected");
+                    app.editor.status_clear_input("No session selected");
                     return InputMode::Session { picker };
                 };
                 match session.rename(new_name.clone()) {
                     Ok(()) => {
-                        let sessions = Session::list();
+                        let sessions = Session::list(app.snapshot.session_id.clone());
                         let filtered = (0..sessions.len()).collect();
                         picker.replace_rows(sessions, filtered);
                         if let Some(selected_id) = selected_id {
@@ -163,23 +161,26 @@ impl PromptEditor {
                                 });
                         }
                         picker.clamp_selected();
-                        self.status_clear_input(&format!("Renamed session: {}", new_name));
+                        app.editor
+                            .status_clear_input(&format!("Renamed session: {}", new_name));
                         return InputMode::Session { picker };
                     }
                     Err(e) => {
-                        self.status = format!("Error renaming session: {}", e);
+                        app.editor.status = format!("Error renaming session: {}", e);
                         return InputMode::SessionRename { picker };
                     }
                 }
             }
             _ => {
-                self.handle_input_cursor(key);
+                app.editor.handle_input_cursor(key);
             }
         }
 
         InputMode::SessionRename { picker }
     }
+}
 
+impl PromptEditor {
     pub fn handle_session_info(key: KeyEvent, info: SessionInfo) -> InputMode {
         match key.code {
             KeyCode::Esc | KeyCode::Enter => InputMode::PromptInput,

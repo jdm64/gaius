@@ -80,7 +80,7 @@ impl InputMode {
             Self::PromptInput => Self::handle_prompt_input(app, key, actor).await?,
             Self::Command { picker } => Self::handle_command(app, key, picker, actor).await,
             Self::Session { picker } => Self::handle_session(app, key, picker, actor).await,
-            Self::SessionRename { picker } => app.editor.handle_session_rename(key, picker),
+            Self::SessionRename { picker } => Self::handle_session_rename(app, key, picker),
             Self::Models { picker } => Self::handle_models(app, key, picker, actor).await,
             Self::AddProvider { picker } => Self::handle_provider_add(app, key, picker).await,
             Self::Agents { picker } => Self::handle_agents(app, key, picker, actor).await,
