@@ -107,8 +107,10 @@ impl InputMode {
         app.editor.handle_input_cursor(key);
         match key.code {
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.editor.status = "Cancelling agent...".to_string();
-                actor.cancel().await?;
+                if app.actor_busy {
+                    app.editor.status = "Cancelling agent...".to_string();
+                    actor.cancel().await?;
+                }
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Ok(Self::Exit);
