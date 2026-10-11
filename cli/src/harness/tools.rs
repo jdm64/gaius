@@ -9,6 +9,10 @@ use crate::{
 use genai::chat::{ChatMessage, ContentPart, CustomPart, ToolCall, ToolResponse};
 use serde_json::json;
 
+const MAX_TOOL_OUTPUT_CHARS: usize = 30_000;
+const TOOL_OUTPUT_START_CHARS: usize = MAX_TOOL_OUTPUT_CHARS * 60 / 100;
+const TOOL_OUTPUT_END_CHARS: usize = MAX_TOOL_OUTPUT_CHARS - TOOL_OUTPUT_START_CHARS;
+
 impl Harness {
     pub(super) async fn call_tools<F>(&mut self, tool_calls: &[ToolCall], on_event: &mut F)
     where
@@ -68,6 +72,7 @@ impl Harness {
     ) where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
+        let result = truncate_tool_output(result);
         let mut message: ChatMessage = ToolResponse::new(&tc.call_id, result.clone()).into();
         message.content.push(ContentPart::Custom(CustomPart {
             model_iden: None,
@@ -90,6 +95,7 @@ impl Harness {
     ) where
         F: FnMut(HarnessEvent) -> Option<String>,
     {
+        let result = truncate_tool_output(result);
         let marker = diff.to_part();
         let mut message: ChatMessage = ToolResponse::new(&tc.call_id, result.clone()).into();
         message.content.push(marker);
@@ -101,4 +107,22 @@ impl Harness {
         });
         on_event(HarnessEvent::DiffView(diff));
     }
+}
+
+fn truncate_tool_output(output: String) -> String {
+    let char_count = output.chars().count();
+    if char_count <= MAX_TOOL_OUTPUT_CHARS {
+        return output;
+    }
+
+    let truncated_chars = char_count - MAX_TOOL_OUTPUT_CHARS;
+    let start: String = output.chars().take(TOOL_OUTPUT_START_CHARS).collect();
+    let end: String = output
+        .chars()
+        .skip(char_count - TOOL_OUTPUT_END_CHARS)
+        .collect();
+
+    format!(
+        "[Warning: tool output truncated.]\n{start}\n[... {truncated_chars} characters truncated ...]\n{end}"
+    )
 }
