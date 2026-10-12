@@ -129,7 +129,8 @@ impl TuiApp {
     pub async fn run(&mut self, harness: Harness) -> Result<HarnessSnapshot, Box<dyn Error>> {
         self.display_prefs = DisplayPrefs::load().unwrap_or_default();
         self.agents = self.config.agents().clone();
-        self.load_history(&harness);
+        harness.replay_history(|event| self.apply_harness_event(event));
+
         if let Err(e) = self.editor.load_prompt_history() {
             eprintln!("Failed to load prompt history: {}", e);
         }
@@ -469,79 +470,6 @@ impl TuiApp {
         }
 
         self.set_dirty_from(self.messages.len().saturating_sub(1));
-    }
-
-    pub fn load_history(&mut self, harness: &Harness) {
-        self.clear_messages();
-        harness.replay_history(|event| match event {
-            HarnessEvent::SystemMessage(text) => {
-                self.push_message(TuiMessage::SystemMessage(text));
-            }
-            HarnessEvent::UserPrompt(text) => {
-                self.push_message(TuiMessage::UserPrompt(text));
-            }
-            HarnessEvent::PlanMessage(text) => {
-                self.push_message(TuiMessage::PlanMessage(text));
-            }
-            HarnessEvent::AgentMessage(text) => {
-                self.append_agent_message(text, false);
-            }
-            HarnessEvent::Thinking(text) => {
-                self.append_agent_message(text, true);
-            }
-            HarnessEvent::CompactStart { start_time } => {
-                self.push_message(TuiMessage::CompactionStart { start_time });
-            }
-            HarnessEvent::CompactSummary(text) => {
-                self.push_message(TuiMessage::AgentMessage(text));
-            }
-            HarnessEvent::ToolCall {
-                name,
-                arguments,
-                start_time,
-            } => {
-                self.push_message(TuiMessage::ToolCall {
-                    name,
-                    arguments,
-                    start_time,
-                });
-            }
-            HarnessEvent::ToolResult {
-                name,
-                result,
-                error,
-            } => {
-                self.finish_last_timer();
-                self.push_message(TuiMessage::ToolResult {
-                    name,
-                    result,
-                    error,
-                });
-            }
-            HarnessEvent::DiffView(diff) => {
-                self.push_message(TuiMessage::DiffView(diff));
-            }
-            HarnessEvent::TokenUsage {
-                prompt,
-                response,
-                total,
-                cost,
-            } => {
-                let info = format_arrows(prompt, response);
-                self.append_token_info(info);
-                self.context_tokens = total;
-                self.snapshot.total_cost = cost;
-            }
-            HarnessEvent::AskUser {
-                title: _,
-                options: _,
-            } => {}
-            HarnessEvent::TurnStarted(_) => {}
-            HarnessEvent::TurnDuration(duration_ms) => {
-                self.push_message(TuiMessage::TurnDuration(duration_ms));
-            }
-            HarnessEvent::QueueChanged(_) => {}
-        });
     }
 
     pub fn clear_messages(&mut self) {
