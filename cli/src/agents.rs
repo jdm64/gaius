@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use crate::tools::ToolName;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{error::Error, path::Path};
 
@@ -114,11 +115,26 @@ impl Agents {
 }
 
 fn hardcoded_agents() -> Vec<AgentDefinition> {
-    vec![AgentDefinition {
-        name: "basic".to_string(),
-        prompt: String::new(),
-        tools: AgentTools::default(),
-    }]
+    vec![
+        AgentDefinition {
+            name: "basic".to_string(),
+            prompt: String::new(),
+            tools: AgentTools::default(),
+        },
+        AgentDefinition {
+            name: "minimal".to_string(),
+            prompt: String::new(),
+            tools: AgentTools {
+                include: vec![
+                    ToolName::ReadFile.name(),
+                    ToolName::CreateFile.name(),
+                    ToolName::EditFile.name(),
+                    ToolName::Bash.name(),
+                ],
+                exclude: Vec::new(),
+            },
+        },
+    ]
 }
 
 fn validate_agents(agents: &[AgentDefinition]) -> Result<(), Box<dyn Error>> {

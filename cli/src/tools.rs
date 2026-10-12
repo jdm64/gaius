@@ -33,6 +33,10 @@ impl ToolName {
         ToolName::WebFetch,
     ];
 
+    pub fn name(self) -> String {
+        self.as_str().to_string()
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             ToolName::ReadFile => "read_file",
