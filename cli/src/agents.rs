@@ -2,13 +2,56 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{error::Error, path::Path};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentDefinition {
     pub name: String,
     pub prompt: String,
+    #[serde(default)]
+    pub tools: AgentTools,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentTools {
+    #[serde(
+        default,
+        serialize_with = "serialize_vec",
+        deserialize_with = "deserialize_vec"
+    )]
+    pub include: Vec<String>,
+    #[serde(
+        default,
+        serialize_with = "serialize_vec",
+        deserialize_with = "deserialize_vec"
+    )]
+    pub exclude: Vec<String>,
+}
+
+impl AgentTools {
+    pub fn has_filters(&self) -> bool {
+        !self.include.is_empty() || !self.exclude.is_empty()
+    }
+}
+
+fn serialize_vec<S>(value: &[String], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&value.join(","))
+}
+
+fn deserialize_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(if s.is_empty() {
+        Vec::new()
+    } else {
+        s.split(',').map(String::from).collect()
+    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -74,6 +117,7 @@ fn hardcoded_agents() -> Vec<AgentDefinition> {
     vec![AgentDefinition {
         name: "basic".to_string(),
         prompt: String::new(),
+        tools: AgentTools::default(),
     }]
 }
 

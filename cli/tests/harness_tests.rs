@@ -30,6 +30,7 @@ fn basic_agent() -> AgentDefinition {
     AgentDefinition {
         name: "basic".to_string(),
         prompt: String::new(),
+        tools: Default::default(),
     }
 }
 

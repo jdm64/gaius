@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{diff_view::DiffView, skills::SkillRepo, tools::ToolName};
+use crate::{agents::AgentTools, diff_view::DiffView, skills::SkillRepo, tools::ToolName};
 use genai::chat::Tool;
 use glob::glob;
 use regex::Regex;
@@ -54,18 +54,23 @@ impl ToolEngine {
         )
     }
 
-    pub fn build_tools(&self, plan_mode: bool) -> Vec<Tool> {
+    pub fn build_tools(&self, plan_mode: bool, filters: Option<&AgentTools>) -> Vec<Tool> {
         let has_skills = !self.skill_repo.is_empty();
         ToolName::ALL
             .iter()
             .filter(|tool| {
-                if **tool == ToolName::Plan {
-                    plan_mode
-                } else if **tool == ToolName::Skill {
-                    has_skills
-                } else {
-                    true
-                }
+                match **tool {
+                    ToolName::Plan => return plan_mode,
+                    ToolName::Skill => return has_skills,
+                    _ => {}
+                };
+
+                let Some(filters) = filters else {
+                    return true;
+                };
+                let name = tool.as_str();
+                (filters.include.is_empty() || filters.include.iter().any(|item| item == name))
+                    && !filters.exclude.iter().any(|item| item == name)
             })
             .map(|tool| tool.genai_tool())
             .collect()

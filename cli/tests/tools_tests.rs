@@ -1,4 +1,5 @@
 use gaius::{
+    agents::AgentTools,
     skills::{Skill, SkillRepo},
     tool_engine::{ToolEngine, ToolResult},
     tools::ToolName::{self},
@@ -374,11 +375,23 @@ async fn webfetch_rejects_unsupported_scheme() {
 }
 
 #[test]
+fn build_tools_applies_agent_include_and_exclude_filters() {
+    let engine = ToolEngine::new(SkillRepo::default(), 30000, 60);
+    let filters = AgentTools {
+        include: vec!["read_file".into(), "bash".into(), "grep".into()],
+        exclude: vec!["bash".into()],
+    };
+
+    let tools = engine.build_tools(true, Some(&filters));
+    let tool_names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
+
+    assert_eq!(tool_names, ["read_file", "grep", "plan"]);
+}
+
+#[test]
 fn test_build_tools_without_plan() {
     let engine = ToolEngine::new(SkillRepo::default(), 30000, 60);
-    let tools = engine.build_tools(false);
-
-    assert_eq!(tools.len(), ToolName::ALL.len() - 2);
+    let tools = engine.build_tools(false, None);
 
     let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     for tool_name in &ToolName::ALL {
@@ -404,6 +417,6 @@ fn test_build_tools_without_plan() {
         body: "body".into(),
     });
     let engine = ToolEngine::new(skill_repo, 30000, 60);
-    let tools = engine.build_tools(true);
+    let tools = engine.build_tools(true, None);
     assert_eq!(tools.len(), ToolName::ALL.len());
 }

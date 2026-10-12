@@ -191,10 +191,16 @@ impl Harness {
     }
 
     fn build_sys_prompt(&mut self) {
-        self.history.tools = Some(self.tool_engine.build_tools(self.plan_mode));
+        let agent_tools = &self.client.agent().tools;
+        let tool_filter = if agent_tools.has_filters() {
+            Some(agent_tools)
+        } else {
+            None
+        };
+        self.history.tools = Some(self.tool_engine.build_tools(self.plan_mode, tool_filter));
         self.history.system = self
             .client
-            .sys_prompt(&self.tool_engine.skill_repo, self.plan_mode)
+            .sys_prompt(&self.tool_engine.skill_repo, self.plan_mode);
     }
 
     pub fn is_cancel(&self) -> bool {
