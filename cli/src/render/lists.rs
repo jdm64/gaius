@@ -176,11 +176,11 @@ impl Render {
             picker,
             PickListRenderSpec {
                 title: "Agents",
-                max_width: 30,
+                max_width: 80,
                 empty_text: "No matching agents",
                 background: Style::default(),
             },
-            |agent, _index| ListItem::new(agent.name.as_str()),
+            |agent, _index| ListItem::new(format!("{}: {}", agent.name.as_str(), agent.desc)),
         );
         Some(vec![
             ("Type", "filter"),

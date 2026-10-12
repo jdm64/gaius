@@ -9,6 +9,8 @@ use std::{error::Error, path::Path};
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentDefinition {
     pub name: String,
+    #[serde(default)]
+    pub desc: String,
     pub prompt: String,
     #[serde(default)]
     pub tools: AgentTools,
@@ -118,11 +120,13 @@ fn hardcoded_agents() -> Vec<AgentDefinition> {
     vec![
         AgentDefinition {
             name: "basic".to_string(),
+            desc: "all tools; no system prompt".to_string(),
             prompt: String::new(),
             tools: AgentTools::default(),
         },
         AgentDefinition {
             name: "minimal".to_string(),
+            desc: "only read/edit file and bash tools; no system prompt".to_string(),
             prompt: String::new(),
             tools: AgentTools {
                 include: vec![

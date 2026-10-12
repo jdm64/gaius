@@ -29,6 +29,7 @@ fn queue_channel() -> (
 fn basic_agent() -> AgentDefinition {
     AgentDefinition {
         name: "basic".to_string(),
+        desc: "description".to_string(),
         prompt: String::new(),
         tools: Default::default(),
     }
