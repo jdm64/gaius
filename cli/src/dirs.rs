@@ -11,9 +11,10 @@ impl Dirs {
     /// --- Config Dirs ---
     ///
     pub fn config_dir() -> Result<PathBuf, Box<dyn Error>> {
-        let home = std::env::var("HOME")?;
-        let dir = PathBuf::from(home).join(".config").join("gaius");
-        Ok(dir)
+        let Some(path) = dirs::config_dir() else {
+            return Err("unable to find config dir".into());
+        };
+        Ok(path.join("gaius"))
     }
 
     pub fn config_file() -> Result<PathBuf, Box<dyn Error>> {
@@ -28,12 +29,10 @@ impl Dirs {
     /// --- Data Dirs ---
     ///
     pub fn data_dir() -> Result<PathBuf, Box<dyn Error>> {
-        let home = std::env::var("HOME")?;
-        let dir = PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join("gaius");
-        Ok(dir)
+        let Some(path) = dirs::data_dir() else {
+            return Err("unable to find data dir".into());
+        };
+        Ok(path.join("gaius"))
     }
 
     pub fn sessions_dir() -> Result<PathBuf, Box<dyn Error>> {
@@ -82,9 +81,10 @@ impl Dirs {
     /// --- Cache Dirs ---
     ///
     pub fn cache_dir() -> Result<PathBuf, Box<dyn Error>> {
-        let home = std::env::var("HOME")?;
-        let dir = PathBuf::from(home).join(".cache").join("gaius");
-        Ok(dir)
+        let Some(path) = dirs::cache_dir() else {
+            return Err("unable to find data dir".into());
+        };
+        Ok(path.join("gaius"))
     }
 
     pub fn models_cache() -> Result<PathBuf, Box<dyn Error>> {

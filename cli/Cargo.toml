@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 base64 = "0.22"
 crossterm = { version = "0.29", features = ["event-stream", "osc52"] }
+dirs = "7"
 fast_html2md = "0.0.63"
 futures = "0.3"
 genai = "0.6"
