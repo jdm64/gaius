@@ -23,20 +23,30 @@ fn with_temp_home(test: impl FnOnce(PathBuf)) {
             .as_nanos()
     ));
     std::fs::create_dir_all(&home).unwrap();
-    let previous_home = std::env::var_os("HOME");
+
+    // `dirs` resolves config/data/cache from the XDG variables before falling
+    // back to `HOME`, so they must be redirected too or the paths escape the
+    // temp home. Clear them so the defaults derive from the temp `HOME`.
+    const VARS: [&str; 4] = ["HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"];
+    let previous: Vec<_> = VARS
+        .iter()
+        .map(|var| (*var, std::env::var_os(var)))
+        .collect();
     unsafe {
         std::env::set_var("HOME", &home);
+        for var in &VARS[1..] {
+            std::env::remove_var(var);
+        }
     }
 
     test(home.clone());
 
-    if let Some(previous_home) = previous_home {
+    for (var, value) in previous {
         unsafe {
-            std::env::set_var("HOME", previous_home);
-        }
-    } else {
-        unsafe {
-            std::env::remove_var("HOME");
+            match value {
+                Some(value) => std::env::set_var(var, value),
+                None => std::env::remove_var(var),
+            }
         }
     }
     let _ = std::fs::remove_dir_all(home);
