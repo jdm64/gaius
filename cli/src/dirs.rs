@@ -22,7 +22,7 @@ impl Dirs {
     }
 
     pub fn display_prefs_file() -> Result<PathBuf, Box<dyn Error>> {
-        Ok(Self::cache_dir()?.join("prefs_display.json"))
+        Ok(Self::config_dir()?.join("prefs_display.json"))
     }
 
     ///
