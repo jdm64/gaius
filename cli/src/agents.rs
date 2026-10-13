@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use crate::dirs::Dirs;
 use crate::tools::ToolName;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{error::Error, path::Path};
@@ -104,6 +105,23 @@ impl Agents {
         let current_index = self.agents.iter().position(|agent| agent.name == name)?;
         let next_index = (current_index + 1) % self.agents.len();
         self.agents.get(next_index)
+    }
+
+    pub fn load_last(agents: &Agents) -> Option<AgentDefinition> {
+        let path = Dirs::last_agent().ok()?;
+        let contents = std::fs::read_to_string(path).ok()?;
+        let name: String = serde_json::from_str(&contents).ok()?;
+        agents.find(&name).cloned()
+    }
+
+    pub fn save_last(agent: &AgentDefinition) -> Result<(), Box<dyn Error>> {
+        let path = Dirs::last_agent()?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        std::fs::write(path, serde_json::to_string(&agent.name)?)?;
+        Ok(())
     }
 
     pub fn mark_recent(&mut self, name: &str) {

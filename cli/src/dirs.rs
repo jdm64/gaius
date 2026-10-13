@@ -98,4 +98,8 @@ impl Dirs {
     pub fn prompt_history_file() -> Result<PathBuf, Box<dyn Error>> {
         Ok(Self::cache_dir()?.join("prompt_history.json"))
     }
+
+    pub fn last_agent() -> Result<PathBuf, Box<dyn Error>> {
+        Ok(Self::cache_dir()?.join("last_agent.json"))
+    }
 }

@@ -9,7 +9,7 @@ pub mod picklist;
 pub mod session;
 
 use crate::{
-    agents::AgentDefinition,
+    agents::{AgentDefinition, Agents},
     commands::Command,
     dirs::Dirs,
     harness_actor::HarnessActorHandle,
@@ -141,10 +141,14 @@ impl InputMode {
                             "Agent is busy; finish current turn before changing agents".to_string();
                     } else {
                         let name = agent.name.clone();
-                        match actor.set_agent(agent).await {
+                        match actor.set_agent(agent.clone()).await {
                             Ok(snapshot) => {
                                 app.save_snapshot(&snapshot);
                                 app.snapshot.agent_name = name;
+                                if let Err(err) = Agents::save_last(&agent) {
+                                    app.editor.status =
+                                        format!("Failed to save last agent: {}", err);
+                                }
                             }
                             Err(err) => app.editor.status = err,
                         }

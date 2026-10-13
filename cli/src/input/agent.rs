@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    agents::AgentDefinition,
+    agents::{AgentDefinition, Agents},
     commands::Command,
     harness_actor::HarnessActorHandle,
     input::{InputMode, PromptEditor, picklist::PickList},
@@ -47,6 +47,9 @@ impl InputMode {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
                         app.snapshot.agent_name = selected_agent.name.clone();
+                        if let Err(err) = Agents::save_last(&selected_agent) {
+                            app.editor.status = format!("Failed to save last agent: {}", err);
+                        }
                         app.editor.status_clear_input(&format!(
                             "Selected agent: {}",
                             selected_agent.name

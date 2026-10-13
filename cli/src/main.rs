@@ -2,16 +2,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use gaius::auth::handle::OAuthHandle;
-use gaius::auth::spec::OAuthKind;
-use gaius::cli_prompt::CliPrompt;
-use gaius::config::Config;
-use gaius::harness::Harness;
-use gaius::models::Models;
-use gaius::tui::TuiApp;
+use gaius::{
+    agents::Agents,
+    auth::{handle::OAuthHandle, spec::OAuthKind},
+    cli_prompt::CliPrompt,
+    config::Config,
+    harness::Harness,
+    models::Models,
+    tui::TuiApp,
+};
 use pico_args::Arguments;
-use std::error::Error;
-use std::path::PathBuf;
+use std::{error::Error, path::PathBuf};
 
 struct Args {
     cli_mode: bool,
@@ -156,6 +157,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         CliPrompt::new(args.prompt, harness).run().await?
     } else {
+        if let Some(last_agent) = Agents::load_last(config.agents()) {
+            harness.set_agent(last_agent);
+        }
+
         if let Some(recent_model) = Models::first_from_recent(&models_cache) {
             harness.set_model(recent_model).await?;
         } else if let Ok(config_model) = Models::first_from_config(&config, &models_cache) {
