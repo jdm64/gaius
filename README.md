@@ -103,6 +103,13 @@ key      = "sk-..."
 name     = "GPT 5.5"
 provider = "example-provider"
 id       = "openai/gpt-5.5"
+
+# Only set if the defaults are not optimal for your use case
+# Long tool responses are truncated in the middle. By default 30k chars are returned with:
+# 60% (18k) from the start and 40% (12k) from the end of the original output.
+[tools]
+max_output = 30000
+max_output_split = 60
 ```
 
 ### Agent definitions
@@ -111,7 +118,13 @@ Custom agents can be defined in `~/.config/gaius/agents/*.toml`:
 
 ```toml
 name    = "my-agent"
+desc    = "a simple coding agent" # optional
 prompt  = "You are a helpful coding assistant..."
+
+# Optional section to enable/disable tools
+[tools]
+include="bash,edit_file,read_file"
+exclude="read_file"
 ```
 
 ## Runtime data
@@ -121,11 +134,14 @@ Gaius stores data in the following locations:
 | Path | Purpose |
 |------|---------|
 | `~/.config/gaius/config.toml` | Global configuration file |
+| `~/.config/gaius/prefs_display.json` | Display preferences |
 | `~/.config/gaius/agents/*.toml` | Agent definitions |
 | `~/.local/share/gaius/sessions/*.mpk` | Session history (MessagePack format) |
 | `~/.cache/gaius/models_cache.json` | Cached model list per provider |
 | `~/.cache/gaius/models_recent.json` | Recently used model IDs |
 | `~/.cache/gaius/prompt_history.json` | History of recent used prompts |
+
+*Note: See [dirs crate](https://crates.io/crates/dirs) for paths on MacOS and Windows*
 
 ## Slash commands
 
@@ -142,10 +158,11 @@ In the TUI, you can use these slash commands:
 - `/rebuild` - Reload agents, skills, and AGENTS.md
 - `/compact` - Compact conversation history into a summary
 - `/info` - Show session info
-- `/streaming` - Toggle streaming mode on/off
-- `/thinking` - Toggle rendering of thinking messages on/off
+- `/theme` - Select color theme
+- `/show-thinking` - Toggle rendering of thinking messages on/off
 - `/show-tokens` - Toggle rendering of token info messages on/off
 - `/show-diff` - Toggle rendering of diff messages on/off
+- `/streaming` - Toggle streaming mode on/off
 
 ## Tools
 
