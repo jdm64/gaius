@@ -101,25 +101,17 @@ pub struct Harness {
 
 impl Harness {
     /// Create a harness that persists turns to a session file.
-    pub fn new(
-        config: &Config,
-        agent: AgentDefinition,
-        session_id: Option<String>,
-    ) -> Result<Self, Box<dyn Error>> {
-        Self::new_with_session(config, agent, session_id, true)
+    pub fn new(config: &Config, session_id: Option<String>) -> Result<Self, Box<dyn Error>> {
+        Self::new_with_session(config, session_id, true)
     }
 
     /// Create a harness for one-shot prompts that should not be persisted.
-    pub fn new_without_session(
-        config: &Config,
-        agent: AgentDefinition,
-    ) -> Result<Self, Box<dyn Error>> {
-        Self::new_with_session(config, agent, None, false)
+    pub fn new_without_session(config: &Config) -> Result<Self, Box<dyn Error>> {
+        Self::new_with_session(config, None, false)
     }
 
     fn new_with_session(
         config: &Config,
-        agent: AgentDefinition,
         session_id: Option<String>,
         create_session: bool,
     ) -> Result<Self, Box<dyn Error>> {
@@ -147,7 +139,7 @@ impl Harness {
 
         let mut harness = Self {
             history,
-            client: LLMClient::new(agent),
+            client: LLMClient::new(),
             tool_engine,
             session,
             token_usage,

@@ -21,12 +21,18 @@ pub struct LLMClient {
     agents_md: Option<String>,
 }
 
+impl Default for LLMClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LLMClient {
-    pub fn new(agent: AgentDefinition) -> Self {
+    pub fn new() -> Self {
         Self {
             client: Mutex::new(Client::default()),
             model: ModelDef::default(),
-            agent,
+            agent: AgentDefinition::default(),
             agents_md: read_agents_md(),
         }
     }

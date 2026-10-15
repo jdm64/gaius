@@ -7,8 +7,8 @@ use gaius::{
     auth::{handle::OAuthHandle, spec::OAuthKind},
     cli_prompt::CliPrompt,
     config::Config,
-    harness::Harness,
-    models::Models,
+    harness::{Harness, HarnessSnapshot},
+    models::{ModelDef, Models},
     tui::TuiApp,
 };
 use pico_args::Arguments;
@@ -18,6 +18,8 @@ struct Args {
     cli_mode: bool,
     prompt: Option<String>,
     session_id: Option<String>,
+    agent: Option<String>,
+    model: Option<String>,
     login: Option<String>,
     token_refresh: Option<String>,
 }
@@ -41,6 +43,8 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
         Ok::<PathBuf, std::convert::Infallible>(PathBuf::from(path))
     })?;
     let session_id = pargs.opt_value_from_str("--session")?;
+    let agent = pargs.opt_value_from_str("--agent")?;
+    let model = pargs.opt_value_from_str("--model")?;
     let login = pargs.opt_value_from_str("--login")?;
     let token_refresh = pargs.opt_value_from_str("--token-refresh")?;
 
@@ -57,6 +61,10 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
 
     if specified_modes.len() > 1 {
         return Err(format!("{} are mutually exclusive", specified_modes.join(", ")).into());
+    }
+
+    if (agent.is_some() || model.is_some()) && !(cli_mode || prompt_mode || prompt_file.is_some()) {
+        return Err("--agent and --model require --cli, --prompt, or --prompt-file".into());
     }
 
     let prompt = if prompt_mode {
@@ -76,6 +84,8 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
         cli_mode,
         prompt,
         session_id,
+        agent,
+        model,
         login,
         token_refresh,
     })
@@ -85,14 +95,20 @@ fn print_help() {
     println!("gaius - LLM agent harness");
     println!();
     println!("USAGE:");
-    println!("  gaius [OPTIONS | COMMANDS | INFO]");
+    println!("  gaius [OPTIONS | CLI_OPTIONS | COMMANDS | INFO]");
     println!();
     println!("OPTIONS:");
+    println!("  --session <ID>  Load and continue a saved session");
+    println!();
+    println!("CLI_OPTIONS:");
     println!("  --cli                 Enter simple interactive mode");
     println!("  --prompt \"<PROMPT>\"   Run one prompt from quoted argument and exit");
     println!("  --prompt-file <PATH>  Run one prompt read from file and exit");
     println!();
-    println!("  --session <ID>        Load and continue a saved session");
+    println!("  --agent <NAME>        Agent to use (default: basic)");
+    println!(
+        "  --model <NAME>        Model to use from config.toml (default: first configured model)"
+    );
     println!();
     println!("COMMANDS:");
     println!("  --login <PROVIDER>          Log in to a provider and exit");
@@ -130,6 +146,49 @@ async fn token_refresh(provider: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+async fn cli_mode(
+    mut harness: Harness,
+    config: Config,
+    models_cache: Vec<ModelDef>,
+    args: Args,
+) -> Result<HarnessSnapshot, Box<dyn Error>> {
+    let agent = match args.agent.as_deref() {
+        Some(name) => config
+            .agents()
+            .find(name)
+            .ok_or_else(|| format!("Unknown agent '{name}'"))?
+            .clone(),
+        _ => config.agents().default_agent().clone(),
+    };
+    harness.set_agent(agent);
+
+    let model = match args.model.as_deref() {
+        Some(name) => Models::from_config_name(&config, &models_cache, name)?,
+        None => Models::first_from_config(&config, &models_cache)?,
+    };
+    harness.set_model(model).await?;
+
+    CliPrompt::new(args.prompt.clone(), harness).run().await
+}
+
+async fn tui_mode(
+    mut harness: Harness,
+    config: Config,
+    models_cache: Vec<ModelDef>,
+) -> Result<HarnessSnapshot, Box<dyn Error>> {
+    if let Some(last_agent) = Agents::load_last(config.agents()) {
+        harness.set_agent(last_agent);
+    }
+
+    if let Some(recent_model) = Models::first_from_recent(&models_cache) {
+        harness.set_model(recent_model).await?;
+    } else if let Ok(config_model) = Models::first_from_config(&config, &models_cache) {
+        harness.set_model(config_model).await?;
+    }
+
+    TuiApp::new(config).run(harness).await
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
@@ -143,31 +202,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut config = Config::new();
     config.load().await?;
 
-    let agent = config.agents().default_agent().clone();
-    let mut harness = if args.prompt.is_some() && args.session_id.is_none() {
-        Harness::new_without_session(&config, agent)?
+    let harness = if args.prompt.is_some() && args.session_id.is_none() {
+        Harness::new_without_session(&config)?
     } else {
-        Harness::new(&config, agent, args.session_id)?
+        Harness::new(&config, args.session_id.clone())?
     };
 
     let models_cache = Models::list(&config).await?;
-    let snapshot = if args.cli_mode || args.prompt.is_some() {
-        let first_model = Models::first_from_config(&config, &models_cache)?;
-        harness.set_model(first_model.clone()).await?;
-
-        CliPrompt::new(args.prompt, harness).run().await?
+    let cli_path = args.cli_mode || args.prompt.is_some();
+    let snapshot = if cli_path {
+        cli_mode(harness, config, models_cache, args).await?
     } else {
-        if let Some(last_agent) = Agents::load_last(config.agents()) {
-            harness.set_agent(last_agent);
-        }
-
-        if let Some(recent_model) = Models::first_from_recent(&models_cache) {
-            harness.set_model(recent_model).await?;
-        } else if let Ok(config_model) = Models::first_from_config(&config, &models_cache) {
-            harness.set_model(config_model).await?;
-        }
-
-        TuiApp::new(config).run(harness).await?
+        tui_mode(harness, config, models_cache).await?
     };
 
     if snapshot.has_history

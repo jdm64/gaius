@@ -7,7 +7,7 @@ use crate::tools::ToolName;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{error::Error, path::Path};
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentDefinition {
     pub name: String,
     #[serde(default)]
@@ -15,6 +15,17 @@ pub struct AgentDefinition {
     pub prompt: String,
     #[serde(default)]
     pub tools: AgentTools,
+}
+
+impl Default for AgentDefinition {
+    fn default() -> Self {
+        AgentDefinition {
+            name: "basic".to_string(),
+            desc: "all tools; no system prompt".to_string(),
+            prompt: String::new(),
+            tools: AgentTools::default(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -136,12 +147,7 @@ impl Agents {
 
 fn hardcoded_agents() -> Vec<AgentDefinition> {
     vec![
-        AgentDefinition {
-            name: "basic".to_string(),
-            desc: "all tools; no system prompt".to_string(),
-            prompt: String::new(),
-            tools: AgentTools::default(),
-        },
+        AgentDefinition::default(),
         AgentDefinition {
             name: "minimal".to_string(),
             desc: "only read/edit file and bash tools; no system prompt".to_string(),

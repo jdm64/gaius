@@ -336,6 +336,31 @@ impl Models {
         .into())
     }
 
+    pub fn from_config_name(
+        config: &Config,
+        cache: &[ModelDef],
+        name: &str,
+    ) -> Result<ModelDef, Box<dyn Error>> {
+        let Some(configured) = config.configured_model(name) else {
+            return Err(format!("Unknown model '{name}'").into());
+        };
+
+        cache
+            .iter()
+            .find(|model| {
+                model.provider.name() == configured.model.provider
+                    && model.id == configured.model.id
+            })
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "Model '{name}' ({}) was not found in the cached model list",
+                    configured.model.id
+                )
+                .into()
+            })
+    }
+
     pub fn first_from_recent(cache: &[ModelDef]) -> Option<ModelDef> {
         if cache.is_empty() {
             return None;

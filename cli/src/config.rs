@@ -203,6 +203,12 @@ impl Config {
             .collect()
     }
 
+    pub fn configured_model(&self, name: &str) -> Option<ConfiguredModel> {
+        self.configured_models()
+            .into_iter()
+            .find(|configured| configured.model.name == name)
+    }
+
     pub fn providers(&self) -> &[ProviderConfig] {
         &self.provider
     }
