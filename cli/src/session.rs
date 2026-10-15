@@ -157,7 +157,8 @@ impl Session {
                         if path.extension()? == "mpk" {
                             let data = Self::deserialize_session(path.as_path(), false).ok()?;
                             let id = path.file_stem()?.to_str().map(|s| s.to_string());
-                            let is_curr = id.as_ref().is_some_and(|i| Some(i) == curr_sess.as_ref());
+                            let is_curr =
+                                id.as_ref().is_some_and(|i| Some(i) == curr_sess.as_ref());
 
                             Some(Session {
                                 id,
