@@ -83,7 +83,7 @@ async fn plan_tool_requires_content() {
 
     match result {
         ToolResult::Error(text) => {
-            assert_eq!(text, "Error: Missing content");
+            assert_eq!(text, "Missing required argument: content");
         }
         other => panic!("Expected ToolResult::Error, got: {:?}", other),
     }
@@ -238,7 +238,7 @@ async fn skill_tool_requires_name() {
 
     match result {
         ToolResult::Error(text) => {
-            assert_eq!(text, "Missing name");
+            assert_eq!(text, "Missing required argument: name");
         }
         other => panic!("Expected ToolResult::Error, got: {:?}", other),
     }
@@ -354,7 +354,7 @@ async fn webfetch_requires_url() {
 
     match result {
         ToolResult::Error(text) => {
-            assert_eq!(text, "Missing url");
+            assert_eq!(text, "Missing required argument: url");
         }
         other => panic!("Expected ToolResult::Error, got: {other:?}"),
     }

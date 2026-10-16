@@ -59,6 +59,10 @@ impl ToolEngine {
         )
     }
 
+    fn required_arg(arg: &str) -> ToolResult {
+        ToolResult::Error(format!("Missing required argument: {arg}"))
+    }
+
     pub fn build_tools(&self, plan_mode: bool, filters: Option<&AgentTools>) -> Vec<Tool> {
         let has_skills = !self.skill_repo.is_empty();
         ToolName::ALL
@@ -107,7 +111,7 @@ impl ToolEngine {
     fn skill_tool(&self, args: &Value) -> ToolResult {
         let name = match args.get(ArgName::Name).and_then(|v| v.as_str()) {
             Some(n) => n,
-            None => return ToolResult::Error("Missing name".to_string()),
+            None => return Self::required_arg(ArgName::Name),
         };
 
         self.load_skill(name)
@@ -116,7 +120,7 @@ impl ToolEngine {
     fn read_file_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get(ArgName::FilePath).and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::Error("Missing file_path".to_string()),
+            None => return Self::required_arg(ArgName::FilePath),
         };
         let start_line = match args.get(ArgName::StartLine) {
             Some(value) => match value.as_u64() {
@@ -166,11 +170,11 @@ impl ToolEngine {
     fn create_file_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get(ArgName::FilePath).and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::Error("Missing file_path".to_string()),
+            None => return Self::required_arg(ArgName::FilePath),
         };
         let contents = match args.get(ArgName::Content).and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => return ToolResult::Error("Missing contents".to_string()),
+            None => return Self::required_arg(ArgName::Content),
         };
         let cwd = match std::env::current_dir() {
             Ok(c) => c,
@@ -197,22 +201,18 @@ impl ToolEngine {
     fn edit_file_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get(ArgName::FilePath).and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::Error("Missing file_path parameter".to_string()),
+            None => return Self::required_arg(ArgName::FilePath),
         };
         let find = match args.get(ArgName::OldString).and_then(|v| v.as_str()) {
             Some(f) => f,
             None => {
-                return ToolResult::Error(
-                    "Missing old_string parameter (the exact text to find in the file)".to_string(),
-                );
+                return Self::required_arg(ArgName::OldString);
             }
         };
         let replace = match args.get(ArgName::NewString).and_then(|v| v.as_str()) {
             Some(r) => r,
             None => {
-                return ToolResult::Error(
-                    "Missing new_string parameter (the replacement text)".to_string(),
-                );
+                return Self::required_arg(ArgName::NewString);
             }
         };
         let cwd = match std::env::current_dir() {
@@ -259,7 +259,7 @@ impl ToolEngine {
     async fn bash_tool(&self, args: &Value) -> ToolResult {
         let command = match args.get(ArgName::Command).and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => return ToolResult::Error("Missing command".to_string()),
+            None => return Self::required_arg(ArgName::Command),
         };
         match Command::new("bash").arg("-c").arg(command).output().await {
             Ok(output) => {
@@ -283,7 +283,7 @@ impl ToolEngine {
     async fn webfetch_tool(args: &Value) -> ToolResult {
         let url_str = match args.get(ArgName::Url).and_then(|v| v.as_str()) {
             Some(u) => u,
-            None => return ToolResult::Error("Missing url".to_string()),
+            None => return Self::required_arg(ArgName::Url),
         };
 
         let parsed = match Url::parse(url_str) {
@@ -358,7 +358,7 @@ impl ToolEngine {
     fn glob_tool(&self, args: &Value) -> ToolResult {
         let pattern = match args.get(ArgName::Pattern).and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::Error("Missing pattern".to_string()),
+            None => return Self::required_arg(ArgName::Pattern),
         };
         if Self::is_glob_too_loose(pattern) {
             return ToolResult::Error(
@@ -404,7 +404,7 @@ impl ToolEngine {
     fn question_tool(&self, args: &Value) -> ToolResult {
         let title = match args.get(ArgName::Prompt).and_then(|v| v.as_str()) {
             Some(t) => t,
-            None => return ToolResult::Error("Missing prompt".to_string()),
+            None => return Self::required_arg(ArgName::Prompt),
         };
         let mut options: Vec<String> = args
             .get(ArgName::Options)
@@ -423,7 +423,7 @@ impl ToolEngine {
 
     fn plan_tool(&self, args: &Value) -> ToolResult {
         if args.get(ArgName::Content).is_none() {
-            return ToolResult::Error("Error: Missing content".to_string());
+            return Self::required_arg(ArgName::Content);
         }
 
         ToolResult::Text("Plan created".to_string())
@@ -432,7 +432,7 @@ impl ToolEngine {
     fn grep_tool(&self, args: &Value) -> ToolResult {
         let pattern_str = match args.get(ArgName::Pattern).and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::Error("Missing pattern".to_string()),
+            None => return Self::required_arg(ArgName::Pattern),
         };
         let path_str = args
             .get(ArgName::Path)
