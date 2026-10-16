@@ -429,10 +429,10 @@ impl ToolEngine {
             Some(p) => p,
             None => return ToolResult::Error("Missing pattern".to_string()),
         };
-        let path_str = match args.get("path").and_then(|v| v.as_str()) {
-            Some(p) => p,
-            None => return ToolResult::Error("Missing path".to_string()),
-        };
+        let path_str = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         let include_pattern = args.get("include").and_then(|v| v.as_str());
         let recursive = args
             .get("recursive")

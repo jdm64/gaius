@@ -184,7 +184,7 @@ impl ToolName {
                             "description": "Whether to search recursively in directories (default: true)"
                         }
                     },
-                    "required": ["pattern", "path"]
+                    "required": ["pattern"]
                 })),
             ToolName::Skill => Tool::new(self.as_str())
                 .with_description("Invoke a skill by name to get its instructions")
