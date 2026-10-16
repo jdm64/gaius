@@ -2,7 +2,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{agents::AgentTools, diff_view::DiffView, skills::SkillRepo, tools::ToolName};
+use crate::{
+    agents::AgentTools,
+    diff_view::DiffView,
+    skills::SkillRepo,
+    tools::{ArgName, ToolName},
+};
 use genai::chat::Tool;
 use glob::glob;
 use regex::Regex;
@@ -100,7 +105,7 @@ impl ToolEngine {
     }
 
     fn skill_tool(&self, args: &Value) -> ToolResult {
-        let name = match args.get("name").and_then(|v| v.as_str()) {
+        let name = match args.get(ArgName::Name).and_then(|v| v.as_str()) {
             Some(n) => n,
             None => return ToolResult::Error("Missing name".to_string()),
         };
@@ -109,11 +114,11 @@ impl ToolEngine {
     }
 
     fn read_file_tool(&self, args: &Value) -> ToolResult {
-        let file_path_str = match args.get("file_path").and_then(|v| v.as_str()) {
+        let file_path_str = match args.get(ArgName::FilePath).and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::Error("Missing file_path".to_string()),
         };
-        let start_line = match args.get("start_line") {
+        let start_line = match args.get(ArgName::StartLine) {
             Some(value) => match value.as_u64() {
                 Some(line) if line >= 1 => line as usize,
                 _ => {
@@ -124,7 +129,7 @@ impl ToolEngine {
             },
             None => 1,
         };
-        let max_lines = match args.get("max_lines") {
+        let max_lines = match args.get(ArgName::MaxLines) {
             Some(value) => match value.as_u64() {
                 Some(0) => None,
                 Some(lines) => Some(lines as usize),
@@ -159,11 +164,11 @@ impl ToolEngine {
     }
 
     fn create_file_tool(&self, args: &Value) -> ToolResult {
-        let file_path_str = match args.get("file_path").and_then(|v| v.as_str()) {
+        let file_path_str = match args.get(ArgName::FilePath).and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::Error("Missing file_path".to_string()),
         };
-        let contents = match args.get("contents").and_then(|v| v.as_str()) {
+        let contents = match args.get(ArgName::Content).and_then(|v| v.as_str()) {
             Some(c) => c,
             None => return ToolResult::Error("Missing contents".to_string()),
         };
@@ -190,11 +195,11 @@ impl ToolEngine {
     }
 
     fn edit_file_tool(&self, args: &Value) -> ToolResult {
-        let file_path_str = match args.get("file_path").and_then(|v| v.as_str()) {
+        let file_path_str = match args.get(ArgName::FilePath).and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::Error("Missing file_path parameter".to_string()),
         };
-        let find = match args.get("old_string").and_then(|v| v.as_str()) {
+        let find = match args.get(ArgName::OldString).and_then(|v| v.as_str()) {
             Some(f) => f,
             None => {
                 return ToolResult::Error(
@@ -202,7 +207,7 @@ impl ToolEngine {
                 );
             }
         };
-        let replace = match args.get("new_string").and_then(|v| v.as_str()) {
+        let replace = match args.get(ArgName::NewString).and_then(|v| v.as_str()) {
             Some(r) => r,
             None => {
                 return ToolResult::Error(
@@ -252,7 +257,7 @@ impl ToolEngine {
     }
 
     async fn bash_tool(&self, args: &Value) -> ToolResult {
-        let command = match args.get("command").and_then(|v| v.as_str()) {
+        let command = match args.get(ArgName::Command).and_then(|v| v.as_str()) {
             Some(c) => c,
             None => return ToolResult::Error("Missing command".to_string()),
         };
@@ -276,7 +281,7 @@ impl ToolEngine {
     }
 
     async fn webfetch_tool(args: &Value) -> ToolResult {
-        let url_str = match args.get("url").and_then(|v| v.as_str()) {
+        let url_str = match args.get(ArgName::Url).and_then(|v| v.as_str()) {
             Some(u) => u,
             None => return ToolResult::Error("Missing url".to_string()),
         };
@@ -351,7 +356,7 @@ impl ToolEngine {
     }
 
     fn glob_tool(&self, args: &Value) -> ToolResult {
-        let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
+        let pattern = match args.get(ArgName::Pattern).and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::Error("Missing pattern".to_string()),
         };
@@ -361,7 +366,7 @@ impl ToolEngine {
             );
         }
         let path_prefix = args
-            .get("path")
+            .get(ArgName::Path)
             .and_then(|v| v.as_str())
             .unwrap_or_default();
         let full_pattern = if path_prefix.is_empty() {
@@ -397,12 +402,12 @@ impl ToolEngine {
     }
 
     fn question_tool(&self, args: &Value) -> ToolResult {
-        let title = match args.get("prompt").and_then(|v| v.as_str()) {
+        let title = match args.get(ArgName::Prompt).and_then(|v| v.as_str()) {
             Some(t) => t,
             None => return ToolResult::Error("Missing prompt".to_string()),
         };
         let mut options: Vec<String> = args
-            .get("options")
+            .get(ArgName::Options)
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -417,7 +422,7 @@ impl ToolEngine {
     }
 
     fn plan_tool(&self, args: &Value) -> ToolResult {
-        if args.get("content").is_none() {
+        if args.get(ArgName::Content).is_none() {
             return ToolResult::Error("Error: Missing content".to_string());
         }
 
@@ -425,17 +430,17 @@ impl ToolEngine {
     }
 
     fn grep_tool(&self, args: &Value) -> ToolResult {
-        let pattern_str = match args.get("pattern").and_then(|v| v.as_str()) {
+        let pattern_str = match args.get(ArgName::Pattern).and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::Error("Missing pattern".to_string()),
         };
         let path_str = args
-            .get("path")
+            .get(ArgName::Path)
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        let include_pattern = args.get("include").and_then(|v| v.as_str());
+        let include_pattern = args.get(ArgName::Include).and_then(|v| v.as_str());
         let recursive = args
-            .get("recursive")
+            .get(ArgName::Recursive)
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
         let cwd = match std::env::current_dir() {
