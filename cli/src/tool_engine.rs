@@ -397,9 +397,9 @@ impl ToolEngine {
     }
 
     fn question_tool(&self, args: &Value) -> ToolResult {
-        let title = match args.get("title").and_then(|v| v.as_str()) {
+        let title = match args.get("prompt").and_then(|v| v.as_str()) {
             Some(t) => t,
-            None => return ToolResult::Error("Missing title".to_string()),
+            None => return ToolResult::Error("Missing prompt".to_string()),
         };
         let mut options: Vec<String> = args
             .get("options")
