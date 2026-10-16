@@ -23,6 +23,7 @@ pub struct HistoryLayout {
     pub scroll: u16,
     pub page_size: u16,
     pub height: u16,
+    pub seen_lines: u16,
     pub new_lines: u16,
 }
 
@@ -39,6 +40,7 @@ impl Default for HistoryLayout {
             scroll: 0,
             page_size: 0,
             height: 0,
+            seen_lines: 0,
             new_lines: 0,
         }
     }
@@ -55,6 +57,7 @@ impl HistoryLayout {
         self.scroll = 0;
         self.page_size = 0;
         self.height = 0;
+        self.seen_lines = 0;
         self.new_lines = 0;
     }
 
@@ -68,7 +71,7 @@ impl HistoryLayout {
 
     pub fn scroll_bottom(&mut self) {
         self.scroll = 0;
-        self.new_lines = 0;
+        self.sync_seen();
     }
 
     pub fn scroll_up(&mut self, amount: u16) {
@@ -77,8 +80,19 @@ impl HistoryLayout {
 
     pub fn scroll_down(&mut self, amount: u16) {
         self.scroll = self.scroll.saturating_sub(amount);
-        let dismissed = amount.min(self.new_lines);
-        self.new_lines = self.new_lines.saturating_sub(dismissed);
+        self.sync_seen();
+    }
+
+    fn sync_seen(&mut self) {
+        let total = self.visible_lines.len() as u16;
+        self.seen_lines = if self.scroll == 0 {
+            total
+        } else {
+            self.seen_lines
+                .max(total.saturating_sub(self.scroll))
+                .min(total)
+        };
+        self.new_lines = total.saturating_sub(self.seen_lines);
     }
 
     pub fn scroll_size(&mut self) -> u16 {
@@ -100,16 +114,7 @@ impl HistoryLayout {
         self.page_size = height - 1;
         self.height = wrapped_height;
         self.scroll = self.scroll.min(max_scroll);
-
-        self.new_lines = if self.scroll == 0 {
-            0
-        } else if height_growth > 0 {
-            self.new_lines
-                .saturating_add(height_growth)
-                .min(self.scroll)
-        } else {
-            self.new_lines.min(self.scroll)
-        };
+        self.sync_seen();
 
         max_scroll
     }
@@ -139,7 +144,13 @@ impl HistoryLayout {
 
     pub fn update_width(&mut self, width: u16) {
         if self.width != width {
-            self.height = self.visible_lines.len() as u16;
+            let old_total = self.height as u32;
+            let new_total = self.visible_lines.len() as u32;
+            if let Some(seen) = (self.seen_lines as u32 * new_total).checked_div(old_total) {
+                self.seen_lines = seen.min(new_total) as u16;
+            }
+            self.height = new_total as u16;
+            self.sync_seen();
         }
         self.width = width;
         self.dirty_from = None;

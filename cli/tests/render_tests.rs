@@ -602,3 +602,99 @@ fn draw_history_anchors_view_and_shows_new_lines_below_indicator() {
     assert_eq!(app.history.new_lines, 0);
     assert!(!buffer_contains(&terminal, " new line"));
 }
+
+fn layout_with_lines(n: usize) -> HistoryLayout {
+    HistoryLayout {
+        visible_lines: (0..n).map(|i| Line::from(i.to_string())).collect(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn scrolling_down_over_unseen_lines_does_not_dismiss_them() {
+    let mut layout = layout_with_lines(30);
+    layout.update_scroll_state(10); // at bottom, everything seen
+
+    // Scroll up 5, then new output arrives and the view stays anchored.
+    layout.scroll_up(5);
+    layout.update_scroll_state(10);
+    layout.visible_lines.push(Line::from("new"));
+    layout.update_scroll_state(10);
+    assert_eq!(layout.new_lines, 1);
+
+    // Scroll up further, then back down past the anchor. The new line was
+    // never on screen, so it must still count as unread until we reach it.
+    layout.scroll_up(20);
+    layout.update_scroll_state(10);
+    layout.scroll_down(20);
+    layout.update_scroll_state(10);
+    assert_eq!(layout.new_lines, 1);
+
+    layout.scroll_down(5);
+    layout.update_scroll_state(10);
+    assert_eq!(layout.new_lines, 0);
+}
+
+#[test]
+fn new_lines_is_total_minus_seen_when_scrolled() {
+    let mut layout = layout_with_lines(30);
+    layout.update_scroll_state(10);
+    layout.scroll_up(5);
+    layout.update_scroll_state(10);
+    for _ in 0..3 {
+        layout.visible_lines.push(Line::from("x"));
+        layout.update_scroll_state(10);
+    }
+    assert_eq!(layout.new_lines, 3);
+    assert_eq!(
+        layout.new_lines as usize,
+        layout.visible_lines.len() - layout.seen_lines as usize
+    );
+}
+
+#[test]
+fn width_change_remaps_seen_lines_into_new_row_space() {
+    let mut layout = HistoryLayout {
+        visible_lines: (0..30).map(|i| Line::from(i.to_string())).collect(),
+        width: 80,
+        ..Default::default()
+    };
+    layout.update_scroll_state(10); // at bottom: all 30 rows seen
+    layout.scroll_up(5);
+    layout.update_scroll_state(10);
+    assert_eq!(layout.seen_lines, 30);
+    assert_eq!(layout.new_lines, 0);
+
+    // Narrower terminal: the same content now wraps to 60 rows. The user
+    // had seen all of the old content, so nothing should count as new.
+    layout.visible_lines = (0..60).map(|i| Line::from(i.to_string())).collect();
+    layout.update_width(40);
+    layout.update_scroll_state(10);
+    assert_eq!(layout.seen_lines, 60);
+    assert_eq!(layout.new_lines, 0);
+}
+
+#[test]
+fn partially_seen_content_remaps_rounding_down() {
+    let mut layout = HistoryLayout {
+        visible_lines: (0..30).map(|i| Line::from(i.to_string())).collect(),
+        width: 80,
+        ..Default::default()
+    };
+    layout.update_scroll_state(10);
+    layout.scroll_up(5); // seen edge = 25 of 30
+    layout.update_scroll_state(10);
+    assert_eq!(layout.seen_lines, 30);
+
+    // Partially seen: 25 of 30 rows were read, but the user has since
+    // scrolled further up, so the viewport edge (30 - 10 = 20) is below it.
+    layout.seen_lines = 25;
+    layout.scroll = 10;
+    layout.new_lines = 5;
+
+    // Reflow to 40 rows. 25 * 40 / 30 = 33.33 -> 33 seen, 7 unseen.
+    layout.visible_lines = (0..40).map(|i| Line::from(i.to_string())).collect();
+    layout.update_width(40);
+    assert_eq!(layout.seen_lines, 33);
+    assert_eq!(layout.new_lines, 7);
+}
