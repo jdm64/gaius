@@ -99,13 +99,13 @@ impl ToolName {
     pub fn genai_tool(self) -> Tool {
         match self {
             ToolName::ReadFile => Tool::new(self.as_str())
-                .with_description("Read the contents of a file")
+                .with_description("Read text from a workspace file; read the whole file or request a line range. Paths are resolved from the current working directory.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::FilePath: {
                             "type": "string",
-                            "description": "The path to the file to read"
+                            "description": "Path to the file, relative to the current working directory (or an absolute path)"
                         },
                         ArgName::StartLine: {
                             "type": "integer",
@@ -121,27 +121,27 @@ impl ToolName {
                     "required": [ArgName::FilePath]
                 })),
             ToolName::EditFile => Tool::new(self.as_str())
-                .with_description("Modify an existing file by replacing exactly one string match")
+                .with_description("Replace one exact, unique text match in an existing workspace file. Include enough surrounding context to identify the intended match.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::FilePath: {
                             "type": "string",
-                            "description": "The path to the file to edit"
+                            "description": "Path to the existing file, relative to the current working directory (or an absolute path)"
                         },
                         ArgName::OldString: {
                             "type": "string",
-                            "description": "The exact string to find and replace"
+                            "description": "Exact text to locate in the file, including whitespace and indentation. It must occur exactly once; include surrounding context if needed."
                         },
                         ArgName::NewString: {
                             "type": "string",
-                            "description": "The string to replace the match with"
+                            "description": "Text that will replace the unique old_string match"
                         }
                     },
                     "required": [ArgName::FilePath, ArgName::OldString, ArgName::NewString]
                 })),
             ToolName::CreateFile => Tool::new(self.as_str())
-                .with_description("Create a new file with the provided contents")
+                .with_description("Create a new file in the workspace. Fails if the target file already exists; use edit_file to modify an existing file.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
@@ -157,25 +157,25 @@ impl ToolName {
                     "required": [ArgName::FilePath, ArgName::Content]
                 })),
             ToolName::Bash => Tool::new(self.as_str())
-                .with_description("Execute a bash command")
+                .with_description("Run a shell command with bash -c in the current workspace and return its exit status, stdout, and stderr.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Command: {
                             "type": "string",
-                            "description": "The bash command to execute"
+                            "description": "Shell command string to run with bash -c"
                         }
                     },
                     "required": [ArgName::Command]
                 })),
             ToolName::Glob => Tool::new(self.as_str())
-                .with_description("Find files matching a glob pattern")
+                .with_description("Find workspace files whose paths match a glob pattern.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Pattern: {
                             "type": "string",
-                            "description": "Glob pattern to match files (e.g., '**/*.rs', 'src/**/*.toml')"
+                            "description": "Glob pattern to match file paths (for example, '**/*.rs' or 'src/**/*.toml')"
                         },
                         ArgName::Path: {
                             "type": "string",
@@ -185,13 +185,13 @@ impl ToolName {
                     "required": [ArgName::Pattern]
                 })),
             ToolName::Grep => Tool::new(self.as_str())
-                .with_description("Search file contents using regex pattern")
+                .with_description("Search file contents for a regular-expression pattern, optionally restricting the search to a path and matching files.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Pattern: {
                             "type": "string",
-                            "description": "Regex pattern to search for"
+                            "description": "Regular expression to search for in file contents"
                         },
                         ArgName::Path: {
                             "type": "string",
@@ -209,19 +209,19 @@ impl ToolName {
                     "required": [ArgName::Pattern]
                 })),
             ToolName::Skill => Tool::new(self.as_str())
-                .with_description("Invoke a skill by name to get its instructions")
+                .with_description("Load a named skill and return its instructions for use in the current task.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Name: {
                             "type": "string",
-                            "description": "Name of skill to invoke"
+                            "description": "Name of the skill to load"
                         }
                     },
                     "required": [ArgName::Name],
                 })),
             ToolName::Question => Tool::new(self.as_str())
-                .with_description("Ask the user a question with optional choices")
+                .with_description("Ask the user a question, optionally providing choices to select from.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
@@ -238,7 +238,7 @@ impl ToolName {
                     "required": [ArgName::Prompt]
                 })),
             ToolName::Plan => Tool::new(self.as_str())
-                .with_description("Create a structured markdown formatted plan")
+                .with_description("Create or update the structured plan for the current task.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
