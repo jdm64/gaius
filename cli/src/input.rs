@@ -125,11 +125,11 @@ impl InputMode {
                 return Ok(app.editor.mode_for_input());
             }
             KeyCode::Up => {
-                app.editor.history_up();
+                app.editor.history_up(app.history.width as usize);
                 return Ok(app.editor.mode_for_input());
             }
             KeyCode::Down => {
-                app.editor.history_down();
+                app.editor.history_down(app.history.width as usize);
                 return Ok(app.editor.mode_for_input());
             }
             KeyCode::Tab => {
@@ -258,6 +258,7 @@ pub struct PromptEditor {
     pub status: String,
     pub history: Vec<String>,
     pub history_idx: Option<usize>,
+    save_input: Option<String>,
     pub answer_tx: Option<Sender<String>>,
 }
 
@@ -270,6 +271,7 @@ impl PromptEditor {
             status: String::new(),
             history: Vec::new(),
             history_idx: None,
+            save_input: None,
             answer_tx: None,
         }
     }
@@ -430,14 +432,19 @@ impl PromptEditor {
         self.cursor = self.input_len();
     }
 
-    pub fn history_up(&mut self) {
+    pub fn history_up(&mut self, history_width: usize) {
         if self.cursor != 0 && self.cursor < self.input_len() {
-            self.move_input_cursor_home();
+            if !self.move_cursor_vertical(true, history_width) {
+                self.move_input_cursor_home();
+            }
             return;
         }
 
         let len = self.history.len();
         if len > 0 {
+            if self.history_idx.is_none() {
+                self.save_input = Some(self.input.clone());
+            }
             self.history_idx = match self.history_idx {
                 None => Some(0),
                 Some(i) if i + 1 < len => Some(i + 1),
@@ -446,15 +453,20 @@ impl PromptEditor {
             if let Some(idx) = self.history_idx {
                 self.input = self.history[idx].clone();
             }
+
             if self.cursor > 0 {
                 self.move_input_cursor_end();
+            } else {
+                self.move_input_cursor_home();
             }
         }
     }
 
-    pub fn history_down(&mut self) {
+    pub fn history_down(&mut self, history_width: usize) {
         if self.cursor > 0 && self.cursor < self.input_len() {
-            self.move_input_cursor_end();
+            if !self.move_cursor_vertical(false, history_width) {
+                self.move_input_cursor_end();
+            }
             return;
         }
 
@@ -465,12 +477,35 @@ impl PromptEditor {
         };
         if let Some(idx) = self.history_idx {
             self.input = self.history[idx].clone();
-            if self.cursor > 0 {
-                self.move_input_cursor_end();
-            }
-        } else {
-            self.clear_input();
+        } else if let Some(input) = self.save_input.take() {
+            self.input = input;
         }
+
+        if self.cursor > 0 {
+            self.move_input_cursor_end();
+        } else {
+            self.move_input_cursor_home();
+        }
+    }
+
+    fn move_cursor_vertical(&mut self, up: bool, history_width: usize) -> bool {
+        // HistoryLayout.width includes the input border width difference; the
+        // input's inner width is two columns narrower, and its first row has
+        // the two-character "> " prefix.
+        let width = history_width.saturating_sub(2).max(1);
+        let visual_cursor = self.cursor + 2;
+        let row = visual_cursor / width;
+        let column = visual_cursor % width;
+        let last_row = (self.input_len() + 2) / width;
+
+        if (up && row == 0) || (!up && row >= last_row) {
+            return false;
+        }
+
+        let target_row = if up { row - 1 } else { row + 1 };
+        let target_visual = target_row * width + column;
+        self.cursor = target_visual.saturating_sub(2).min(self.input_len());
+        true
     }
 
     pub fn update_prompt_history(&mut self, prompt: String) {
