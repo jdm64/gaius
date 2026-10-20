@@ -88,7 +88,7 @@ impl ToolEngine {
     pub async fn execute(&self, name: &str, args: &Value) -> ToolResult {
         match ToolName::from_name(name) {
             Some(ToolName::ReadFile) => self.read_file_tool(args),
-            Some(ToolName::CreateFile) => self.create_file_tool(args),
+            Some(ToolName::WriteFile) => self.write_file_tool(args),
             Some(ToolName::EditFile) => self.edit_file_tool(args),
             Some(ToolName::Bash) => self.bash_tool(args).await,
             Some(ToolName::Glob) => self.glob_tool(args),
@@ -167,7 +167,7 @@ impl ToolEngine {
         }
     }
 
-    fn create_file_tool(&self, args: &Value) -> ToolResult {
+    fn write_file_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get(ArgName::FilePath).and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return Self::required_arg(ArgName::FilePath),
@@ -176,24 +176,33 @@ impl ToolEngine {
             Some(c) => c,
             None => return Self::required_arg(ArgName::Content),
         };
+        let overwrite = match args.get(ArgName::Overwrite) {
+            None => false,
+            Some(value) => match value.as_bool() {
+                Some(value) => value,
+                None => return ToolResult::Error("overwrite must be a boolean".to_string()),
+            },
+        };
         let cwd = match std::env::current_dir() {
             Ok(c) => c,
             Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
         };
         let full_path = cwd.join(file_path_str);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(full_path)
-        {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true);
+        if overwrite {
+            options.create(true).truncate(true);
+        } else {
+            options.create_new(true);
+        }
+        match options.open(full_path) {
             Ok(mut file) => match file.write_all(contents.as_bytes()) {
                 Ok(()) => ToolResult::Text("File written successfully".to_string()),
-                Err(e) if e.kind() == ErrorKind::AlreadyExists => ToolResult::Error(
-                    "create_file cannot overwrite an existing file. Use edit_file instead"
-                        .to_string(),
-                ),
                 Err(e) => ToolResult::Error(format!("Error writing file: {}", e)),
             },
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => ToolResult::Error(
+                "write_file cannot overwrite an existing file unless overwrite is true".to_string(),
+            ),
             Err(e) => ToolResult::Error(format!("Error creating file: {}", e)),
         }
     }

@@ -19,6 +19,7 @@ impl ArgName {
     pub const NewString: &'static str = "new_string";
     pub const OldString: &'static str = "old_string";
     pub const Options: &'static str = "options";
+    pub const Overwrite: &'static str = "overwrite";
     pub const Path: &'static str = "path";
     pub const Plan: &'static str = "plan";
     pub const Query: &'static str = "query";
@@ -31,7 +32,7 @@ impl ArgName {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ToolName {
     ReadFile,
-    CreateFile,
+    WriteFile,
     EditFile,
     Bash,
     Glob,
@@ -45,7 +46,7 @@ pub enum ToolName {
 impl ToolName {
     pub const ALL: [ToolName; 10] = [
         ToolName::ReadFile,
-        ToolName::CreateFile,
+        ToolName::WriteFile,
         ToolName::EditFile,
         ToolName::Bash,
         ToolName::Glob,
@@ -63,7 +64,7 @@ impl ToolName {
     pub fn as_str(self) -> &'static str {
         match self {
             ToolName::ReadFile => "read_file",
-            ToolName::CreateFile => "create_file",
+            ToolName::WriteFile => "write_file",
             ToolName::EditFile => "edit_file",
             ToolName::Bash => "bash",
             ToolName::Glob => "glob",
@@ -85,7 +86,7 @@ impl ToolName {
     pub fn display_fields(self) -> &'static [&'static str] {
         match self {
             ToolName::ReadFile => &[ArgName::FilePath, ArgName::StartLine, ArgName::MaxLines],
-            ToolName::CreateFile => &[ArgName::FilePath],
+            ToolName::WriteFile => &[ArgName::FilePath, ArgName::Overwrite],
             ToolName::EditFile => &[ArgName::FilePath],
             ToolName::Bash => &[ArgName::Command],
             ToolName::Glob => &[ArgName::Path, ArgName::Query],
@@ -141,8 +142,8 @@ impl ToolName {
                     },
                     "required": [ArgName::FilePath, ArgName::OldString, ArgName::NewString]
                 })),
-            ToolName::CreateFile => Tool::new(self.as_str())
-                .with_description("Create a new file in the workspace. Fails if the target file already exists; use edit_file to modify an existing file.")
+            ToolName::WriteFile => Tool::new(self.as_str())
+                .with_description("Write content to a workspace file. By default, fails if the target already exists; set overwrite to true to replace it.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
@@ -152,7 +153,11 @@ impl ToolName {
                         },
                         ArgName::Content: {
                             "type": "string",
-                            "description": "The contents to write to the new file"
+                            "description": "The contents to write to the file"
+                        },
+                        ArgName::Overwrite: {
+                            "type": "boolean",
+                            "description": "Whether to overwrite the file if it already exists (default: false)"
                         }
                     },
                     "required": [ArgName::FilePath, ArgName::Content]

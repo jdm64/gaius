@@ -155,7 +155,7 @@ fn hardcoded_agents() -> Vec<AgentDefinition> {
             tools: AgentTools {
                 include: vec![
                     ToolName::ReadFile.name(),
-                    ToolName::CreateFile.name(),
+                    ToolName::WriteFile.name(),
                     ToolName::EditFile.name(),
                     ToolName::Bash.name(),
                 ],
