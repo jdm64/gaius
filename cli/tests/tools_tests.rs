@@ -43,7 +43,7 @@ async fn plan_tool_returns_plan_text() {
         .execute(
             "plan",
             &json!({
-                "content": "# Implement feature\n\nBackground information"
+                "plan": "# Implement feature\n\nBackground information"
             }),
         )
         .await;
@@ -62,7 +62,7 @@ async fn plan_tool_renders_arbitrary_fields() {
         .execute(
             "plan",
             &json!({
-                "content": "# Refactor auth\n\nRisks and considerations"
+                "plan": "# Refactor auth\n\nRisks and considerations"
             }),
         )
         .await;
@@ -83,7 +83,7 @@ async fn plan_tool_requires_content() {
 
     match result {
         ToolResult::Error(text) => {
-            assert_eq!(text, "Missing required argument: content");
+            assert_eq!(text, "Missing required argument: plan");
         }
         other => panic!("Expected ToolResult::Error, got: {:?}", other),
     }
@@ -142,7 +142,7 @@ async fn glob_returns_relative_paths() {
     std::env::set_current_dir(&dir).unwrap();
 
     let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute("glob", &json!({ "pattern": "*.txt", "path": "nested" }))
+        .execute("glob", &json!({ "query": "*.txt", "path": "nested" }))
         .await;
 
     std::env::set_current_dir(original_dir).unwrap();
@@ -166,7 +166,7 @@ async fn grep_returns_relative_paths() {
     let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute(
             "grep",
-            &json!({ "pattern": "match", "path": "nested/sample.txt" }),
+            &json!({ "query": "match", "path": "nested/sample.txt" }),
         )
         .await;
 

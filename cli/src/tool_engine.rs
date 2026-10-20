@@ -356,9 +356,9 @@ impl ToolEngine {
     }
 
     fn glob_tool(&self, args: &Value) -> ToolResult {
-        let pattern = match args.get(ArgName::Pattern).and_then(|v| v.as_str()) {
+        let pattern = match args.get(ArgName::Query).and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return Self::required_arg(ArgName::Pattern),
+            None => return Self::required_arg(ArgName::Query),
         };
         if Self::is_glob_too_loose(pattern) {
             return ToolResult::Error(
@@ -402,9 +402,9 @@ impl ToolEngine {
     }
 
     fn question_tool(&self, args: &Value) -> ToolResult {
-        let title = match args.get(ArgName::Prompt).and_then(|v| v.as_str()) {
+        let title = match args.get(ArgName::Question).and_then(|v| v.as_str()) {
             Some(t) => t,
-            None => return Self::required_arg(ArgName::Prompt),
+            None => return Self::required_arg(ArgName::Question),
         };
         let mut options: Vec<String> = args
             .get(ArgName::Options)
@@ -422,23 +422,23 @@ impl ToolEngine {
     }
 
     fn plan_tool(&self, args: &Value) -> ToolResult {
-        if args.get(ArgName::Content).is_none() {
-            return Self::required_arg(ArgName::Content);
+        if args.get(ArgName::Plan).is_none() {
+            return Self::required_arg(ArgName::Plan);
         }
 
         ToolResult::Text("Plan created".to_string())
     }
 
     fn grep_tool(&self, args: &Value) -> ToolResult {
-        let pattern_str = match args.get(ArgName::Pattern).and_then(|v| v.as_str()) {
+        let pattern_str = match args.get(ArgName::Query).and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return Self::required_arg(ArgName::Pattern),
+            None => return Self::required_arg(ArgName::Query),
         };
         let path_str = args
             .get(ArgName::Path)
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        let include_pattern = args.get(ArgName::Include).and_then(|v| v.as_str());
+        let include_pattern = args.get(ArgName::FilePattern).and_then(|v| v.as_str());
         let recursive = args
             .get(ArgName::Recursive)
             .and_then(|v| v.as_bool())

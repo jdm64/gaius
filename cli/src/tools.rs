@@ -13,15 +13,16 @@ impl ArgName {
     pub const Command: &'static str = "command";
     pub const Content: &'static str = "content";
     pub const FilePath: &'static str = "file_path";
-    pub const Include: &'static str = "include";
+    pub const FilePattern: &'static str = "file_pattern";
     pub const MaxLines: &'static str = "max_lines";
     pub const Name: &'static str = "name";
     pub const NewString: &'static str = "new_string";
     pub const OldString: &'static str = "old_string";
     pub const Options: &'static str = "options";
     pub const Path: &'static str = "path";
-    pub const Pattern: &'static str = "pattern";
-    pub const Prompt: &'static str = "prompt";
+    pub const Plan: &'static str = "plan";
+    pub const Query: &'static str = "query";
+    pub const Question: &'static str = "question";
     pub const Recursive: &'static str = "recursive";
     pub const StartLine: &'static str = "start_line";
     pub const Url: &'static str = "url";
@@ -87,9 +88,9 @@ impl ToolName {
             ToolName::CreateFile => &[ArgName::FilePath],
             ToolName::EditFile => &[ArgName::FilePath],
             ToolName::Bash => &[ArgName::Command],
-            ToolName::Glob => &[ArgName::Path, ArgName::Pattern],
-            ToolName::Grep => &[ArgName::Path, ArgName::Include, ArgName::Pattern],
-            ToolName::Question => &[ArgName::Prompt],
+            ToolName::Glob => &[ArgName::Path, ArgName::Query],
+            ToolName::Grep => &[ArgName::Path, ArgName::FilePattern, ArgName::Query],
+            ToolName::Question => &[ArgName::Question],
             ToolName::Plan => &[],
             ToolName::Skill => &[ArgName::Name],
             ToolName::WebFetch => &[ArgName::Url],
@@ -173,7 +174,7 @@ impl ToolName {
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
-                        ArgName::Pattern: {
+                        ArgName::Query: {
                             "type": "string",
                             "description": "Glob pattern to match file paths (for example, '**/*.rs' or 'src/**/*.toml')"
                         },
@@ -182,14 +183,14 @@ impl ToolName {
                             "description": "Optional directory to search in (defaults to current directory)"
                         }
                     },
-                    "required": [ArgName::Pattern]
+                    "required": [ArgName::Query]
                 })),
             ToolName::Grep => Tool::new(self.as_str())
                 .with_description("Search file contents for a regular-expression pattern, optionally restricting the search to a path and matching files.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
-                        ArgName::Pattern: {
+                        ArgName::Query: {
                             "type": "string",
                             "description": "Regular expression to search for in file contents"
                         },
@@ -197,7 +198,7 @@ impl ToolName {
                             "type": "string",
                             "description": "File or directory path to search"
                         },
-                        ArgName::Include: {
+                        ArgName::FilePattern: {
                             "type": "string",
                             "description": "Optional glob pattern to filter which files to search (e.g., '*.rs')"
                         },
@@ -206,7 +207,7 @@ impl ToolName {
                             "description": "Whether to search recursively in directories (default: true)"
                         }
                     },
-                    "required": [ArgName::Pattern]
+                    "required": [ArgName::Query]
                 })),
             ToolName::Skill => Tool::new(self.as_str())
                 .with_description("Load a named skill and return its instructions for use in the current task.")
@@ -225,7 +226,7 @@ impl ToolName {
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
-                        ArgName::Prompt: {
+                        ArgName::Question: {
                             "type": "string",
                             "description": "The question or prompt to show the user"
                         },
@@ -235,19 +236,19 @@ impl ToolName {
                             "description": "Optional list of choices for the user"
                         }
                     },
-                    "required": [ArgName::Prompt]
+                    "required": [ArgName::Question]
                 })),
             ToolName::Plan => Tool::new(self.as_str())
                 .with_description("Create or update the structured plan for the current task.")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
-                        ArgName::Content: {
+                        ArgName::Plan: {
                             "type": "string",
                             "description": "The content of the plan"
                         }
                     },
-                    "required": [ArgName::Content],
+                    "required": [ArgName::Plan],
                 })),
             ToolName::WebFetch => Tool::new(self.as_str())
                 .with_description("Fetch a URL and return its content as cleaned Markdown text")
