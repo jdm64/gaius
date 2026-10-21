@@ -28,7 +28,7 @@ impl Default for AgentDefinition {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentTools {
     #[serde(
         default,
@@ -42,6 +42,15 @@ pub struct AgentTools {
         deserialize_with = "deserialize_vec"
     )]
     pub exclude: Vec<String>,
+}
+
+impl Default for AgentTools {
+    fn default() -> Self {
+        Self {
+            include: Vec::default(),
+            exclude: vec![ToolName::WebSearch.name()],
+        }
+    }
 }
 
 impl AgentTools {

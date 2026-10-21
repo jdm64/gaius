@@ -19,6 +19,7 @@ use std::{
 };
 use tokio::process::Command;
 use url::Url;
+use websearch::{SearchOptions, providers::DuckDuckGoProvider, web_search};
 
 #[derive(Debug)]
 pub enum ToolResult {
@@ -97,6 +98,7 @@ impl ToolEngine {
             Some(ToolName::Plan) => self.plan_tool(args),
             Some(ToolName::Skill) => self.skill_tool(args),
             Some(ToolName::WebFetch) => Self::webfetch_tool(args).await,
+            Some(ToolName::WebSearch) => Self::websearch_tool(args).await,
             None => ToolResult::Error(format!("Unknown tool call: {} ({})", name, args)),
         }
     }
@@ -286,6 +288,47 @@ impl ToolEngine {
                 }
             }
             Err(e) => ToolResult::Error(format!("Error executing command: {}", e)),
+        }
+    }
+
+    async fn websearch_tool(args: &Value) -> ToolResult {
+        let query = match args.get(ArgName::Query).and_then(Value::as_str) {
+            Some(q) => q,
+            None => return Self::required_arg(ArgName::Query),
+        };
+        let max_results = match args.get(ArgName::MaxResults) {
+            None => 5,
+            Some(v) => match v.as_u64().filter(|&n| n > 0 && n <= u32::MAX as u64) {
+                Some(n) => n as u32,
+                None => {
+                    return ToolResult::Error("max_results must be a positive integer".to_string());
+                }
+            },
+        };
+        let results = web_search(SearchOptions {
+            query: query.to_string(),
+            max_results: Some(max_results),
+            provider: Box::new(DuckDuckGoProvider::new()),
+            ..Default::default()
+        })
+        .await;
+
+        match results {
+            Ok(results) => ToolResult::Text(
+                results
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "{}\n{}\n{}",
+                            r.title,
+                            r.url,
+                            r.snippet.as_deref().unwrap_or("")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n"),
+            ),
+            Err(e) => ToolResult::Error(format!("Web search failed: {e}")),
         }
     }
 

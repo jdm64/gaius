@@ -15,6 +15,7 @@ impl ArgName {
     pub const FilePath: &'static str = "file_path";
     pub const FilePattern: &'static str = "file_pattern";
     pub const MaxLines: &'static str = "max_lines";
+    pub const MaxResults: &'static str = "max_results";
     pub const Name: &'static str = "name";
     pub const NewString: &'static str = "new_string";
     pub const OldString: &'static str = "old_string";
@@ -41,10 +42,11 @@ pub enum ToolName {
     Plan,
     Skill,
     WebFetch,
+    WebSearch,
 }
 
 impl ToolName {
-    pub const ALL: [ToolName; 10] = [
+    pub const ALL: [ToolName; 11] = [
         ToolName::ReadFile,
         ToolName::WriteFile,
         ToolName::EditFile,
@@ -55,6 +57,7 @@ impl ToolName {
         ToolName::Plan,
         ToolName::Skill,
         ToolName::WebFetch,
+        ToolName::WebSearch,
     ];
 
     pub fn name(self) -> String {
@@ -73,6 +76,7 @@ impl ToolName {
             ToolName::Plan => "plan",
             ToolName::Skill => "skill",
             ToolName::WebFetch => "webfetch",
+            ToolName::WebSearch => "websearch",
         }
     }
 
@@ -95,6 +99,7 @@ impl ToolName {
             ToolName::Plan => &[],
             ToolName::Skill => &[ArgName::Name],
             ToolName::WebFetch => &[ArgName::Url],
+            ToolName::WebSearch => &[ArgName::Query],
         }
     }
 
@@ -266,6 +271,23 @@ impl ToolName {
                         },
                     },
                     "required": [ArgName::Url]
+                })),
+            ToolName::WebSearch => Tool::new(self.as_str())
+                .with_description("Search the web for information relevant to a query and return ranked results with titles, URLs, and snippets.")
+                .with_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        ArgName::Query: {
+                            "type": "string",
+                            "description": "The web search terms or question"
+                        },
+                        ArgName::MaxResults: {
+                            "type": "integer",
+                            "description": "Maximum number of results to return (default: 5)",
+                            "minimum": 1
+                        }
+                    },
+                    "required": [ArgName::Query]
                 })),
         }
     }
