@@ -934,18 +934,19 @@ footer {
       <div class="frame-in">
         <div class="manifest-head">
           <span>built-in tools</span>
-          <span><span class="dot" aria-hidden="true"></span>&nbsp; 10 loaded</span>
+          <span><span class="dot" aria-hidden="true"></span>&nbsp; 11 loaded</span>
         </div>
-        <div class="manifest-row"><code>read_file</code><span>Read the contents of a file</span></div>
-        <div class="manifest-row"><code>create_file</code><span>Create a new file with the provided contents</span></div>
-        <div class="manifest-row"><code>edit_file</code><span>Modify a file by replacing exactly one string match</span></div>
-        <div class="manifest-row"><code>bash</code><span>Execute a bash command</span></div>
-        <div class="manifest-row"><code>glob</code><span>Find files matching a glob pattern</span></div>
-        <div class="manifest-row"><code>grep</code><span>Search file contents using regex</span></div>
-        <div class="manifest-row"><code>question</code><span>Ask the user a question with optional choices</span></div>
-        <div class="manifest-row"><code>plan</code><span>Create a structured markdown plan</span></div>
-        <div class="manifest-row"><code>skill</code><span>Invoke a skill by name to get its instructions</span></div>
-        <div class="manifest-row"><code>webfetch</code><span>Fetch a URL, returned as cleaned markdown</span></div>
+        <div class="manifest-row"><code>read</code><span>Read workspace file</span></div>
+        <div class="manifest-row"><code>write</code><span>Create or replace file</span></div>
+        <div class="manifest-row"><code>edit</code><span>Replace one unique exact text match in a file</span></div>
+        <div class="manifest-row"><code>bash</code><span>Run command with bash -c in the workspace</span></div>
+        <div class="manifest-row"><code>glob</code><span>Find files matching glob</span></div>
+        <div class="manifest-row"><code>grep</code><span>Search file contents with regular expression</span></div>
+        <div class="manifest-row"><code>question</code><span>Ask user a question, optionally with choices</span></div>
+        <div class="manifest-row"><code>plan</code><span>Create or update task plan</span></div>
+        <div class="manifest-row"><code>skill</code><span>Load skill instructions</span></div>
+        <div class="manifest-row"><code>webfetch</code><span>Fetch URL as Markdown</span></div>
+        <div class="manifest-row"><code>websearch</code><span>Search the web and return ranked results</span></div>
       </div>
     </div>
   </div>
@@ -964,11 +965,12 @@ footer {
       <div class="frame-in">
         <div class="manifest-head">
           <span>slash commands</span>
-          <span><span class="dot" aria-hidden="true"></span>&nbsp; 15 loaded</span>
+          <span><span class="dot" aria-hidden="true"></span>&nbsp; 16 loaded</span>
         </div>
         <div class="manifest-row"><code>/new</code><span>Clear history and create a new session</span></div>
         <div class="manifest-row"><code>/sessions</code><span>Load and delete sessions</span></div>
         <div class="manifest-row"><code>/models</code><span>List and select models</span></div>
+        <div class="manifest-row"><code>/reasoning</code><span>Set reasoning effort level</span></div>
         <div class="manifest-row"><code>/agents</code><span>List and select agents</span></div>
         <div class="manifest-row"><code>/skills</code><span>List available skills</span></div>
         <div class="manifest-row"><code>/plan</code><span>Toggle plan mode on/off</span></div>
@@ -976,11 +978,12 @@ footer {
         <div class="manifest-row"><code>/fork</code><span>Copy the current session with a new id</span></div>
         <div class="manifest-row"><code>/info</code><span>Show session info</span></div>
         <div class="manifest-row"><code>/rebuild</code><span>Reload agents, skills, and AGENTS.md</span></div>
-        <div class="manifest-row"><code>/compact</code><span>Compact conversation history into a summary</span></div>
-        <div class="manifest-row"><code>/streaming</code><span>Toggle streaming mode on/off</span></div>
-        <div class="manifest-row"><code>/thinking</code><span>Toggle rendering of thinking messages on/off</span></div>
-        <div class="manifest-row"><code>/show-tokens</code><span>Toggle rendering of token info messages on/off</span></div>
-        <div class="manifest-row"><code>/show-diff</code><span>Toggle rendering of diff messages on/off</span></div>
+        <div class="manifest-row"><code>/compact</code><span>Compact conversation history into summary</span></div>
+        <div class="manifest-row"><code>/streaming</code><span>Toggle streaming mode</span></div>
+        <div class="manifest-row"><code>/theme</code><span>Select the color theme</span></div>
+        <div class="manifest-row"><code>/show-thinking</code><span>Toggle rendering of thinking messages on/off</span></div>
+        <div class="manifest-row"><code>/show-tokens</code><span>Toggle rendering of token info messages</span></div>
+        <div class="manifest-row"><code>/show-diff</code><span>Toggle rendering of diff messages</span></div>
       </div>
     </div>
   </div>

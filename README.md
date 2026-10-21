@@ -150,19 +150,19 @@ In the TUI, you can use these slash commands:
 - `/new` - Clear history and create a new session
 - `/sessions` - Load and delete sessions
 - `/models` - List and select models
+- `/reasoning` - Set reasoning effort level
 - `/agents` - List and select agents
 - `/skills` - List available skills
 - `/plan` - Toggle plan mode on/off
-- `/reasoning` - Set reasoning effort level
-- `/fork` - Copy the current session with a new id
 - `/rebuild` - Reload agents, skills, and AGENTS.md
-- `/compact` - Compact conversation history into a summary
+- `/compact` - Compact conversation history into summary
+- `/fork` - Copy the current session with a new id
 - `/info` - Show session info
-- `/theme` - Select color theme
-- `/show-thinking` - Toggle rendering of thinking messages on/off
-- `/show-tokens` - Toggle rendering of token info messages on/off
-- `/show-diff` - Toggle rendering of diff messages on/off
-- `/streaming` - Toggle streaming mode on/off
+- `/theme` - Select the color theme
+- `/show-thinking` - Toggle rendering of thinking messages
+- `/show-tokens` - Toggle rendering of token info messages
+- `/show-diff` - Toggle rendering of diff messages
+- `/streaming` - Toggle streaming mode
 
 ## Tools
 
@@ -170,13 +170,14 @@ Gaius provides built-in tools that the agent can use during conversations:
 
 | Tool | Description |
 |------|-------------|
-| `read_file` | Read the contents of a file |
-| `create_file` | Create a new file with the provided contents |
-| `edit_file` | Modify an existing file by replacing exactly one string match |
-| `bash` | Execute a bash command |
-| `glob` | Find files matching a glob pattern |
-| `grep` | Search file contents using regex pattern |
-| `question` | Ask the user a question with optional choices |
-| `plan` | Create a structured markdown formatted plan |
-| `skill` | Invoke a skill by name to get its instructions |
-| `webfetch` | Fetch a URL and return its content as cleaned Markdown text |
+| `read` | Read workspace file |
+| `write` | Create or replace file |
+| `edit` | Replace one unique exact text match in a file |
+| `bash` | Run command with bash -c in the workspace |
+| `glob` | Find files matching glob |
+| `grep` | Search file contents with regular expression |
+| `question` | Ask user a question, optionally with choices |
+| `plan` | Create or update task plan |
+| `skill` | Load skill instructions |
+| `webfetch` | Fetch URL as Markdown |
+| `websearch` | Search the web and return ranked results |
