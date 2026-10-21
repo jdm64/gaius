@@ -269,7 +269,12 @@ impl ToolEngine {
 
     async fn bash_tool(&self, args: &Value) -> ToolResult {
         let command = match args.get(ArgName::Command).and_then(|v| v.as_str()) {
-            Some(c) => c,
+            Some(c) => {
+                if c.is_empty() {
+                    return Self::required_arg(ArgName::Command);
+                }
+                c
+            }
             None => return Self::required_arg(ArgName::Command),
         };
         match Command::new("bash").arg("-c").arg(command).output().await {
