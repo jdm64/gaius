@@ -30,6 +30,8 @@ impl ArgName {
     pub const Url: &'static str = "url";
 }
 
+const FILE_PATH_DESC: &str = "Workspace relative or absolute file path";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ToolName {
     Read,
@@ -106,69 +108,69 @@ impl ToolName {
     pub fn genai_tool(self) -> Tool {
         match self {
             ToolName::Read => Tool::new(self.as_str())
-                .with_description("Read text from a workspace file; read the whole file or request a line range. Paths are resolved from the current working directory.")
+                .with_description("Read workspace file")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::FilePath: {
                             "type": "string",
-                            "description": "Path to the file, relative to the current working directory (or an absolute path)"
+                            "description": FILE_PATH_DESC
                         },
                         ArgName::StartLine: {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "one-based line number to start reading from; defaults to 1"
+                            "description": "First 1-based line to read (default: 1)"
                         },
                         ArgName::MaxLines: {
                             "type": "integer",
                             "minimum": 0,
-                            "description": "maximum number of lines to read; 0 or omitted reads the entire file"
+                            "description": "Line limit; 0 or omitted reads the whole file"
                         }
                     },
                     "required": [ArgName::FilePath]
                 })),
             ToolName::Edit => Tool::new(self.as_str())
-                .with_description("Replace one exact, unique text match in an existing workspace file. Include enough surrounding context to identify the intended match.")
+                .with_description("Replace one unique exact text match in a file")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::FilePath: {
                             "type": "string",
-                            "description": "Path to the existing file, relative to the current working directory (or an absolute path)"
+                            "description": FILE_PATH_DESC
                         },
                         ArgName::OldString: {
                             "type": "string",
-                            "description": "Exact text to locate in the file, including whitespace and indentation. It must occur exactly once; include surrounding context if needed."
+                            "description": "Exact text to match including whitespace; must occur once"
                         },
                         ArgName::NewString: {
                             "type": "string",
-                            "description": "Text that will replace the unique old_string match"
+                            "description": "Replacement text"
                         }
                     },
                     "required": [ArgName::FilePath, ArgName::OldString, ArgName::NewString]
                 })),
             ToolName::Write => Tool::new(self.as_str())
-                .with_description("Write content to a workspace file. By default, fails if the target already exists; set overwrite to true to replace it.")
+                .with_description("Create or replace file")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::FilePath: {
                             "type": "string",
-                            "description": "The path to the file to create"
+                            "description": FILE_PATH_DESC
                         },
                         ArgName::Content: {
                             "type": "string",
-                            "description": "The contents to write to the file"
+                            "description": "Contents to write to the file"
                         },
                         ArgName::Overwrite: {
                             "type": "boolean",
-                            "description": "Whether to overwrite the file if it already exists (default: false)"
+                            "description": "Overwrite if it exists (default: false)"
                         }
                     },
                     "required": [ArgName::FilePath, ArgName::Content]
                 })),
             ToolName::Bash => Tool::new(self.as_str())
-                .with_description("Run a shell command with bash -c in the current workspace and return its exit status, stdout, and stderr.")
+                .with_description("Run command with bash -c in the workspace")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
@@ -180,110 +182,110 @@ impl ToolName {
                     "required": [ArgName::Command]
                 })),
             ToolName::Glob => Tool::new(self.as_str())
-                .with_description("Find workspace files whose paths match a glob pattern.")
+                .with_description("Find files matching glob")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Query: {
                             "type": "string",
-                            "description": "Glob pattern to match file paths (for example, '**/*.rs' or 'src/**/*.toml')"
+                            "description": "Glob pattern (e.g. '**/*.rs')"
                         },
                         ArgName::Path: {
                             "type": "string",
-                            "description": "Optional directory to search in (defaults to current directory)"
+                            "description": "Optional directory to search in (default: current directory)"
                         }
                     },
                     "required": [ArgName::Query]
                 })),
             ToolName::Grep => Tool::new(self.as_str())
-                .with_description("Search file contents for a regular-expression pattern, optionally restricting the search to a path and matching files.")
+                .with_description("Search file contents with regular expression")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Query: {
                             "type": "string",
-                            "description": "Regular expression to search for in file contents"
+                            "description": "Regex to search for"
                         },
                         ArgName::Path: {
                             "type": "string",
-                            "description": "File or directory path to search"
+                            "description": "Optional file or directory to search (default: current directory)"
                         },
                         ArgName::FilePattern: {
                             "type": "string",
-                            "description": "Optional glob pattern to filter which files to search (e.g., '*.rs')"
+                            "description": "Optional glob filter (e.g. '*.rs')"
                         },
                         ArgName::Recursive: {
                             "type": "boolean",
-                            "description": "Whether to search recursively in directories (default: true)"
+                            "description": "Search subdirectories (default: true)"
                         }
                     },
                     "required": [ArgName::Query]
                 })),
             ToolName::Skill => Tool::new(self.as_str())
-                .with_description("Load a named skill and return its instructions for use in the current task.")
+                .with_description("Load skill instructions")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Name: {
                             "type": "string",
-                            "description": "Name of the skill to load"
+                            "description": "Name of skill to load"
                         }
                     },
                     "required": [ArgName::Name],
                 })),
             ToolName::Question => Tool::new(self.as_str())
-                .with_description("Ask the user a question, optionally providing choices to select from.")
+                .with_description("Ask user a question, optionally with choices")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Question: {
                             "type": "string",
-                            "description": "The question or prompt to show the user"
+                            "description": "Question to ask"
                         },
                         ArgName::Options: {
                             "type": "array",
                             "items": { "type": "string" },
-                            "description": "Optional list of choices for the user"
+                            "description": "Optional list of choices"
                         }
                     },
                     "required": [ArgName::Question]
                 })),
             ToolName::Plan => Tool::new(self.as_str())
-                .with_description("Create or update the structured plan for the current task.")
+                .with_description("Create or update task plan")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Plan: {
                             "type": "string",
-                            "description": "The content of the plan"
+                            "description": "Plan text"
                         }
                     },
                     "required": [ArgName::Plan],
                 })),
             ToolName::WebFetch => Tool::new(self.as_str())
-                .with_description("Fetch a URL and return its content as cleaned Markdown text")
+                .with_description("Fetch URL as Markdown")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Url: {
                             "type": "string",
-                            "description": "The fully-qualified http(s) URL to fetch"
+                            "description": "HTTP or HTTPS URL"
                         },
                     },
                     "required": [ArgName::Url]
                 })),
             ToolName::WebSearch => Tool::new(self.as_str())
-                .with_description("Search the web for information relevant to a query and return ranked results with titles, URLs, and snippets.")
+                .with_description("Search the web and return ranked results")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Query: {
                             "type": "string",
-                            "description": "The web search terms or question"
+                            "description": "Search terms or question"
                         },
                         ArgName::MaxResults: {
                             "type": "integer",
-                            "description": "Maximum number of results to return (default: 5)",
+                            "description": "Result limit (default: 5)",
                             "minimum": 1
                         }
                     },
