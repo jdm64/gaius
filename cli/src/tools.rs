@@ -114,6 +114,7 @@ impl ToolName {
                     "properties": {
                         ArgName::FilePath: {
                             "type": "string",
+                            "minLength": 1,
                             "description": FILE_PATH_DESC
                         },
                         ArgName::StartLine: {
@@ -136,6 +137,7 @@ impl ToolName {
                     "properties": {
                         ArgName::FilePath: {
                             "type": "string",
+                            "minLength": 1,
                             "description": FILE_PATH_DESC
                         },
                         ArgName::OldString: {
@@ -156,6 +158,7 @@ impl ToolName {
                     "properties": {
                         ArgName::FilePath: {
                             "type": "string",
+                            "minLength": 1,
                             "description": FILE_PATH_DESC
                         },
                         ArgName::Content: {
@@ -170,13 +173,14 @@ impl ToolName {
                     "required": [ArgName::FilePath, ArgName::Content]
                 })),
             ToolName::Bash => Tool::new(self.as_str())
-                .with_description("Run command with bash -c in the workspace")
+                .with_description("Execute shell command in the workspace")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
                         ArgName::Command: {
                             "type": "string",
-                            "description": "Shell command string to run with bash -c"
+                            "minLength": 1,
+                            "description": "Shell command string to run"
                         }
                     },
                     "required": [ArgName::Command]
@@ -188,11 +192,12 @@ impl ToolName {
                     "properties": {
                         ArgName::Query: {
                             "type": "string",
+                            "minLength": 1,
                             "description": "Glob pattern (e.g. '**/*.rs')"
                         },
                         ArgName::Path: {
                             "type": "string",
-                            "description": "Optional directory to search in (default: current directory)"
+                            "description": "Directory to search in (default: current directory)"
                         }
                     },
                     "required": [ArgName::Query]
@@ -204,15 +209,16 @@ impl ToolName {
                     "properties": {
                         ArgName::Query: {
                             "type": "string",
+                            "minLength": 1,
                             "description": "Regex to search for"
                         },
                         ArgName::Path: {
                             "type": "string",
-                            "description": "Optional file or directory to search (default: current directory)"
+                            "description": "File or directory to search (default: current directory)"
                         },
                         ArgName::FilePattern: {
                             "type": "string",
-                            "description": "Optional glob filter (e.g. '*.rs')"
+                            "description": "Glob filter (e.g. '*.rs')"
                         },
                         ArgName::Recursive: {
                             "type": "boolean",
@@ -228,6 +234,7 @@ impl ToolName {
                     "properties": {
                         ArgName::Name: {
                             "type": "string",
+                            "minLength": 1,
                             "description": "Name of skill to load"
                         }
                     },
@@ -240,12 +247,13 @@ impl ToolName {
                     "properties": {
                         ArgName::Question: {
                             "type": "string",
+                            "minLength": 1,
                             "description": "Question to ask"
                         },
                         ArgName::Options: {
                             "type": "array",
                             "items": { "type": "string" },
-                            "description": "Optional list of choices"
+                            "description": "List of choices"
                         }
                     },
                     "required": [ArgName::Question]
@@ -257,6 +265,7 @@ impl ToolName {
                     "properties": {
                         ArgName::Plan: {
                             "type": "string",
+                            "minLength": 1,
                             "description": "Plan text"
                         }
                     },
@@ -269,6 +278,7 @@ impl ToolName {
                     "properties": {
                         ArgName::Url: {
                             "type": "string",
+                            "minLength": 1,
                             "description": "HTTP or HTTPS URL"
                         },
                     },
@@ -281,6 +291,7 @@ impl ToolName {
                     "properties": {
                         ArgName::Query: {
                             "type": "string",
+                            "minLength": 1,
                             "description": "Search terms or question"
                         },
                         ArgName::MaxResults: {
