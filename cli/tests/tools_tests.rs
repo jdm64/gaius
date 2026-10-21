@@ -101,7 +101,7 @@ async fn edit_file_returns_compact_diff_view() {
 
     let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
         .execute(
-            "edit_file",
+            &ToolName::Edit.name(),
             &json!({
                 "file_path": "sample.txt",
                 "old_string": "three\n",
@@ -378,14 +378,14 @@ async fn webfetch_rejects_unsupported_scheme() {
 fn build_tools_applies_agent_include_and_exclude_filters() {
     let engine = ToolEngine::new(SkillRepo::default(), 30000, 60);
     let filters = AgentTools {
-        include: vec!["read_file".into(), "bash".into(), "grep".into()],
+        include: vec!["read".into(), "bash".into(), "grep".into()],
         exclude: vec!["bash".into()],
     };
 
     let tools = engine.build_tools(true, Some(&filters));
     let tool_names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
 
-    assert_eq!(tool_names, ["read_file", "grep", "plan"]);
+    assert_eq!(tool_names, ["read", "grep", "plan"]);
 }
 
 #[test]

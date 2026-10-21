@@ -6,6 +6,7 @@ use gaius::{
     models::TokenPrice,
     rate_limit::{is_rate_limit_error, is_webc_rate_limit},
     token_usage::{TokenUsageLedger, TokenUsageSpan},
+    tools::ToolName,
 };
 use genai::{
     Error as GenaiError, ModelIden,
@@ -93,7 +94,7 @@ fn replay_diff_marker_after_tool_call() {
     let messages = vec![
         ChatMessage::from(vec![ToolCall {
             call_id: "call-1".to_string(),
-            fn_name: "edit_file".to_string(),
+            fn_name: ToolName::Edit.name(),
             fn_arguments: json!({"file_path":"src/lib.rs"}),
             thought_signatures: None,
         }]),
@@ -117,12 +118,12 @@ fn replay_diff_marker_after_tool_call() {
         events,
         vec![
             HarnessEvent::ToolCall {
-                name: "edit_file".to_string(),
+                name: ToolName::Edit.name(),
                 arguments: json!({"file_path":"src/lib.rs"}).to_string(),
                 start_time: 0,
             },
             HarnessEvent::ToolResult {
-                name: "edit_file".to_string(),
+                name: ToolName::Edit.name(),
                 result: "File edited successfully".to_string(),
                 error: false,
             },
@@ -627,7 +628,7 @@ fn split_point_keeps_tool_call_with_its_result() {
         ChatMessage::assistant("two"),
         ChatMessage::assistant(MessageContent::from_tool_calls(vec![ToolCall {
             call_id: "call-1".to_string(),
-            fn_name: "read_file".to_string(),
+            fn_name: ToolName::Read.name(),
             fn_arguments: json!({"file_path": "src/lib.rs"}),
             thought_signatures: None,
         }])),

@@ -88,9 +88,9 @@ impl ToolEngine {
 
     pub async fn execute(&self, name: &str, args: &Value) -> ToolResult {
         match ToolName::from_name(name) {
-            Some(ToolName::ReadFile) => self.read_file_tool(args),
-            Some(ToolName::WriteFile) => self.write_file_tool(args),
-            Some(ToolName::EditFile) => self.edit_file_tool(args),
+            Some(ToolName::Read) => self.read_tool(args),
+            Some(ToolName::Write) => self.write_tool(args),
+            Some(ToolName::Edit) => self.edit_tool(args),
             Some(ToolName::Bash) => self.bash_tool(args).await,
             Some(ToolName::Glob) => self.glob_tool(args),
             Some(ToolName::Grep) => self.grep_tool(args),
@@ -119,7 +119,7 @@ impl ToolEngine {
         self.load_skill(name)
     }
 
-    fn read_file_tool(&self, args: &Value) -> ToolResult {
+    fn read_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get(ArgName::FilePath).and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return Self::required_arg(ArgName::FilePath),
@@ -169,7 +169,7 @@ impl ToolEngine {
         }
     }
 
-    fn write_file_tool(&self, args: &Value) -> ToolResult {
+    fn write_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get(ArgName::FilePath).and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return Self::required_arg(ArgName::FilePath),
@@ -203,13 +203,13 @@ impl ToolEngine {
                 Err(e) => ToolResult::Error(format!("Error writing file: {}", e)),
             },
             Err(e) if e.kind() == ErrorKind::AlreadyExists => ToolResult::Error(
-                "write_file cannot overwrite an existing file unless overwrite is true".to_string(),
+                "write tool cannot overwrite an existing file unless overwrite is true".to_string(),
             ),
             Err(e) => ToolResult::Error(format!("Error creating file: {}", e)),
         }
     }
 
-    fn edit_file_tool(&self, args: &Value) -> ToolResult {
+    fn edit_tool(&self, args: &Value) -> ToolResult {
         let file_path_str = match args.get(ArgName::FilePath).and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return Self::required_arg(ArgName::FilePath),

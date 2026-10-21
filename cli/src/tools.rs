@@ -32,9 +32,9 @@ impl ArgName {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ToolName {
-    ReadFile,
-    WriteFile,
-    EditFile,
+    Read,
+    Write,
+    Edit,
     Bash,
     Glob,
     Grep,
@@ -47,9 +47,9 @@ pub enum ToolName {
 
 impl ToolName {
     pub const ALL: [ToolName; 11] = [
-        ToolName::ReadFile,
-        ToolName::WriteFile,
-        ToolName::EditFile,
+        ToolName::Read,
+        ToolName::Write,
+        ToolName::Edit,
         ToolName::Bash,
         ToolName::Glob,
         ToolName::Grep,
@@ -66,9 +66,9 @@ impl ToolName {
 
     pub fn as_str(self) -> &'static str {
         match self {
-            ToolName::ReadFile => "read_file",
-            ToolName::WriteFile => "write_file",
-            ToolName::EditFile => "edit_file",
+            ToolName::Read => "read",
+            ToolName::Write => "write",
+            ToolName::Edit => "edit",
             ToolName::Bash => "bash",
             ToolName::Glob => "glob",
             ToolName::Grep => "grep",
@@ -89,9 +89,9 @@ impl ToolName {
 
     pub fn display_fields(self) -> &'static [&'static str] {
         match self {
-            ToolName::ReadFile => &[ArgName::FilePath, ArgName::StartLine, ArgName::MaxLines],
-            ToolName::WriteFile => &[ArgName::FilePath, ArgName::Overwrite],
-            ToolName::EditFile => &[ArgName::FilePath],
+            ToolName::Read => &[ArgName::FilePath, ArgName::StartLine, ArgName::MaxLines],
+            ToolName::Write => &[ArgName::FilePath, ArgName::Overwrite],
+            ToolName::Edit => &[ArgName::FilePath],
             ToolName::Bash => &[ArgName::Command],
             ToolName::Glob => &[ArgName::Path, ArgName::Query],
             ToolName::Grep => &[ArgName::Path, ArgName::FilePattern, ArgName::Query],
@@ -105,7 +105,7 @@ impl ToolName {
 
     pub fn genai_tool(self) -> Tool {
         match self {
-            ToolName::ReadFile => Tool::new(self.as_str())
+            ToolName::Read => Tool::new(self.as_str())
                 .with_description("Read text from a workspace file; read the whole file or request a line range. Paths are resolved from the current working directory.")
                 .with_schema(json!({
                     "type": "object",
@@ -127,7 +127,7 @@ impl ToolName {
                     },
                     "required": [ArgName::FilePath]
                 })),
-            ToolName::EditFile => Tool::new(self.as_str())
+            ToolName::Edit => Tool::new(self.as_str())
                 .with_description("Replace one exact, unique text match in an existing workspace file. Include enough surrounding context to identify the intended match.")
                 .with_schema(json!({
                     "type": "object",
@@ -147,7 +147,7 @@ impl ToolName {
                     },
                     "required": [ArgName::FilePath, ArgName::OldString, ArgName::NewString]
                 })),
-            ToolName::WriteFile => Tool::new(self.as_str())
+            ToolName::Write => Tool::new(self.as_str())
                 .with_description("Write content to a workspace file. By default, fails if the target already exists; set overwrite to true to replace it.")
                 .with_schema(json!({
                     "type": "object",
