@@ -255,6 +255,13 @@ impl ToolEngine {
                 return Self::required_arg(ArgName::NewString);
             }
         };
+        let replace_all = match args.get(ArgName::ReplaceAll) {
+            None => false,
+            Some(value) => match value.as_bool() {
+                Some(value) => value,
+                None => return ToolResult::Failure("replace_all must be a boolean".to_string()),
+            },
+        };
         let cwd = match std::env::current_dir() {
             Ok(c) => c,
             Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
@@ -272,10 +279,9 @@ impl ToolEngine {
                     .to_string(),
             );
         }
-        if match_count > 1 {
+        if !replace_all && match_count > 1 {
             return ToolResult::Error(format!(
-                "old_string matched {} times. The old_string parameter must match exactly once in \
-                 the file. Include more surrounding context to make it unique.",
+                "old_string matched {} times. Set replace_all to true to replace every occurrence, or include more surrounding context to make the match unique.",
                 match_count
             ));
         }
@@ -289,7 +295,7 @@ impl ToolEngine {
         let diff = DiffView::from_text(relative_path, &content, &updated);
         match std::fs::write(full_path, updated) {
             Ok(()) => ToolResult::FileEdit {
-                message: "File edited successfully".to_string(),
+                message: format!("File edited successfully. Made {match_count} replacements"),
                 diff,
             },
             Err(e) => ToolResult::Error(format!("Error writing file: {}", e)),

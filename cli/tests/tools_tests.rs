@@ -117,7 +117,7 @@ async fn edit_file_returns_compact_diff_view() {
     assert_eq!(updated, "one\ntwo\nTHREE\nfour\nfive\n");
     match result {
         ToolResult::FileEdit { message, diff } => {
-            assert_eq!(message, "File edited successfully");
+            assert_eq!(message, "File edited successfully. Made 1 replacements");
             assert_eq!(diff.file_path, "sample.txt");
             assert_eq!(diff.hunks.len(), 1);
             let hunk = &diff.hunks[0];

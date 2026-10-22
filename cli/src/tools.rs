@@ -26,6 +26,7 @@ impl ArgName {
     pub const Query: &'static str = "query";
     pub const Question: &'static str = "question";
     pub const Recursive: &'static str = "recursive";
+    pub const ReplaceAll: &'static str = "replace_all";
     pub const StartLine: &'static str = "start_line";
     pub const Url: &'static str = "url";
 }
@@ -131,7 +132,7 @@ impl ToolName {
                     "required": [ArgName::FilePath]
                 })),
             ToolName::Edit => Tool::new(self.as_str())
-                .with_description("Replace one unique exact text match in a file")
+                .with_description("Replace exact text in a file")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
@@ -142,11 +143,15 @@ impl ToolName {
                         },
                         ArgName::OldString: {
                             "type": "string",
-                            "description": "Exact text to match including whitespace; must occur once"
+                            "description": "Exact text to match including whitespace"
                         },
                         ArgName::NewString: {
                             "type": "string",
                             "description": "Replacement text"
+                        },
+                        ArgName::ReplaceAll: {
+                            "type": "boolean",
+                            "description": "Replace every occurrence instead of requiring a unique match (default: false)"
                         }
                     },
                     "required": [ArgName::FilePath, ArgName::OldString, ArgName::NewString]
