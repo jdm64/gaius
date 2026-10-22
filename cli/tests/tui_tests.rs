@@ -1,6 +1,7 @@
 use gaius::{
     config::Config,
     diff_view::DiffView,
+    tool_engine::ToolStatus,
     tui::{TuiApp, TuiMessage},
 };
 
@@ -18,7 +19,7 @@ fn build_tui_app_messages_with_all_variants() {
     app.push_message(TuiMessage::ToolResult {
         name: "weather".to_string(),
         result: String::new(),
-        error: false,
+        status: ToolStatus::Valid,
     });
     app.push_message(TuiMessage::ToolCall {
         name: "123".to_string(),
@@ -28,7 +29,7 @@ fn build_tui_app_messages_with_all_variants() {
     app.push_message(TuiMessage::ToolResult {
         name: "123".to_string(),
         result: "sunny".to_string(),
-        error: false,
+        status: ToolStatus::Valid,
     });
     app.push_message(TuiMessage::DiffView(DiffView {
         file_path: "src/main.rs".to_string(),
@@ -61,11 +62,11 @@ fn build_tui_app_messages_with_all_variants() {
         TuiMessage::ToolResult {
             name,
             result,
-            error,
+            status,
         } => {
             assert_eq!(name, "weather");
             assert!(result.is_empty());
-            assert!(!error);
+            assert_eq!(*status, ToolStatus::Valid);
         }
         _ => panic!("expected ToolResult"),
     }
@@ -82,11 +83,11 @@ fn build_tui_app_messages_with_all_variants() {
         TuiMessage::ToolResult {
             name,
             result,
-            error,
+            status,
         } => {
             assert_eq!(name, "123");
             assert_eq!(result, "sunny");
-            assert!(!error);
+            assert_eq!(*status, ToolStatus::Valid);
         }
         _ => panic!("expected ToolResult"),
     }

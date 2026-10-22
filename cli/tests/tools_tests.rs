@@ -82,7 +82,7 @@ async fn plan_tool_requires_content() {
         .await;
 
     match result {
-        ToolResult::Error(text) => {
+        ToolResult::Failure(text) => {
             assert_eq!(text, "Missing required argument: plan");
         }
         other => panic!("Expected ToolResult::Error, got: {:?}", other),
@@ -237,7 +237,7 @@ async fn skill_tool_requires_name() {
         .await;
 
     match result {
-        ToolResult::Error(text) => {
+        ToolResult::Failure(text) => {
             assert_eq!(text, "Missing required argument: name");
         }
         other => panic!("Expected ToolResult::Error, got: {:?}", other),
@@ -353,7 +353,7 @@ async fn webfetch_requires_url() {
         .await;
 
     match result {
-        ToolResult::Error(text) => {
+        ToolResult::Failure(text) => {
             assert_eq!(text, "Missing required argument: url");
         }
         other => panic!("Expected ToolResult::Error, got: {other:?}"),
@@ -367,7 +367,7 @@ async fn webfetch_rejects_unsupported_scheme() {
         .await;
 
     match result {
-        ToolResult::Error(text) => {
+        ToolResult::Failure(text) => {
             assert!(text.contains("scheme"), "expected scheme error: {text}");
         }
         other => panic!("Expected ToolResult::Error, got: {other:?}"),

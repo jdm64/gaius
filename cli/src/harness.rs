@@ -20,7 +20,7 @@ use crate::{
     session::Session,
     skills::{Skill, SkillRepo},
     token_usage::{SessionInfo, TokenUsageLedger},
-    tool_engine::ToolEngine,
+    tool_engine::{ToolEngine, ToolStatus},
 };
 use genai::chat::{ChatRequest, ChatResponse};
 use std::{
@@ -53,7 +53,7 @@ pub enum HarnessEvent {
     ToolResult {
         name: String,
         result: String,
-        error: bool,
+        status: ToolStatus,
     },
     DiffView(DiffView),
     TokenUsage {

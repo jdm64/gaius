@@ -6,6 +6,7 @@ use crate::{
     diff_view::DiffView,
     harness::{Harness, HarnessEvent},
     token_usage::TokenUsageLedger,
+    tool_engine::ToolStatus,
 };
 use genai::chat::{ChatMessage, ChatRole, ContentPart, CustomPart};
 
@@ -25,7 +26,7 @@ impl Harness {
 }
 
 pub trait MessageExt {
-    fn is_tool_error(&self) -> bool;
+    fn tool_status(&self) -> ToolStatus;
 
     fn has_plan_marker(&self) -> bool;
 
@@ -37,14 +38,26 @@ pub trait MessageExt {
 }
 
 impl MessageExt for ChatMessage {
-    fn is_tool_error(&self) -> bool {
-        self.content.custom_parts().iter().any(|part| {
-            part.data
-                .as_object()
-                .is_some_and(|obj: &serde_json::Map<String, serde_json::Value>| {
-                    obj.get("tool_error") == Some(&serde_json::json!(true))
+    fn tool_status(&self) -> ToolStatus {
+        self.content
+            .custom_parts()
+            .iter()
+            .find_map(|part| {
+                part.data.as_object().and_then(|obj| {
+                    obj.get("tool_error").and_then(|value| {
+                        value.as_u64().map(ToolStatus::from_value).or_else(|| {
+                            value.as_bool().map(|flag| {
+                                if flag {
+                                    ToolStatus::Error
+                                } else {
+                                    ToolStatus::Valid
+                                }
+                            })
+                        })
+                    })
                 })
-        })
+            })
+            .unwrap_or(ToolStatus::Valid)
     }
 
     fn has_plan_marker(&self) -> bool {
@@ -142,7 +155,7 @@ where
                     let (next_index, next_msg) = messages.next().unwrap();
                     let responses: Vec<&genai::chat::ToolResponse> =
                         next_msg.content.tool_responses();
-                    let tool_error = next_msg.is_tool_error();
+                    let status = next_msg.tool_status();
                     for resp in responses {
                         if let Some((name, args)) = pending_tool_calls.first() {
                             on_event(HarnessEvent::ToolCall {
@@ -153,7 +166,7 @@ where
                             on_event(HarnessEvent::ToolResult {
                                 name: (*name).clone(),
                                 result: resp.content.clone(),
-                                error: tool_error,
+                                status,
                             });
                             pending_tool_calls.remove(0);
                         }
@@ -173,7 +186,7 @@ where
                     on_event(HarnessEvent::ToolResult {
                         name,
                         result: String::new(),
-                        error: false,
+                        status: ToolStatus::Valid,
                     });
                 }
             }

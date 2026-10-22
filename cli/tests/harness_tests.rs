@@ -6,6 +6,7 @@ use gaius::{
     models::TokenPrice,
     rate_limit::{is_rate_limit_error, is_webc_rate_limit},
     token_usage::{TokenUsageLedger, TokenUsageSpan},
+    tool_engine::ToolStatus,
     tools::ToolName,
 };
 use genai::{
@@ -125,7 +126,7 @@ fn replay_diff_marker_after_tool_call() {
             HarnessEvent::ToolResult {
                 name: ToolName::Edit.name(),
                 result: "File edited successfully".to_string(),
-                error: false,
+                status: ToolStatus::Valid,
             },
             HarnessEvent::DiffView(sample_diff()),
         ]
@@ -163,7 +164,7 @@ fn replay_tool_error_marker_sets_error_flag() {
             HarnessEvent::ToolResult {
                 name: "search".to_string(),
                 result: "something failed".to_string(),
-                error: true,
+                status: ToolStatus::Error,
             },
         ]
     );
@@ -196,7 +197,7 @@ fn replay_tool_error_marker_absent_defaults_false() {
             HarnessEvent::ToolResult {
                 name: "search".to_string(),
                 result: "ok".to_string(),
-                error: false,
+                status: ToolStatus::Valid,
             },
         ]
     );

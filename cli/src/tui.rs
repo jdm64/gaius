@@ -12,6 +12,7 @@ use crate::{
     render::{Render, history::DisplayPrefs, layout::HistoryLayout},
     selection::Selection,
     token_usage::format_arrows,
+    tool_engine::ToolStatus,
 };
 use crossterm::{
     event::{
@@ -58,7 +59,7 @@ pub enum TuiMessage {
     ToolResult {
         name: String,
         result: String,
-        error: bool,
+        status: ToolStatus,
     },
     DiffView(DiffView),
     TurnDuration(u64),
@@ -391,13 +392,13 @@ impl TuiApp {
             HarnessEvent::ToolResult {
                 name,
                 result,
-                error,
+                status,
             } => {
                 self.finish_last_timer();
                 self.push_message(TuiMessage::ToolResult {
                     name,
                     result,
-                    error,
+                    status,
                 });
                 self.push_message(TuiMessage::Padding);
             }

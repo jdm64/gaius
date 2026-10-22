@@ -21,12 +21,41 @@ use tokio::process::Command;
 use url::Url;
 use websearch::{SearchOptions, providers::DuckDuckGoProvider, web_search};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ToolStatus {
+    Valid = 0,
+    Error = 1,
+    Failure = 2,
+}
+
+impl ToolStatus {
+    pub fn from_value(value: u64) -> Self {
+        match value {
+            1 => Self::Error,
+            2 => Self::Failure,
+            _ => Self::Valid,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ToolResult {
     Error(String),
+    Failure(String),
     Text(String),
     FileEdit { message: String, diff: DiffView },
     Question(String, Vec<String>),
+}
+
+impl ToolResult {
+    pub fn status(&self) -> ToolStatus {
+        match self {
+            ToolResult::Error(..) => ToolStatus::Error,
+            ToolResult::Failure(..) => ToolStatus::Failure,
+            _ => ToolStatus::Valid,
+        }
+    }
 }
 
 pub struct ToolEngine {
@@ -61,7 +90,7 @@ impl ToolEngine {
     }
 
     fn required_arg(arg: &str) -> ToolResult {
-        ToolResult::Error(format!("Missing required argument: {arg}"))
+        ToolResult::Failure(format!("Missing required argument: {arg}"))
     }
 
     pub fn build_tools(&self, plan_mode: bool, filters: Option<&AgentTools>) -> Vec<Tool> {
@@ -99,7 +128,7 @@ impl ToolEngine {
             Some(ToolName::Skill) => self.skill_tool(args),
             Some(ToolName::WebFetch) => Self::webfetch_tool(args).await,
             Some(ToolName::WebSearch) => Self::websearch_tool(args).await,
-            None => ToolResult::Error(format!("Unknown tool call: {} ({})", name, args)),
+            None => ToolResult::Failure(format!("Unknown tool call: {} ({})", name, args)),
         }
     }
 
@@ -128,7 +157,7 @@ impl ToolEngine {
             Some(value) => match value.as_u64() {
                 Some(line) if line >= 1 => line as usize,
                 _ => {
-                    return ToolResult::Error(
+                    return ToolResult::Failure(
                         "start_line must be an integer greater than or equal to 1".to_string(),
                     );
                 }
@@ -140,7 +169,7 @@ impl ToolEngine {
                 Some(0) => None,
                 Some(lines) => Some(lines as usize),
                 _ => {
-                    return ToolResult::Error(
+                    return ToolResult::Failure(
                         "max_lines must be a non-negative integer".to_string(),
                     );
                 }
@@ -182,7 +211,7 @@ impl ToolEngine {
             None => false,
             Some(value) => match value.as_bool() {
                 Some(value) => value,
-                None => return ToolResult::Error("overwrite must be a boolean".to_string()),
+                None => return ToolResult::Failure("overwrite must be a boolean".to_string()),
             },
         };
         let cwd = match std::env::current_dir() {
@@ -306,7 +335,9 @@ impl ToolEngine {
             Some(v) => match v.as_u64().filter(|&n| n > 0 && n <= u32::MAX as u64) {
                 Some(n) => n as u32,
                 None => {
-                    return ToolResult::Error("max_results must be a positive integer".to_string());
+                    return ToolResult::Failure(
+                        "max_results must be a positive integer".to_string(),
+                    );
                 }
             },
         };
@@ -345,12 +376,12 @@ impl ToolEngine {
 
         let parsed = match Url::parse(url_str) {
             Ok(u) => u,
-            Err(e) => return ToolResult::Error(format!("Invalid url: {e}")),
+            Err(e) => return ToolResult::Failure(format!("Invalid url: {e}")),
         };
 
         match parsed.scheme() {
             "http" | "https" => {}
-            other => return ToolResult::Error(format!("Unsupported url scheme: {other}")),
+            other => return ToolResult::Failure(format!("Unsupported url scheme: {other}")),
         }
 
         let client = match reqwest::Client::builder()
@@ -418,7 +449,7 @@ impl ToolEngine {
             None => return Self::required_arg(ArgName::Query),
         };
         if Self::is_glob_too_loose(pattern) {
-            return ToolResult::Error(
+            return ToolResult::Failure(
                 "Glob pattern must contain at least one non-wildcard character".to_string(),
             );
         }

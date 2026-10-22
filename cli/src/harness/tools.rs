@@ -4,7 +4,10 @@
 
 use super::{Harness, HarnessEvent};
 use crate::{
-    diff_view::DiffView, render::util::RenderUtil, tool_engine::ToolResult, util::time_now,
+    diff_view::DiffView,
+    render::util::RenderUtil,
+    tool_engine::{ToolResult, ToolStatus},
+    util::time_now,
 };
 use genai::chat::{ChatMessage, ContentPart, CustomPart, ToolCall, ToolResponse};
 use serde_json::json;
@@ -25,24 +28,25 @@ impl Harness {
                 .tool_engine
                 .execute(&tc.fn_name, &tc.fn_arguments)
                 .await;
+            let status = result.status();
             match result {
                 ToolResult::Question(title, options) => {
                     let answer =
                         on_event(HarnessEvent::AskUser { title, options }).unwrap_or_default();
-                    self.send_tool_result_event(tc, answer, false, on_event);
+                    self.send_tool_result_event(tc, answer, status, on_event);
                 }
                 ToolResult::Text(text) => {
                     if tc.fn_name == "plan" {
                         let plan_text = RenderUtil::plan_to_md(&tc.fn_arguments);
                         self.last_plan_content = Some(plan_text);
                     }
-                    self.send_tool_result_event(tc, text, false, on_event);
+                    self.send_tool_result_event(tc, text, status, on_event);
                 }
                 ToolResult::FileEdit { message, diff } => {
                     self.send_diff_view_event(tc, message, diff, on_event);
                 }
-                ToolResult::Error(err) => {
-                    self.send_tool_result_event(tc, err, true, on_event);
+                ToolResult::Error(err) | ToolResult::Failure(err) => {
+                    self.send_tool_result_event(tc, err, status, on_event);
                 }
             }
         }
@@ -63,7 +67,7 @@ impl Harness {
         &mut self,
         tc: &ToolCall,
         result: String,
-        error: bool,
+        status: ToolStatus,
         on_event: &mut F,
     ) where
         F: FnMut(HarnessEvent) -> Option<String>,
@@ -72,13 +76,13 @@ impl Harness {
         let mut message: ChatMessage = ToolResponse::new(&tc.call_id, result.clone()).into();
         message.content.push(ContentPart::Custom(CustomPart {
             model_iden: None,
-            data: json!({ "tool_error": error }),
+            data: json!({ "tool_error": status as i32 }),
         }));
         self.history.messages.push(message);
         on_event(HarnessEvent::ToolResult {
             name: tc.fn_name.to_string(),
             result,
-            error,
+            status,
         });
     }
 
@@ -98,7 +102,7 @@ impl Harness {
         on_event(HarnessEvent::ToolResult {
             name: tc.fn_name.to_string(),
             result,
-            error: false,
+            status: ToolStatus::Valid,
         });
         on_event(HarnessEvent::DiffView(diff));
     }

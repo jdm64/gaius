@@ -70,9 +70,11 @@ impl Harness {
         self.send_tool_call_event(&tc, &mut on_event);
 
         let result = self.tool_engine.load_skill(&name);
+        let status = result.status();
         match result {
-            ToolResult::Text(text) => self.send_tool_result_event(&tc, text, false, &mut on_event),
-            ToolResult::Error(err) => self.send_tool_result_event(&tc, err, true, &mut on_event),
+            ToolResult::Text(text) | ToolResult::Error(text) | ToolResult::Failure(text) => {
+                self.send_tool_result_event(&tc, text, status, &mut on_event)
+            }
             _ => {
                 return Err("Tool engine failed to run skill".into());
             }

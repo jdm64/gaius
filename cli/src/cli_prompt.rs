@@ -7,6 +7,7 @@ use crate::{
     harness::{Harness, HarnessEvent, HarnessSnapshot, UserRequest},
     render::util::RenderUtil,
     token_usage::format_arrows,
+    tool_engine::ToolStatus,
 };
 use std::{
     error::Error,
@@ -112,9 +113,9 @@ impl CliPrompt {
                 HarnessEvent::ToolResult {
                     name,
                     result,
-                    error,
+                    status,
                 } => {
-                    if error {
+                    if status != ToolStatus::Valid {
                         println!("tool-error> {}: {}", name, result);
                     } else {
                         println!("tool-result> {}: {}", name, result);

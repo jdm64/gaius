@@ -11,6 +11,7 @@ use crate::{
         util::{RenderUtil, USER_PROMPT_BAR},
     },
     theme::ColorTheme,
+    tool_engine::ToolStatus,
     tools::ToolName,
     tui::{TuiApp, TuiMessage},
 };
@@ -248,14 +249,17 @@ impl Render {
             TuiMessage::ToolResult {
                 name,
                 result,
-                error,
+                status,
             } => {
                 let style = self.theme.toolcall_style();
                 let json_args = Value::Null;
                 let tool_name = ToolName::from_name(name.as_str());
                 let mut ret = Vec::new();
-                if *error {
-                    let e_style = self.theme.error_style();
+                if *status != ToolStatus::Valid {
+                    let mut e_style = self.theme.error_style();
+                    if *status == ToolStatus::Failure {
+                        e_style = e_style.crossed_out().dim()
+                    }
                     let error_lines: Vec<&str> = result.split('\n').collect();
                     for i in error_lines {
                         if !i.is_empty() {
