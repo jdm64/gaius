@@ -53,13 +53,13 @@ define_commands! {
     /* Common */
     New => "new", "Clear history and create a new session";
     Sessions => "sessions", "Load and delete sessions";
-    Models => "models", "List and select models";
-    Reasoning => "reasoning", "Set reasoning effort level";
     /* Prompt */
     Agents => "agents", "List and select agents";
     Skills => "skills", "List available skills";
     Plan => "plan", "Toggle plan mode on/off";
-    Rebuild => "rebuild", "Reload agents, skills, and AGENTS.md";
+    /* Model */
+    Models => "models", "List and select models";
+    Reasoning => "reasoning", "Set reasoning effort level";
     /* Session */
     Compact => "compact", "Compact conversation history into summary";
     Fork => "fork", "Copy the current session with a new id";
@@ -69,6 +69,8 @@ define_commands! {
     ShowThinking => "show-thinking", "Toggle rendering of thinking messages";
     ShowTokens => "show-tokens", "Toggle rendering of token info messages";
     ShowDiff => "show-diff", "Toggle rendering of diff messages";
+    /* Misc */
+    Rebuild => "rebuild", "Reload agents, skills, and AGENTS.md";
     Streaming => "streaming", "Toggle streaming mode";
 }
 
