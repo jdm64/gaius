@@ -82,5 +82,8 @@ async fn add_provider_mode_cancel_returns_to_models() {
     let mode = InputMode::handle_provider_add(&mut app, key, picker).await;
 
     assert!(matches!(mode, InputMode::Models { .. }));
-    assert_eq!(app.editor.status, "Add provider cancelled");
+    assert_eq!(
+        app.editor.status_visible(),
+        Some(&"Add provider cancelled".to_string())
+    );
 }

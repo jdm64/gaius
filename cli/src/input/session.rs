@@ -40,29 +40,33 @@ impl InputMode {
                 };
                 if let Some(session_id) = &session.id {
                     if let Some(busy) = Command::busy_status(app, "loading a session") {
-                        app.editor.status = busy;
+                        app.editor.set_status(busy);
                     } else {
                         match actor.load_session(session_id.clone()).await {
                             Ok(snapshot) => {
                                 app.save_snapshot(&snapshot);
                                 app.clear_messages();
                                 app.history.scroll_bottom();
-                                app.editor.status =
-                                    format!("Loaded session: {}", session.display_name());
+                                app.editor.set_status(format!(
+                                    "Loaded session: {}",
+                                    session.display_name()
+                                ));
                                 app.context_tokens = None;
                                 match actor.replay_history().await {
                                     Ok(snapshot) => app.save_snapshot(&snapshot),
-                                    Err(err) => app.editor.status = err,
+                                    Err(err) => app.editor.set_status(err),
                                 }
                                 return Self::PromptInput;
                             }
                             Err(e) => {
-                                app.editor.status = format!("Error loading session: {}", e);
+                                app.editor
+                                    .set_status(format!("Error loading session: {}", e));
                             }
                         }
                     }
                 } else {
-                    app.editor.status = "Error loading session: missing session id".to_string();
+                    app.editor
+                        .set_status("Error loading session: missing session id".to_string());
                 }
             }
             KeyCode::Char('d')
@@ -74,17 +78,20 @@ impl InputMode {
                 if let Some(session_id) = &session.id {
                     let display_name = session.display_name();
                     if let Err(e) = Session::delete(session_id) {
-                        app.editor.status = format!("Error deleting session: {}", e);
+                        app.editor
+                            .set_status(format!("Error deleting session: {}", e));
                     } else {
                         let (sessions, filtered) = Session::picker_rows(
                             Session::list(app.snapshot.session_id.clone()),
                             &app.editor.input,
                         );
                         picker.replace_rows(sessions, filtered);
-                        app.editor.status = format!("Deleted session: {}", display_name);
+                        app.editor
+                            .set_status(format!("Deleted session: {}", display_name));
                     }
                 } else {
-                    app.editor.status = "Error deleting session: missing session id".to_string();
+                    app.editor
+                        .set_status("Error deleting session: missing session id".to_string());
                 }
             }
             KeyCode::Char('e')
@@ -95,7 +102,7 @@ impl InputMode {
                 };
                 app.editor.input = session.display_name();
                 app.editor.cursor = app.editor.input.chars().count();
-                app.editor.status = "Rename session".to_string();
+                app.editor.set_status("Rename session".to_string());
                 return Self::SessionRename { picker };
             }
             KeyCode::Char('o')
@@ -106,10 +113,12 @@ impl InputMode {
                 };
                 match session.export() {
                     Ok(path) => {
-                        app.editor.status = format!("Exported session to {}", path);
+                        app.editor
+                            .set_status(format!("Exported session to {}", path));
                     }
                     Err(e) => {
-                        app.editor.status = format!("Error exporting session: {}", e);
+                        app.editor
+                            .set_status(format!("Error exporting session: {}", e));
                     }
                 }
             }
@@ -142,7 +151,8 @@ impl InputMode {
             KeyCode::Enter => {
                 let new_name = app.editor.input.trim().to_string();
                 if new_name.is_empty() {
-                    app.editor.status = "Session name cannot be empty".to_string();
+                    app.editor
+                        .set_status("Session name cannot be empty".to_string());
                     return InputMode::SessionRename { picker };
                 }
 
@@ -176,11 +186,12 @@ impl InputMode {
                         }
                         picker.clamp_selected();
                         app.editor
-                            .status_clear_input(&format!("Renamed session: {}", new_name));
+                            .status_clear_input(format!("Renamed session: {}", new_name));
                         return InputMode::Session { picker };
                     }
                     Err(e) => {
-                        app.editor.status = format!("Error renaming session: {}", e);
+                        app.editor
+                            .set_status(format!("Error renaming session: {}", e));
                         return InputMode::SessionRename { picker };
                     }
                 }

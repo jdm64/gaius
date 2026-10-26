@@ -36,11 +36,11 @@ impl InputMode {
             }
             KeyCode::Enter => {
                 let Some(selected_agent) = picker.selected_row().cloned() else {
-                    app.editor.status = "No matching agents".to_string();
+                    app.editor.set_status("No matching agents".to_string());
                     return Self::Agents { picker };
                 };
                 if let Some(busy) = Command::busy_status(app, "changing agents") {
-                    app.editor.status = busy;
+                    app.editor.set_status(busy);
                     return Self::Agents { picker };
                 }
                 match actor.set_agent(selected_agent.clone()).await {
@@ -48,15 +48,14 @@ impl InputMode {
                         app.save_snapshot(&snapshot);
                         app.snapshot.agent_name = selected_agent.name.clone();
                         if let Err(err) = Agents::save_last(&selected_agent) {
-                            app.editor.status = format!("Failed to save last agent: {}", err);
+                            app.editor
+                                .set_status(format!("Failed to save last agent: {}", err));
                         }
-                        app.editor.status_clear_input(&format!(
-                            "Selected agent: {}",
-                            selected_agent.name
-                        ));
+                        app.editor
+                            .status_clear_input(format!("Selected agent: {}", selected_agent.name));
                         return Self::PromptInput;
                     }
-                    Err(err) => app.editor.status = err,
+                    Err(err) => app.editor.set_status(err),
                 }
             }
             _ if PromptEditor::input_changed_key(key) => {
@@ -92,15 +91,16 @@ impl InputMode {
             KeyCode::Enter if !picker.is_empty() => {
                 if let Some(skill) = picker.selected_row() {
                     if let Some(busy) = Command::busy_status(app, "running a skill") {
-                        app.editor.status = busy;
+                        app.editor.set_status(busy);
                         return Self::Skills { picker };
                     }
                     match actor.run_skill(skill.name.clone()).await {
                         Ok(()) => {
-                            app.editor.status = format!("Ran skill: {}", skill.name);
+                            app.editor.set_status(format!("Ran skill: {}", skill.name));
                         }
                         Err(err) => {
-                            app.editor.status = format!("Error running skill: {}", err);
+                            app.editor
+                                .set_status(format!("Error running skill: {}", err));
                         }
                     }
                     app.editor.clear_input();
@@ -111,13 +111,15 @@ impl InputMode {
                 let skills = match actor.reload_skills().await {
                     Ok(skills) => skills,
                     Err(err) => {
-                        app.editor.status = format!("Error reloading skills: {}", err);
+                        app.editor
+                            .set_status(format!("Error reloading skills: {}", err));
                         Vec::new()
                     }
                 };
                 let filtered = filter_skills(&app.editor.input, &skills);
                 picker.replace_rows(skills, filtered);
-                app.editor.status = format!("Reloaded {} skills", picker.rows.len());
+                app.editor
+                    .set_status(format!("Reloaded {} skills", picker.rows.len()));
             }
             _ if PromptEditor::input_changed_key(key) => {
                 picker.replace_filter(filter_skills(&app.editor.input, &picker.rows));

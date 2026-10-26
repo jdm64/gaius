@@ -91,10 +91,10 @@ impl Command {
                         app.save_snapshot(&snapshot);
                         app.clear_messages();
                         app.history.scroll_bottom();
-                        app.editor.status = "New session created".to_string();
+                        app.editor.set_status("New session created");
                         app.context_tokens = None;
                     }
-                    Err(e) => app.editor.status = e,
+                    Err(e) => app.editor.set_status(e),
                 }
                 app.editor.clear_input();
                 InputMode::PromptInput
@@ -107,10 +107,10 @@ impl Command {
                             "Session forked: {}",
                             snapshot.session_id.unwrap_or("<unknown>".to_string()),
                         )));
-                        app.editor.status = "Forked session".to_string();
+                        app.editor.set_status("Forked session");
                         app.history.scroll_bottom();
                     }
-                    Err(e) => app.editor.status = e,
+                    Err(e) => app.editor.set_status(e),
                 }
                 app.editor.clear_input();
                 InputMode::PromptInput
@@ -130,7 +130,7 @@ impl Command {
             Self::Agents => {
                 let agents = app.config.agents().all().to_vec();
                 app.editor
-                    .status_clear_input(&format!("Loaded {} agents", agents.len()));
+                    .status_clear_input(format!("Loaded {} agents", agents.len()));
                 InputMode::Agents {
                     picker: PickList::all(agents),
                 }
@@ -139,7 +139,8 @@ impl Command {
                 let skills = match actor.get_skills().await {
                     Ok(skills) => skills,
                     Err(err) => {
-                        app.editor.status = format!("Error loading skills: {}", err);
+                        app.editor
+                            .set_status(format!("Error loading skills: {}", err));
                         Vec::new()
                     }
                 };
@@ -150,7 +151,7 @@ impl Command {
             }
             Self::Rebuild => {
                 if let Some(busy) = Self::busy_status(app, "rebuilding") {
-                    app.editor.status = busy;
+                    app.editor.set_status(busy);
                 } else {
                     // Reload agents from disk
                     let agents = match Dirs::config_dir() {
@@ -161,13 +162,13 @@ impl Command {
                             }
                             Err(e) => {
                                 app.editor
-                                    .status_clear_input(&format!("Error reloading agents: {}", e));
+                                    .status_clear_input(format!("Error reloading agents: {}", e));
                                 return InputMode::PromptInput;
                             }
                         },
                         Err(e) => {
                             app.editor
-                                .status_clear_input(&format!("Error getting config dir: {}", e));
+                                .status_clear_input(format!("Error getting config dir: {}", e));
                             return InputMode::PromptInput;
                         }
                     };
@@ -183,9 +184,9 @@ impl Command {
                     match actor.rebuild_agent(agent).await {
                         Ok(snapshot) => {
                             app.save_snapshot(&snapshot);
-                            app.editor.status = "Rebuilt agent and system prompt".to_string();
+                            app.editor.set_status("Rebuilt agent and system prompt");
                         }
-                        Err(err) => app.editor.status = err,
+                        Err(err) => app.editor.set_status(err),
                     }
                 }
                 app.editor.clear_input();
@@ -193,13 +194,13 @@ impl Command {
             }
             Self::Compact => {
                 if let Some(busy) = Self::busy_status(app, "compacting") {
-                    app.editor.status = busy;
+                    app.editor.set_status(busy);
                 } else {
                     app.actor_busy = true;
-                    app.editor.status = "Compacting conversation...".to_string();
+                    app.editor.set_status("Compacting conversation...");
                     app.history.scroll_bottom();
                     if let Err(err) = actor.compact().await {
-                        app.editor.status = err;
+                        app.editor.set_status(err);
                     }
                     app.actor_busy = false;
                 }
@@ -213,7 +214,7 @@ impl Command {
                 }
                 Err(e) => {
                     app.editor
-                        .status_clear_input(&format!("Error getting session info: {}", e));
+                        .status_clear_input(format!("Error getting session info: {}", e));
                     InputMode::PromptInput
                 }
             },
@@ -221,9 +222,10 @@ impl Command {
                 match Self::when_idle(app, "changing streaming", actor.toggle_streaming()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
-                        app.editor.status = format!("Streaming = {}", snapshot.streaming);
+                        app.editor
+                            .set_status(format!("Streaming = {}", snapshot.streaming));
                     }
-                    Err(e) => app.editor.status = e,
+                    Err(e) => app.editor.set_status(e),
                 }
                 app.editor.clear_input();
                 InputMode::PromptInput
@@ -263,9 +265,10 @@ impl Command {
                 match Self::when_idle(app, "changing plan mode", actor.toggle_plan_mode()).await {
                     Ok(snapshot) => {
                         app.save_snapshot(&snapshot);
-                        app.editor.status = format!("Plan mode = {}", snapshot.plan_mode_on);
+                        app.editor
+                            .set_status(format!("Plan mode = {}", snapshot.plan_mode_on));
                     }
-                    Err(e) => app.editor.status = e,
+                    Err(e) => app.editor.set_status(e),
                 }
                 app.editor.clear_input();
                 InputMode::PromptInput

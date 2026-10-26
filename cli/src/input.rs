@@ -19,12 +19,14 @@ use crate::{
     skills::Skill,
     token_usage::SessionInfo,
     tui::TuiApp,
+    util::time_now_sec,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::{error::Error, fs};
 use tokio::sync::oneshot::Sender;
 
 const MAX_HISTORY: usize = 16;
+const STATUS_TTL_SECS: i64 = 5;
 
 pub enum InputMode {
     Exit,
@@ -108,7 +110,7 @@ impl InputMode {
         match key.code {
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if app.actor_busy {
-                    app.editor.status = "Cancelling agent...".to_string();
+                    app.editor.set_status("Cancelling agent...".to_string());
                     actor.cancel().await?;
                 }
             }
@@ -137,8 +139,9 @@ impl InputMode {
                 let next_agent = agent.cloned();
                 if let Some(agent) = next_agent {
                     if !app.harness_idle() {
-                        app.editor.status =
-                            "Agent is busy; finish current turn before changing agents".to_string();
+                        app.editor.set_status(
+                            "Agent is busy; finish current turn before changing agents",
+                        );
                     } else {
                         let name = agent.name.clone();
                         match actor.set_agent(agent.clone()).await {
@@ -146,11 +149,11 @@ impl InputMode {
                                 app.save_snapshot(&snapshot);
                                 app.snapshot.agent_name = name;
                                 if let Err(err) = Agents::save_last(&agent) {
-                                    app.editor.status =
-                                        format!("Failed to save last agent: {}", err);
+                                    app.editor
+                                        .set_status(format!("Failed to save last agent: {}", err));
                                 }
                             }
-                            Err(err) => app.editor.status = err,
+                            Err(err) => app.editor.set_status(err),
                         }
                     }
                 }
@@ -165,7 +168,7 @@ impl InputMode {
                     let mode = match Command::from_name(name) {
                         Some(command) => Command::execute(app, actor, command).await,
                         None => {
-                            app.editor.status = format!("Unknown command: {name}");
+                            app.editor.set_status(format!("Unknown command: {name}"));
                             InputMode::PromptInput
                         }
                     };
@@ -240,7 +243,7 @@ impl InputMode {
             }
             KeyCode::Enter => {
                 if let Some(name) = picker.selected_row() {
-                    app.editor.status = format!("Theme: {name}");
+                    app.editor.set_status(format!("Theme: {name}"));
                 }
                 app.save_display_prefs();
                 return Self::PromptInput;
@@ -255,7 +258,8 @@ pub struct PromptEditor {
     pub mode: InputMode,
     pub input: String,
     pub cursor: usize,
-    pub status: String,
+    status: String,
+    status_time: i64,
     pub history: Vec<String>,
     pub history_idx: Option<usize>,
     save_input: Option<String>,
@@ -269,6 +273,7 @@ impl PromptEditor {
             input: String::new(),
             cursor: 0,
             status: String::new(),
+            status_time: 0,
             history: Vec::new(),
             history_idx: None,
             save_input: None,
@@ -370,9 +375,24 @@ impl PromptEditor {
             .unwrap_or(self.input.len())
     }
 
-    pub fn status_clear_input(&mut self, msg: &str) {
-        self.status = msg.to_string();
+    pub fn set_status(&mut self, msg: impl Into<String>) {
+        self.status = msg.into();
+        self.status_time = time_now_sec();
+    }
+
+    pub fn status_clear_input(&mut self, msg: impl Into<String>) {
+        self.set_status(msg);
         self.clear_input();
+    }
+
+    pub fn status_visible(&self) -> Option<&String> {
+        if !self.status.is_empty()
+            && time_now_sec().saturating_sub(self.status_time) < STATUS_TTL_SECS
+        {
+            Some(&self.status)
+        } else {
+            None
+        }
     }
 
     pub fn clear_input(&mut self) {

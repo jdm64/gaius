@@ -48,7 +48,7 @@ impl InputMode {
             }
             KeyCode::Enter => {
                 if let Some(busy) = Command::busy_status(app, "changing models") {
-                    app.editor.status = busy;
+                    app.editor.set_status(busy);
                     return Self::Models { picker };
                 }
                 let Some(selected_model) = picker.selected_row().and_then(|row| match row {
@@ -57,7 +57,7 @@ impl InputMode {
                     }
                     ModelPickerRow::Header(_) | ModelPickerRow::Separator => None,
                 }) else {
-                    app.editor.status = "No matching models".to_string();
+                    app.editor.set_status("No matching models".to_string());
                     return Self::Models { picker };
                 };
 
@@ -66,19 +66,19 @@ impl InputMode {
                         app.save_snapshot(&snapshot);
                         app.snapshot.model = selected_model.clone();
                         let _ = RecentModelDef::add(selected_model);
-                        app.editor.status_clear_input(&format!(
+                        app.editor.status_clear_input(format!(
                             "Selected model: {}",
                             selected_model.label()
                         ));
                         return Self::PromptInput;
                     }
-                    Err(err) => app.editor.status = err,
+                    Err(err) => app.editor.set_status(err),
                 }
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let Some(ModelPickerRow::RecentModel(model)) = picker.selected_row().cloned()
                 else {
-                    app.editor.status = "Can only delete recent models".to_string();
+                    app.editor.set_status("Can only delete recent models");
                     return Self::Models { picker };
                 };
                 match RecentModelDef::remove(&model) {
@@ -89,15 +89,17 @@ impl InputMode {
                             let filtered = filter_model_rows(&app.editor.input, &rows);
                             picker.replace_rows(rows, filtered);
                         }
-                        app.editor.status = format!("Removed from recent models: {}", model.id);
+                        app.editor
+                            .set_status(format!("Removed from recent models: {}", model.id));
                     }
                     Err(err) => {
-                        app.editor.status = format!("Error removing recent model: {}", err);
+                        app.editor
+                            .set_status(format!("Error removing recent model: {}", err));
                     }
                 }
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.editor.status = "Reloading models...".to_string();
+                app.editor.set_status("Reloading models...".to_string());
                 match Models::reload(&app.config).await {
                     Ok(reloaded_models) => {
                         let recent = RecentModelDef::load(&reloaded_models);
@@ -106,10 +108,11 @@ impl InputMode {
                         let filtered = filter_model_rows(&app.editor.input, &rows);
                         let count = reloaded_models.len();
                         picker.replace_rows(rows, filtered);
-                        app.editor.status = format!("Reloaded {} models", count);
+                        app.editor.set_status(format!("Reloaded {} models", count));
                     }
                     Err(err) => {
-                        app.editor.status = format!("Error reloading models: {}", err);
+                        app.editor
+                            .set_status(format!("Error reloading models: {}", err));
                     }
                 }
             }
@@ -170,11 +173,12 @@ impl InputMode {
                     key: provider_key.trim().to_string(),
                 };
 
-                app.editor.status = "Validating provider...".to_string();
+                app.editor.set_status("Validating provider...".to_string());
                 let provider_def = match ProviderDef::new(&provider) {
                     Ok(provider_def) => provider_def,
                     Err(err) => {
-                        app.editor.status = format!("Error creating provider: {}", err);
+                        app.editor
+                            .set_status(format!("Error creating provider: {}", err));
                         return Self::AddProvider { picker };
                     }
                 };
@@ -185,7 +189,7 @@ impl InputMode {
                                 let recent = RecentModelDef::load(&reloaded_models);
                                 let rows = Models::filter_rows("", &reloaded_models, &recent);
                                 let filtered = filter_model_rows("", &rows);
-                                app.editor.status_clear_input(&format!(
+                                app.editor.status_clear_input(format!(
                                     "Added provider; loaded {} models",
                                     reloaded_models.len()
                                 ));
@@ -194,7 +198,7 @@ impl InputMode {
                                 };
                             }
                             Err(err) => {
-                                app.editor.status_clear_input(&format!(
+                                app.editor.status_clear_input(format!(
                                     "Added provider, but failed to reload models: {}",
                                     err
                                 ));
@@ -202,11 +206,13 @@ impl InputMode {
                             }
                         },
                         Err(err) => {
-                            app.editor.status = format!("Error adding provider: {}", err);
+                            app.editor
+                                .set_status(format!("Error adding provider: {}", err));
                         }
                     },
                     Err(err) => {
-                        app.editor.status = format!("Provider validation failed: {}", err);
+                        app.editor
+                            .set_status(format!("Provider validation failed: {}", err));
                     }
                 }
             }
@@ -241,7 +247,7 @@ impl InputMode {
             }
             KeyCode::Enter => {
                 if let Some(busy) = Command::busy_status(app, "changing reasoning") {
-                    app.editor.status = busy;
+                    app.editor.set_status(busy);
                     return Self::Reasoning { picker };
                 }
                 let Some(selected) = picker.selected_row() else {
@@ -261,13 +267,11 @@ impl InputMode {
                         app.save_snapshot(&snapshot);
                         app.snapshot.model = model;
                         let _ = RecentModelDef::add(&app.snapshot.model);
-                        app.editor.status_clear_input(&format!(
-                            "Reasoning effort = {}",
-                            selected.label()
-                        ));
+                        app.editor
+                            .status_clear_input(format!("Reasoning effort = {}", selected.label()));
                         return Self::PromptInput;
                     }
-                    Err(err) => app.editor.status = err,
+                    Err(err) => app.editor.set_status(err),
                 }
             }
             _ => {}
@@ -284,7 +288,7 @@ impl PromptEditor {
                 let recent = RecentModelDef::load(&models);
                 let rows = Models::filter_rows("", &models, &recent);
                 let filtered = filter_model_rows("", &rows);
-                self.status = format!("Loaded {} models", models.len());
+                self.set_status(format!("Loaded {} models", models.len()));
                 InputMode::Models {
                     picker: PickList::new(rows, filtered),
                 }

@@ -249,7 +249,7 @@ impl TuiApp {
                     }
                     MouseEventKind::Up(MouseButton::Left) => {
                         if let Some(status) = self.selection.mouse_up(mouse) {
-                            self.editor.status = status;
+                            self.editor.set_status(status);
                         }
                     }
                     _ => {}
@@ -295,7 +295,7 @@ impl TuiApp {
 
         if let Err(err) = actor.run_prompt(prompt).await {
             self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
-            self.editor.status = "Agent request failed".to_string();
+            self.editor.set_status("Agent request failed");
         }
 
         Ok(())
@@ -325,7 +325,7 @@ impl TuiApp {
                 self.actor_busy = false;
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
-                self.editor.status = "".to_string();
+                self.editor.set_status("");
                 Some(snapshot)
             }
             HarnessActorEvent::RequestFailed(err, snapshot) => {
@@ -333,7 +333,7 @@ impl TuiApp {
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
                 self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
-                self.editor.status = "Agent request failed".to_string();
+                self.editor.set_status("Agent request failed");
                 Some(snapshot)
             }
             HarnessActorEvent::HistoryReplayed(events) => {
@@ -420,7 +420,7 @@ impl TuiApp {
             HarnessEvent::TurnStarted(turn_started) => {
                 self.actor_busy = true;
                 self.snapshot.turn_started = Some(turn_started);
-                self.editor.status = "Waiting for agent...".to_string();
+                self.editor.set_status("Waiting for agent...");
             }
             HarnessEvent::TurnDuration(duration_ms) => {
                 self.push_message(TuiMessage::TurnDuration(duration_ms));
@@ -479,19 +479,21 @@ impl TuiApp {
     }
 
     pub fn toggle_thinking(&mut self) {
-        self.editor.status = self.display_prefs.toggle_thinking();
+        self.editor.set_status(self.display_prefs.toggle_thinking());
         self.save_display_prefs();
         self.history.invalidate_from(0);
     }
 
     pub fn toggle_token_info(&mut self) {
-        self.editor.status = self.display_prefs.toggle_token_info();
+        self.editor
+            .set_status(self.display_prefs.toggle_token_info());
         self.save_display_prefs();
         self.history.invalidate_from(0);
     }
 
     pub fn toggle_diff_view(&mut self) {
-        self.editor.status = self.display_prefs.toggle_diff_view();
+        self.editor
+            .set_status(self.display_prefs.toggle_diff_view());
         self.save_display_prefs();
         self.history.invalidate_from(0);
     }

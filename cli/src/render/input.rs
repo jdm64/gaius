@@ -31,14 +31,12 @@ impl Render {
             .borders(Borders::ALL)
             .style(self.theme.inputbox_style())
             .padding(Padding::horizontal(1));
-        if !app.editor.status.is_empty() {
-            if matches!(&app.editor.mode, InputMode::Question { .. }) {
-                block = block
-                    .title_bottom(" Waiting for user... ".to_string())
-                    .title_alignment(HorizontalAlignment::Right);
-            } else {
-                block = block.title(format!(" {} ", app.editor.status));
-            }
+        if matches!(&app.editor.mode, InputMode::Question { .. }) {
+            block = block
+                .title_bottom(" Waiting for user... ".to_string())
+                .title_alignment(HorizontalAlignment::Right);
+        } else if let Some(status) = app.editor.status_visible() {
+            block = block.title(format!(" {} ", status.clone()));
         }
 
         if app.snapshot.queued_prompts > 0 {
