@@ -117,9 +117,10 @@ impl Command {
             }
             Self::Sessions => {
                 let sessions = Session::list(app.snapshot.session_id.clone());
+                let (rows, filtered) = Session::picker_rows(sessions, "");
                 app.editor.clear_input();
                 InputMode::Session {
-                    picker: PickList::all(sessions),
+                    picker: PickList::new(rows, filtered),
                 }
             }
             Self::Models => {

@@ -15,7 +15,7 @@ use crate::{
     harness_actor::HarnessActorHandle,
     input::{file::FileEntry, model::ProviderInfoRow, picklist::PickList},
     models::{ModelPickerRow, ReasoningEffort},
-    session::Session,
+    session::SessionPickerRow,
     skills::Skill,
     token_usage::SessionInfo,
     tui::TuiApp,
@@ -33,10 +33,10 @@ pub enum InputMode {
         picker: PickList<Command>,
     },
     Session {
-        picker: PickList<Session>,
+        picker: PickList<SessionPickerRow>,
     },
     SessionRename {
-        picker: PickList<Session>,
+        picker: PickList<SessionPickerRow>,
     },
     Models {
         picker: PickList<ModelPickerRow>,

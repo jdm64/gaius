@@ -8,7 +8,7 @@ use crate::{
     agents::AgentDefinition,
     commands::Command,
     models::{ModelPickerRow, ReasoningEffort},
-    session::Session,
+    session::SessionPickerRow,
     skills::Skill,
     token_usage::SessionInfo,
 };
@@ -57,22 +57,30 @@ impl Render {
         &self,
         frame: &mut Frame<'_>,
         area: Rect,
-        picker: &PickList<Session>,
+        picker: &PickList<SessionPickerRow>,
         renaming: bool,
     ) -> Option<Vec<(&'static str, &'static str)>> {
-        self.draw_pick_list(
+        let display_rows = picker.display_rows();
+        let header_style = self.theme.header_style();
+        self.draw_indexed_pick_list(
             frame,
             area,
             picker,
+            &display_rows,
             PickListRenderSpec {
                 title: "Sessions",
                 max_width: 60,
                 empty_text: "No sessions",
                 background: Style::default(),
             },
-            |session, _index| {
-                let marker = if session.curr { ">" } else { " " };
-                ListItem::new(format!("{marker}{}", session.display_name()))
+            |row, _index| match row {
+                SessionPickerRow::Header(label) => {
+                    ListItem::new(Line::from(Span::styled(label.as_str(), header_style)))
+                }
+                SessionPickerRow::Session(session) => {
+                    let marker = if session.curr { ">" } else { " " };
+                    ListItem::new(format!("{marker}{}", session.display_name()))
+                }
             },
         );
         if renaming {
@@ -94,7 +102,7 @@ impl Render {
         area: Rect,
         picker: &PickList<ModelPickerRow>,
     ) -> Option<Vec<(&'static str, &'static str)>> {
-        let display_rows = Self::model_display_rows(picker);
+        let display_rows = picker.display_rows();
         let header_style = self.theme.header_style();
         self.draw_indexed_pick_list(
             frame,
@@ -409,90 +417,6 @@ impl Render {
 
         frame.render_widget(Clear, rect);
         frame.render_widget(list, rect);
-    }
-
-    fn model_display_rows(picker: &PickList<ModelPickerRow>) -> Vec<usize> {
-        if picker.filtered.is_empty() {
-            return Vec::new();
-        }
-
-        let mut display_rows = Vec::new();
-        let selected: std::collections::BTreeSet<usize> = picker.filtered.iter().copied().collect();
-
-        for (index, row) in picker.rows.iter().enumerate() {
-            match row {
-                ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
-                    if selected.contains(&index) =>
-                {
-                    display_rows.push(index)
-                }
-                ModelPickerRow::Header(_)
-                    if Self::section_has_selected_model(index, picker, &selected) =>
-                {
-                    display_rows.push(index);
-                }
-                ModelPickerRow::Separator
-                    if Self::separator_has_selected_models(index, picker, &selected) =>
-                {
-                    display_rows.push(index);
-                }
-                ModelPickerRow::Header(_)
-                | ModelPickerRow::Separator
-                | ModelPickerRow::Model(_)
-                | ModelPickerRow::RecentModel(_) => {}
-            }
-        }
-
-        display_rows
-    }
-
-    fn section_has_selected_model(
-        header_index: usize,
-        picker: &PickList<ModelPickerRow>,
-        selected: &std::collections::BTreeSet<usize>,
-    ) -> bool {
-        picker.rows[header_index + 1..]
-            .iter()
-            .enumerate()
-            .take_while(|(_, row)| {
-                !matches!(row, ModelPickerRow::Header(_) | ModelPickerRow::Separator)
-            })
-            .any(|(offset, row)| {
-                matches!(
-                    row,
-                    ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
-                ) && selected.contains(&(header_index + 1 + offset))
-            })
-    }
-
-    fn separator_has_selected_models(
-        separator_index: usize,
-        picker: &PickList<ModelPickerRow>,
-        selected: &std::collections::BTreeSet<usize>,
-    ) -> bool {
-        let has_before = picker.rows[..separator_index]
-            .iter()
-            .enumerate()
-            .rev()
-            .take_while(|(_, row)| !matches!(row, ModelPickerRow::Separator))
-            .any(|(index, row)| {
-                matches!(
-                    row,
-                    ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
-                ) && selected.contains(&index)
-            });
-        let has_after =
-            picker.rows[separator_index + 1..]
-                .iter()
-                .enumerate()
-                .any(|(offset, row)| {
-                    matches!(
-                        row,
-                        ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
-                    ) && selected.contains(&(separator_index + 1 + offset))
-                });
-
-        has_before && has_after
     }
 }
 

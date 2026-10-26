@@ -2,10 +2,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{config::Config, dirs::Dirs, providers::ProviderDef};
+use crate::{config::Config, dirs::Dirs, input::picklist::PickList, providers::ProviderDef};
 use genai::Client;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, error::Error};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+};
 
 pub const RECENT_MODELS_LIMIT: usize = 8;
 
@@ -111,6 +114,85 @@ pub enum ModelPickerRow {
     Separator,
     Model(ModelDef),
     RecentModel(ModelDef),
+}
+
+impl PickList<ModelPickerRow> {
+    pub fn display_rows(&self) -> Vec<usize> {
+        if self.filtered.is_empty() {
+            return Vec::new();
+        }
+
+        let mut display_rows = Vec::new();
+        let selected: BTreeSet<usize> = self.filtered.iter().copied().collect();
+
+        for (index, row) in self.rows.iter().enumerate() {
+            match row {
+                ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
+                    if selected.contains(&index) =>
+                {
+                    display_rows.push(index)
+                }
+                ModelPickerRow::Header(_) if self.section_has_selected_model(index, &selected) => {
+                    display_rows.push(index);
+                }
+                ModelPickerRow::Separator
+                    if self.separator_has_selected_models(index, &selected) =>
+                {
+                    display_rows.push(index);
+                }
+                ModelPickerRow::Header(_)
+                | ModelPickerRow::Separator
+                | ModelPickerRow::Model(_)
+                | ModelPickerRow::RecentModel(_) => {}
+            }
+        }
+
+        display_rows
+    }
+
+    fn section_has_selected_model(&self, header_index: usize, selected: &BTreeSet<usize>) -> bool {
+        self.rows[header_index + 1..]
+            .iter()
+            .enumerate()
+            .take_while(|(_, row)| {
+                !matches!(row, ModelPickerRow::Header(_) | ModelPickerRow::Separator)
+            })
+            .any(|(offset, row)| {
+                matches!(
+                    row,
+                    ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
+                ) && selected.contains(&(header_index + 1 + offset))
+            })
+    }
+
+    fn separator_has_selected_models(
+        &self,
+        separator_index: usize,
+        selected: &BTreeSet<usize>,
+    ) -> bool {
+        let has_before = self.rows[..separator_index]
+            .iter()
+            .enumerate()
+            .rev()
+            .take_while(|(_, row)| !matches!(row, ModelPickerRow::Separator))
+            .any(|(index, row)| {
+                matches!(
+                    row,
+                    ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
+                ) && selected.contains(&index)
+            });
+        let has_after = self.rows[separator_index + 1..]
+            .iter()
+            .enumerate()
+            .any(|(offset, row)| {
+                matches!(
+                    row,
+                    ModelPickerRow::Model(_) | ModelPickerRow::RecentModel(_)
+                ) && selected.contains(&(separator_index + 1 + offset))
+            });
+
+        has_before && has_after
+    }
 }
 
 impl ModelDef {

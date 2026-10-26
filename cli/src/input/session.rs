@@ -6,7 +6,7 @@ use crate::{
     commands::Command,
     harness_actor::HarnessActorHandle,
     input::{InputMode, PromptEditor, picklist::PickList},
-    session::Session,
+    session::{Session, SessionPickerRow},
     token_usage::SessionInfo,
     tui::TuiApp,
 };
@@ -16,11 +16,15 @@ impl InputMode {
     pub async fn handle_session(
         app: &mut TuiApp,
         key: KeyEvent,
-        mut picker: PickList<Session>,
+        mut picker: PickList<SessionPickerRow>,
         actor: &HarnessActorHandle,
     ) -> Self {
+        app.editor.handle_input_cursor(key);
         match key.code {
-            KeyCode::Esc => return Self::PromptInput,
+            KeyCode::Esc => {
+                app.editor.clear_input();
+                return Self::PromptInput;
+            }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Self::Exit;
             }
@@ -31,7 +35,7 @@ impl InputMode {
                 picker.move_down();
             }
             KeyCode::Enter if !picker.is_empty() => {
-                let Some(session) = picker.selected_row() else {
+                let Some(session) = picker.selected_session() else {
                     return Self::Session { picker };
                 };
                 if let Some(session_id) = &session.id {
@@ -64,7 +68,7 @@ impl InputMode {
             KeyCode::Char('d')
                 if key.modifiers.contains(KeyModifiers::CONTROL) && !picker.is_empty() =>
             {
-                let Some(session) = picker.selected_row() else {
+                let Some(session) = picker.selected_session() else {
                     return Self::Session { picker };
                 };
                 if let Some(session_id) = &session.id {
@@ -72,8 +76,10 @@ impl InputMode {
                     if let Err(e) = Session::delete(session_id) {
                         app.editor.status = format!("Error deleting session: {}", e);
                     } else {
-                        let sessions = Session::list(app.snapshot.session_id.clone());
-                        let filtered = (0..sessions.len()).collect();
+                        let (sessions, filtered) = Session::picker_rows(
+                            Session::list(app.snapshot.session_id.clone()),
+                            &app.editor.input,
+                        );
                         picker.replace_rows(sessions, filtered);
                         app.editor.status = format!("Deleted session: {}", display_name);
                     }
@@ -84,7 +90,7 @@ impl InputMode {
             KeyCode::Char('e')
                 if key.modifiers.contains(KeyModifiers::CONTROL) && !picker.is_empty() =>
             {
-                let Some(session) = picker.selected_row() else {
+                let Some(session) = picker.selected_session() else {
                     return Self::Session { picker };
                 };
                 app.editor.input = session.display_name();
@@ -95,7 +101,7 @@ impl InputMode {
             KeyCode::Char('o')
                 if key.modifiers.contains(KeyModifiers::CONTROL) && !picker.is_empty() =>
             {
-                let Some(session) = picker.selected_row() else {
+                let Some(session) = picker.selected_session() else {
                     return Self::Session { picker };
                 };
                 match session.export() {
@@ -107,6 +113,13 @@ impl InputMode {
                     }
                 }
             }
+            _ if PromptEditor::input_changed_key(key) => {
+                let (rows, filtered) = Session::picker_rows(
+                    Session::list(app.snapshot.session_id.clone()),
+                    &app.editor.input,
+                );
+                picker.replace_rows(rows, filtered);
+            }
             _ => {}
         };
 
@@ -116,7 +129,7 @@ impl InputMode {
     pub fn handle_session_rename(
         app: &mut TuiApp,
         key: KeyEvent,
-        mut picker: PickList<Session>,
+        mut picker: PickList<SessionPickerRow>,
     ) -> InputMode {
         match key.code {
             KeyCode::Esc => {
@@ -138,23 +151,24 @@ impl InputMode {
                     return InputMode::Session { picker };
                 }
 
-                let selected_id = picker.selected_row().and_then(|session| session.id.clone());
-                let Some(session) = picker.selected_row_mut() else {
+                let Some(session) = picker.selected_session_mut() else {
                     app.editor.status_clear_input("No session selected");
                     return InputMode::Session { picker };
                 };
+                let selected_id = session.id.clone();
                 match session.rename(new_name.clone()) {
                     Ok(()) => {
-                        let sessions = Session::list(app.snapshot.session_id.clone());
-                        let filtered = (0..sessions.len()).collect();
+                        let (sessions, filtered) = Session::picker_rows(
+                            Session::list(app.snapshot.session_id.clone()),
+                            &app.editor.input,
+                        );
                         picker.replace_rows(sessions, filtered);
                         if let Some(selected_id) = selected_id {
                             picker.selected = picker
                                 .filtered
                                 .iter()
                                 .position(|row_index| {
-                                    picker.rows[*row_index].id.as_deref()
-                                        == Some(selected_id.as_str())
+                                    picker.rows[*row_index].id() == Some(selected_id.clone())
                                 })
                                 .unwrap_or_else(|| {
                                     picker.selected.min(picker.filtered.len().saturating_sub(1))

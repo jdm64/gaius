@@ -4,17 +4,21 @@
 
 use crate::{
     dirs::Dirs,
+    input::picklist::PickList,
     token_usage::{TokenUsageLedger, TokenUsageSpan, UsageInfo},
 };
+use chrono::{DateTime, Local};
 use genai::chat::{ChatMessage, ChatRequest, ChatRole, MessageContent};
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     env::current_dir,
     error::Error,
     fs::{self, File},
     io::BufReader,
     path::Path,
+    time::{self, SystemTime},
 };
 use uuid::Uuid;
 
@@ -29,6 +33,102 @@ pub struct Session {
     pub id: Option<String>,
     pub name: Option<String>,
     pub curr: bool,
+    pub modified: SystemTime,
+}
+
+pub enum SessionPickerRow {
+    Header(String),
+    Session(Session),
+}
+
+impl SessionPickerRow {
+    pub fn id(&self) -> Option<String> {
+        match self {
+            Self::Session(session) => session.id.clone(),
+            _ => None,
+        }
+    }
+}
+
+impl PickList<SessionPickerRow> {
+    pub fn selected_session(&self) -> Option<&Session> {
+        self.selected_row().and_then(|x| match x {
+            SessionPickerRow::Session(session) => Some(session),
+            SessionPickerRow::Header(_) => None,
+        })
+    }
+
+    pub fn selected_session_mut(&mut self) -> Option<&mut Session> {
+        self.selected_row_mut().and_then(|x| match x {
+            SessionPickerRow::Session(session) => Some(session),
+            SessionPickerRow::Header(_) => None,
+        })
+    }
+
+    pub fn display_rows(&self) -> Vec<usize> {
+        if self.filtered.is_empty() {
+            return Vec::new();
+        }
+
+        let selected: BTreeSet<usize> = self.filtered.iter().copied().collect();
+        let mut display_rows = Vec::new();
+        for (index, row) in self.rows.iter().enumerate() {
+            match row {
+                SessionPickerRow::Session(_) if selected.contains(&index) => {
+                    display_rows.push(index);
+                }
+                SessionPickerRow::Header(_) => {
+                    let has_selected_session = self.rows[index + 1..]
+                        .iter()
+                        .enumerate()
+                        .take_while(|(_, row)| !matches!(row, SessionPickerRow::Header(_)))
+                        .any(|(offset, row)| {
+                            matches!(row, SessionPickerRow::Session(_))
+                                && selected.contains(&(index + 1 + offset))
+                        });
+                    if has_selected_session {
+                        display_rows.push(index);
+                    }
+                }
+                SessionPickerRow::Session(_) => {}
+            }
+        }
+        display_rows
+    }
+}
+
+impl Session {
+    pub fn picker_rows(sessions: Vec<Session>, query: &str) -> (Vec<SessionPickerRow>, Vec<usize>) {
+        let query = query.trim().to_lowercase();
+        let mut rows = Vec::new();
+        let mut filtered = Vec::new();
+        let mut current_day = None;
+
+        for session in sessions {
+            let date: DateTime<Local> = session.modified.into();
+            let day = date.date_naive();
+            let matches = query.is_empty()
+                || session.display_name().to_lowercase().contains(&query)
+                || session
+                    .id
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_lowercase()
+                    .contains(&query);
+            if current_day != Some(day) {
+                rows.push(SessionPickerRow::Header(
+                    date.format("%a, %d %b %Y").to_string(),
+                ));
+                current_day = Some(day);
+            }
+            let session_index = rows.len();
+            rows.push(SessionPickerRow::Session(session));
+            if matches {
+                filtered.push(session_index);
+            }
+        }
+        (rows, filtered)
+    }
 }
 
 impl Default for Session {
@@ -43,6 +143,7 @@ impl Session {
             id: Some(Uuid::now_v7().to_string()),
             name: None,
             curr: false,
+            modified: SystemTime::now(),
         }
     }
 
@@ -52,6 +153,7 @@ impl Session {
             id: Some(name),
             name: None,
             curr: false,
+            modified: SystemTime::now(),
         })
     }
 
@@ -60,6 +162,7 @@ impl Session {
             id: None,
             name: None,
             curr: false,
+            modified: SystemTime::now(),
         }
     }
 
@@ -148,7 +251,7 @@ impl Session {
             Err(_) => return Vec::new(),
         };
 
-        let mut sessions: Vec<Session> = std::fs::read_dir(dir)
+        let mut sessions: Vec<(SystemTime, Session)> = std::fs::read_dir(dir)
             .map(|entries| {
                 entries
                     .filter_map(|entry| entry.ok())
@@ -159,12 +262,20 @@ impl Session {
                             let id = path.file_stem()?.to_str().map(|s| s.to_string());
                             let is_curr =
                                 id.as_ref().is_some_and(|i| Some(i) == curr_sess.as_ref());
+                            let modified = entry
+                                .metadata()
+                                .and_then(|metadata| metadata.modified())
+                                .unwrap_or(time::UNIX_EPOCH);
 
-                            Some(Session {
-                                id,
-                                name: Some(data.name),
-                                curr: is_curr,
-                            })
+                            Some((
+                                modified,
+                                Session {
+                                    id,
+                                    name: Some(data.name),
+                                    curr: is_curr,
+                                    modified,
+                                },
+                            ))
                         } else {
                             None
                         }
@@ -173,8 +284,8 @@ impl Session {
             })
             .unwrap_or_default();
 
-        sessions.sort_by(|a, b| b.id.cmp(&a.id));
-        sessions
+        sessions.sort_by(|(a, _), (b, _)| b.cmp(a));
+        sessions.into_iter().map(|(_, session)| session).collect()
     }
 
     pub fn delete(session_id: &str) -> Result<(), Box<dyn Error>> {
