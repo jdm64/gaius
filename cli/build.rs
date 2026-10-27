@@ -39,5 +39,15 @@ fn main() {
     // Combine version and git hash as <version>-<git commit>
     let git_version = format!("v{version}-{git_hash}");
 
+    let platform = format!(
+        "{}-{}",
+        std::env::var("CARGO_CFG_TARGET_OS").expect("missing target OS"),
+        std::env::var("CARGO_CFG_TARGET_ARCH").expect("missing target architecture")
+    );
+    let upgrade_repo = "https://api.github.com/repos/jdm64/gaius/releases/latest";
+
     println!("cargo:rustc-env=GIT_VERSION={git_version}");
+    println!("cargo:rustc-env=TAG_VERSION=v{version}");
+    println!("cargo:rustc-env=PLATFORM={platform}");
+    println!("cargo:rustc-env=UPGRADE_REPO={upgrade_repo}");
 }

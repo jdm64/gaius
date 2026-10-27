@@ -10,12 +10,14 @@ use gaius::{
     harness::{Harness, HarnessSnapshot},
     models::{ModelDef, Models},
     tui::TuiApp,
+    upgrade::Upgrader,
 };
 use pico_args::Arguments;
 use std::{error::Error, path::PathBuf};
 
 struct Args {
     cli_mode: bool,
+    upgrade: bool,
     prompt: Option<String>,
     session_id: Option<String>,
     agent: Option<String>,
@@ -26,6 +28,27 @@ struct Args {
 
 fn parse_args() -> Result<Args, Box<dyn Error>> {
     let mut pargs = Arguments::from_env();
+
+    // Commands are standalone; do not interpret prompt text as a command.
+    if let Some(command) = pargs.subcommand()? {
+        if command != "upgrade" {
+            return Err(format!("Unknown command: {command}").into());
+        }
+        let remaining = pargs.finish();
+        if !remaining.is_empty() {
+            return Err(format!("Unexpected arguments: {:?}", remaining).into());
+        }
+        return Ok(Args {
+            upgrade: true,
+            cli_mode: false,
+            prompt: None,
+            session_id: None,
+            agent: None,
+            model: None,
+            login: None,
+            token_refresh: None,
+        });
+    }
 
     if pargs.contains(["-h", "--help"]) {
         print_help();
@@ -81,6 +104,7 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
     }
 
     Ok(Args {
+        upgrade: false,
         cli_mode,
         prompt,
         session_id,
@@ -111,6 +135,7 @@ fn print_help() {
     );
     println!();
     println!("COMMANDS:");
+    println!("  upgrade                     Upgrade to the latest release and exit");
     println!("  --login <PROVIDER>          Log in to a provider and exit");
     println!("  --token-refresh <PROVIDER>  Force refresh the saved token and exit");
     println!(
@@ -193,6 +218,9 @@ async fn tui_mode(
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
 
+    if args.upgrade {
+        return Upgrader::new()?.run().await;
+    }
     if let Some(provider) = args.login.as_deref() {
         return login(provider).await;
     } else if let Some(provider) = args.token_refresh.as_deref() {
