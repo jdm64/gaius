@@ -57,7 +57,7 @@ async fn codex_provider_without_login_points_at_login_command() {
         .await
         .unwrap_err()
         .to_string();
-    assert!(err.contains("--login codex"), "{}", err);
+    assert!(err.contains("login codex"), "{}", err);
 }
 
 #[test]
@@ -188,6 +188,6 @@ async fn grok_provider_without_login_points_at_its_own_login_command() {
         .await
         .unwrap_err()
         .to_string();
-    assert!(err.contains("--login grok"), "{}", err);
-    assert!(!err.contains("--login codex"), "{}", err);
+    assert!(err.contains("login grok"), "{}", err);
+    assert!(!err.contains("login codex"), "{}", err);
 }

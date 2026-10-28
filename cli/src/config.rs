@@ -127,12 +127,12 @@ impl Config {
                 match OAuthHandle::get(sub).map(|auth| auth.is_logged_in()) {
                     Ok(true) => {}
                     Ok(false) => eprintln!(
-                        "Not logged in to {} yet. Run 'gaius --login {}' first.",
+                        "Not logged in to {} yet. Run 'gaius login {}' first.",
                         spec.display, spec.id
                     ),
                     Err(err) => eprintln!(
                         "Could not read the saved {} login ({err}). \
-                         Run 'gaius --login {}' to sign in again.",
+                         Run 'gaius login {}' to sign in again.",
                         spec.display, spec.id
                     ),
                 }

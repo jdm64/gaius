@@ -150,7 +150,7 @@ impl OAuthSpec {
 
     pub fn not_logged_in(&self) -> String {
         format!(
-            "Not logged in to {}. Run 'gaius --login {}' first.",
+            "Not logged in to {}. Run 'gaius login {}' first.",
             self.display, self.id
         )
     }

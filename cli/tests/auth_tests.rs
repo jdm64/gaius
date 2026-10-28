@@ -697,7 +697,7 @@ async fn access_token_without_login_points_at_login_command() {
     let err = auth.access_token().await.unwrap_err().to_string();
 
     assert!(!auth.is_logged_in());
-    assert!(err.contains("--login codex"), "{}", err);
+    assert!(err.contains("login codex"), "{}", err);
 }
 
 #[tokio::test]
@@ -705,7 +705,7 @@ async fn refresh_without_login_points_at_login_command() {
     let auth = OAuthHandle::at(&CODEX, None);
     let err = auth.refresh().await.unwrap_err().to_string();
 
-    assert!(err.contains("--login codex"), "{}", err);
+    assert!(err.contains("login codex"), "{}", err);
 }
 
 /// An auth holding a token that is still valid, wired to `endpoint` and to a
@@ -772,7 +772,7 @@ async fn refresh_now_without_login_points_at_login_command() {
     let auth = OAuthHandle::at(&CODEX, None);
     let err = auth.refresh_now().await.unwrap_err().to_string();
 
-    assert!(err.contains("--login codex"), "{}", err);
+    assert!(err.contains("login codex"), "{}", err);
 }
 
 /// Forcing is a request the user asked for, so a refusal still drops the spent
@@ -1390,7 +1390,7 @@ fn a_response_that_grants_no_lifetime_falls_back_to_the_claim() {
 
 #[tokio::test]
 async fn a_provider_is_only_matched_by_its_own_name() {
-    // `--login` and the configured kind both go through one lookup, so a name
+    // `login` and the configured kind both go through one lookup, so a name
     // that is a prefix of another's cannot select the wrong login.
     assert_eq!(OAuthKind::from_lower_str("codex"), Some(OAuthKind::Codex));
     assert_eq!(OAuthKind::from_lower_str("GROK"), Some(OAuthKind::Grok));

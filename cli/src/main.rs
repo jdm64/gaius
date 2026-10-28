@@ -13,51 +13,72 @@ use gaius::{
     upgrade::Upgrader,
 };
 use pico_args::Arguments;
-use std::{error::Error, path::PathBuf};
+use std::{error::Error, path::PathBuf, process};
 
 struct Args {
+    command: Option<Command>,
     cli_mode: bool,
-    upgrade: bool,
     prompt: Option<String>,
     session_id: Option<String>,
     agent: Option<String>,
     model: Option<String>,
-    login: Option<String>,
-    token_refresh: Option<String>,
+}
+
+enum Command {
+    Upgrade,
+    Login(String),
+    TokenRefresh(String),
 }
 
 fn parse_args() -> Result<Args, Box<dyn Error>> {
     let mut pargs = Arguments::from_env();
 
     // Commands are standalone; do not interpret prompt text as a command.
-    if let Some(command) = pargs.subcommand()? {
-        if command != "upgrade" {
-            return Err(format!("Unknown command: {command}").into());
-        }
+    if let Some(name) = pargs.subcommand()? {
+        let command = match name.as_str() {
+            "upgrade" => Command::Upgrade,
+            "login" => {
+                let provider = match pargs.free_from_str() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return Err("Missing provider".into());
+                    }
+                };
+                Command::Login(provider)
+            }
+            "token-refresh" => {
+                let provider = match pargs.free_from_str() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return Err("Missing provider".into());
+                    }
+                };
+                Command::TokenRefresh(provider)
+            }
+            _ => return Err(format!("Unknown command: {name}").into()),
+        };
         let remaining = pargs.finish();
         if !remaining.is_empty() {
             return Err(format!("Unexpected arguments: {:?}", remaining).into());
         }
         return Ok(Args {
-            upgrade: true,
+            command: Some(command),
             cli_mode: false,
             prompt: None,
             session_id: None,
             agent: None,
             model: None,
-            login: None,
-            token_refresh: None,
         });
     }
 
     if pargs.contains(["-h", "--help"]) {
         print_help();
-        std::process::exit(0);
+        process::exit(0);
     }
 
     if pargs.contains(["-V", "--version"]) {
         println!("gaius {}", env!("GIT_VERSION"));
-        std::process::exit(0);
+        process::exit(0);
     }
 
     let cli_mode = pargs.contains("--cli");
@@ -68,15 +89,11 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
     let session_id = pargs.opt_value_from_str("--session")?;
     let agent = pargs.opt_value_from_str("--agent")?;
     let model = pargs.opt_value_from_str("--model")?;
-    let login = pargs.opt_value_from_str("--login")?;
-    let token_refresh = pargs.opt_value_from_str("--token-refresh")?;
 
     let specified_modes: Vec<&str> = [
         ("--cli", cli_mode),
         ("--prompt", prompt_mode),
         ("--prompt-file", prompt_file.is_some()),
-        ("--login", login.is_some()),
-        ("--token-refresh", token_refresh.is_some()),
     ]
     .into_iter()
     .filter_map(|(flag, specified)| specified.then_some(flag))
@@ -104,14 +121,12 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
     }
 
     Ok(Args {
-        upgrade: false,
+        command: None,
         cli_mode,
         prompt,
         session_id,
         agent,
         model,
-        login,
-        token_refresh,
     })
 }
 
@@ -135,11 +150,11 @@ fn print_help() {
     );
     println!();
     println!("COMMANDS:");
-    println!("  upgrade                     Upgrade to the latest release and exit");
-    println!("  --login <PROVIDER>          Log in to a provider and exit");
-    println!("  --token-refresh <PROVIDER>  Force refresh the saved token and exit");
+    println!("  upgrade                   Upgrade to the latest release and exit");
+    println!("  login <PROVIDER>          Log in to a provider and exit");
+    println!("  token-refresh <PROVIDER>  Force refresh the saved token and exit");
     println!(
-        "                              (supported: {})",
+        "                            (supported: {})",
         OAuthKind::names()
     );
     println!();
@@ -218,13 +233,12 @@ async fn tui_mode(
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
 
-    if args.upgrade {
-        return Upgrader::new()?.run().await;
-    }
-    if let Some(provider) = args.login.as_deref() {
-        return login(provider).await;
-    } else if let Some(provider) = args.token_refresh.as_deref() {
-        return token_refresh(provider).await;
+    if let Some(command) = args.command {
+        return match command {
+            Command::Upgrade => Upgrader::new()?.run().await,
+            Command::Login(provider) => login(&provider).await,
+            Command::TokenRefresh(provider) => token_refresh(&provider).await,
+        };
     }
 
     let mut config = Config::new();
