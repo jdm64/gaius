@@ -70,11 +70,23 @@ impl Render {
 
         let active_help: Option<Vec<(&'static str, &'static str)>> = match &app.editor.mode {
             InputMode::Command { picker } => self.draw_commands(frame, chunks[1], picker),
-            InputMode::Session { picker } => self.draw_sessions(frame, chunks[1], picker, false),
-            InputMode::SessionRename { picker } => {
-                self.draw_sessions(frame, chunks[1], picker, true)
+            InputMode::Session { picker } => self.draw_sessions(
+                frame,
+                chunks[1],
+                picker,
+                app.snapshot.session_id.as_ref(),
+                false,
+            ),
+            InputMode::SessionRename { picker } => self.draw_sessions(
+                frame,
+                chunks[1],
+                picker,
+                app.snapshot.session_id.as_ref(),
+                true,
+            ),
+            InputMode::Models { picker } => {
+                self.draw_models(frame, chunks[1], picker, &app.snapshot.model)
             }
-            InputMode::Models { picker } => self.draw_models(frame, chunks[1], picker),
             InputMode::AddProvider { picker } => {
                 self.draw_add_provider(frame, chunks[1], picker, app.editor.input.as_str())
             }
@@ -84,7 +96,12 @@ impl Render {
             InputMode::PromptInput | InputMode::Exit => None,
             InputMode::SessionInfo { info } => self.draw_session_info(frame, chunks[1], info),
             InputMode::Question { .. } => Some(Self::question_help()),
-            InputMode::Reasoning { picker } => self.draw_reasoning(frame, chunks[1], picker),
+            InputMode::Reasoning { picker } => self.draw_reasoning(
+                frame,
+                chunks[1],
+                picker,
+                app.snapshot.model.reasoning.clone(),
+            ),
             InputMode::Theme { picker } => self.draw_theme(frame, chunks[1], picker),
         };
 

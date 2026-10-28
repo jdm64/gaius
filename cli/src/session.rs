@@ -32,7 +32,6 @@ pub struct SessionFile {
 pub struct Session {
     pub id: Option<String>,
     pub name: Option<String>,
-    pub curr: bool,
     pub modified: SystemTime,
 }
 
@@ -142,7 +141,6 @@ impl Session {
         Self {
             id: Some(Uuid::now_v7().to_string()),
             name: None,
-            curr: false,
             modified: SystemTime::now(),
         }
     }
@@ -152,7 +150,6 @@ impl Session {
         Ok(Self {
             id: Some(name),
             name: None,
-            curr: false,
             modified: SystemTime::now(),
         })
     }
@@ -161,7 +158,6 @@ impl Session {
         Self {
             id: None,
             name: None,
-            curr: false,
             modified: SystemTime::now(),
         }
     }
@@ -245,7 +241,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn list(curr_sess: Option<String>) -> Vec<Session> {
+    pub fn list() -> Vec<Session> {
         let dir = match Dirs::sessions_dir() {
             Ok(d) => d,
             Err(_) => return Vec::new(),
@@ -260,8 +256,6 @@ impl Session {
                         if path.extension()? == "mpk" {
                             let data = Self::deserialize_session(path.as_path(), false).ok()?;
                             let id = path.file_stem()?.to_str().map(|s| s.to_string());
-                            let is_curr =
-                                id.as_ref().is_some_and(|i| Some(i) == curr_sess.as_ref());
                             let modified = entry
                                 .metadata()
                                 .and_then(|metadata| metadata.modified())
@@ -272,7 +266,6 @@ impl Session {
                                 Session {
                                     id,
                                     name: Some(data.name),
-                                    curr: is_curr,
                                     modified,
                                 },
                             ))

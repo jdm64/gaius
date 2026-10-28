@@ -81,10 +81,8 @@ impl InputMode {
                         app.editor
                             .set_status(format!("Error deleting session: {}", e));
                     } else {
-                        let (sessions, filtered) = Session::picker_rows(
-                            Session::list(app.snapshot.session_id.clone()),
-                            &app.editor.input,
-                        );
+                        let (sessions, filtered) =
+                            Session::picker_rows(Session::list(), &app.editor.input);
                         picker.replace_rows(sessions, filtered);
                         app.editor
                             .set_status(format!("Deleted session: {}", display_name));
@@ -123,10 +121,7 @@ impl InputMode {
                 }
             }
             _ if PromptEditor::input_changed_key(key) => {
-                let (rows, filtered) = Session::picker_rows(
-                    Session::list(app.snapshot.session_id.clone()),
-                    &app.editor.input,
-                );
+                let (rows, filtered) = Session::picker_rows(Session::list(), &app.editor.input);
                 picker.replace_rows(rows, filtered);
             }
             _ => {}
@@ -168,10 +163,8 @@ impl InputMode {
                 let selected_id = session.id.clone();
                 match session.rename(new_name.clone()) {
                     Ok(()) => {
-                        let (sessions, filtered) = Session::picker_rows(
-                            Session::list(app.snapshot.session_id.clone()),
-                            &app.editor.input,
-                        );
+                        let (sessions, filtered) =
+                            Session::picker_rows(Session::list(), &app.editor.input);
                         picker.replace_rows(sessions, filtered);
                         if let Some(selected_id) = selected_id {
                             picker.selected = picker

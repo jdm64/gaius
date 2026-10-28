@@ -7,7 +7,7 @@ use crate::render::Render;
 use crate::{
     agents::AgentDefinition,
     commands::Command,
-    models::{ModelPickerRow, ReasoningEffort},
+    models::{ModelDef, ModelPickerRow, ReasoningEffort},
     session::SessionPickerRow,
     skills::Skill,
     token_usage::SessionInfo,
@@ -58,6 +58,7 @@ impl Render {
         frame: &mut Frame<'_>,
         area: Rect,
         picker: &PickList<SessionPickerRow>,
+        curr_id: Option<&String>,
         renaming: bool,
     ) -> Option<Vec<(&'static str, &'static str)>> {
         let display_rows = picker.display_rows();
@@ -78,7 +79,11 @@ impl Render {
                     ListItem::new(Line::from(Span::styled(label.as_str(), header_style)))
                 }
                 SessionPickerRow::Session(session) => {
-                    let marker = if session.curr { ">" } else { " " };
+                    let marker = if session.id.as_ref() == curr_id {
+                        ">"
+                    } else {
+                        " "
+                    };
                     ListItem::new(format!("{marker}{}", session.display_name()))
                 }
             },
@@ -101,6 +106,7 @@ impl Render {
         frame: &mut Frame<'_>,
         area: Rect,
         picker: &PickList<ModelPickerRow>,
+        current_model: &ModelDef,
     ) -> Option<Vec<(&'static str, &'static str)>> {
         let display_rows = picker.display_rows();
         let header_style = self.theme.header_style();
@@ -121,7 +127,12 @@ impl Render {
                 }
                 ModelPickerRow::Separator => ListItem::new(""),
                 ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model) => {
-                    ListItem::new(model.label())
+                    let marker = if current_model.similar(model) {
+                        ">"
+                    } else {
+                        " "
+                    };
+                    ListItem::new(format!("{marker}{}", model.label()))
                 }
             },
         );
@@ -334,7 +345,9 @@ impl Render {
         frame: &mut Frame<'_>,
         area: Rect,
         picker: &PickList<ReasoningEffort>,
+        current_reasoning: Option<ReasoningEffort>,
     ) -> Option<Vec<(&'static str, &'static str)>> {
+        let current_reasoning = current_reasoning.unwrap_or(ReasoningEffort::Default);
         self.draw_pick_list(
             frame,
             area,
@@ -345,7 +358,14 @@ impl Render {
                 empty_text: "No levels",
                 background: Style::default(),
             },
-            |effort, _index| ListItem::new(effort.label()),
+            |effort, _index| {
+                let marker = if *effort == current_reasoning {
+                    ">"
+                } else {
+                    " "
+                };
+                ListItem::new(format!("{marker}{}", effort.label()))
+            },
         );
         Some(vec![
             ("Up/Down", "select"),
