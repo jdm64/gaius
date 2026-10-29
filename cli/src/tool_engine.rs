@@ -14,7 +14,7 @@ use regex::Regex;
 use serde_json::Value;
 use std::{
     io::{ErrorKind, Write},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 use tokio::process::Command;
@@ -59,14 +59,21 @@ impl ToolResult {
 }
 
 pub struct ToolEngine {
+    pub proj_dir: PathBuf,
     pub skill_repo: SkillRepo,
     max_output: usize,
     max_output_split: usize,
 }
 
 impl ToolEngine {
-    pub fn new(skill_repo: SkillRepo, max_output: usize, max_output_split: usize) -> Self {
+    pub fn new(
+        skill_repo: SkillRepo,
+        proj_dir: PathBuf,
+        max_output: usize,
+        max_output_split: usize,
+    ) -> Self {
         Self {
+            proj_dir,
             skill_repo,
             max_output,
             max_output_split,
@@ -176,11 +183,7 @@ impl ToolEngine {
             },
             None => None,
         };
-        let cwd = match std::env::current_dir() {
-            Ok(c) => c,
-            Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
-        };
-        let full_path = cwd.join(file_path_str);
+        let full_path = self.proj_dir.join(file_path_str);
         match std::fs::read_to_string(full_path) {
             Ok(content) => {
                 if start_line == 1 && max_lines.is_none() {
@@ -214,11 +217,7 @@ impl ToolEngine {
                 None => return ToolResult::Failure("overwrite must be a boolean".to_string()),
             },
         };
-        let cwd = match std::env::current_dir() {
-            Ok(c) => c,
-            Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
-        };
-        let full_path = cwd.join(file_path_str);
+        let full_path = self.proj_dir.join(file_path_str);
         let mut options = std::fs::OpenOptions::new();
         options.write(true);
         if overwrite {
@@ -262,11 +261,7 @@ impl ToolEngine {
                 None => return ToolResult::Failure("replace_all must be a boolean".to_string()),
             },
         };
-        let cwd = match std::env::current_dir() {
-            Ok(c) => c,
-            Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
-        };
-        let full_path = cwd.join(file_path_str);
+        let full_path = self.proj_dir.join(file_path_str);
         let content = match std::fs::read_to_string(&full_path) {
             Ok(content) => content,
             Err(e) => return ToolResult::Error(format!("Error reading file: {}", e)),
@@ -288,7 +283,7 @@ impl ToolEngine {
 
         let updated = content.replace(find, replace);
         let relative_path = full_path
-            .strip_prefix(&cwd)
+            .strip_prefix(&self.proj_dir)
             .unwrap_or(&full_path)
             .to_string_lossy()
             .into_owned();
@@ -312,7 +307,13 @@ impl ToolEngine {
             }
             None => return Self::required_arg(ArgName::Command),
         };
-        match Command::new("bash").arg("-c").arg(command).output().await {
+        match Command::new("bash")
+            .arg("-c")
+            .arg(command)
+            .current_dir(&self.proj_dir)
+            .output()
+            .await
+        {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -468,14 +469,13 @@ impl ToolEngine {
         } else {
             format!("{}/{}", path_prefix, pattern)
         };
-        let cwd = match std::env::current_dir() {
-            Ok(c) => c,
-            Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
-        };
         let full_pattern = if full_pattern.starts_with('/') {
             full_pattern
         } else {
-            cwd.join(&full_pattern).to_string_lossy().into_owned()
+            self.proj_dir
+                .join(&full_pattern)
+                .to_string_lossy()
+                .into_owned()
         };
         match glob(&full_pattern) {
             Ok(entries) => {
@@ -483,7 +483,7 @@ impl ToolEngine {
                 for entry in entries.filter_map(Result::ok) {
                     results.push(
                         entry
-                            .strip_prefix(&cwd)
+                            .strip_prefix(&self.proj_dir)
                             .unwrap_or(&entry)
                             .to_string_lossy()
                             .into_owned(),
@@ -537,14 +537,10 @@ impl ToolEngine {
             .get(ArgName::Recursive)
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        let cwd = match std::env::current_dir() {
-            Ok(c) => c,
-            Err(e) => return ToolResult::Error(format!("Error getting current directory: {}", e)),
-        };
         let full_path = if path_str.starts_with('/') {
-            std::path::PathBuf::from(path_str)
+            PathBuf::from(path_str)
         } else {
-            cwd.join(path_str)
+            self.proj_dir.join(path_str)
         };
         let regex = match Regex::new(pattern_str) {
             Ok(r) => r,
@@ -569,10 +565,9 @@ impl ToolEngine {
             Ok(c) => c,
             Err(_) => return,
         };
-        let cwd = std::env::current_dir().ok().unwrap_or_default();
         for (line_num, line) in content.lines().enumerate() {
             if regex.is_match(line) {
-                let display_path = path.strip_prefix(&cwd).unwrap_or(path);
+                let display_path = path.strip_prefix(&self.proj_dir).unwrap_or(path);
                 results.push(format!(
                     "{}:{}: {}",
                     display_path.to_string_lossy(),

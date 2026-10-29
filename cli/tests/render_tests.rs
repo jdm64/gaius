@@ -302,8 +302,8 @@ fn draw_history_applies_selection_highlight_to_selected_cells() {
     let mut app = TuiApp::new(Config::new());
     app.push_message(TuiMessage::AgentMessage("abcdef".to_string()));
     app.selection.selection = Some(HistorySelection {
-        anchor: HistoryPoint { row: 1, col: 1 },
-        focus: HistoryPoint { row: 1, col: 4 },
+        anchor: HistoryPoint { row: 0, col: 1 },
+        focus: HistoryPoint { row: 0, col: 4 },
         active: true,
     });
     let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
@@ -313,12 +313,12 @@ fn draw_history_applies_selection_highlight_to_selected_cells() {
     let selected = terminal
         .backend()
         .buffer()
-        .cell(Position { x: 2, y: 2 })
+        .cell(Position { x: 2, y: 3 })
         .unwrap();
     let unselected = terminal
         .backend()
         .buffer()
-        .cell(Position { x: 1, y: 2 })
+        .cell(Position { x: 1, y: 3 })
         .unwrap();
 
     assert_eq!(selected.symbol(), "b");

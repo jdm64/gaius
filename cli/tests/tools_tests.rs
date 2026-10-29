@@ -39,14 +39,19 @@ fn allows_glob_patterns_with_literal_characters() {
 
 #[tokio::test]
 async fn plan_tool_returns_plan_text() {
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute(
-            "plan",
-            &json!({
-                "plan": "# Implement feature\n\nBackground information"
-            }),
-        )
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute(
+        "plan",
+        &json!({
+            "plan": "# Implement feature\n\nBackground information"
+        }),
+    )
+    .await;
 
     match result {
         ToolResult::Text(text) => {
@@ -58,14 +63,19 @@ async fn plan_tool_returns_plan_text() {
 
 #[tokio::test]
 async fn plan_tool_renders_arbitrary_fields() {
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute(
-            "plan",
-            &json!({
-                "plan": "# Refactor auth\n\nRisks and considerations"
-            }),
-        )
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute(
+        "plan",
+        &json!({
+            "plan": "# Refactor auth\n\nRisks and considerations"
+        }),
+    )
+    .await;
 
     match result {
         ToolResult::Text(text) => {
@@ -77,9 +87,14 @@ async fn plan_tool_renders_arbitrary_fields() {
 
 #[tokio::test]
 async fn plan_tool_requires_content() {
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute("plan", &json!({ "goal": "Refactor auth" }))
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute("plan", &json!({ "goal": "Refactor auth" }))
+    .await;
 
     match result {
         ToolResult::Failure(text) => {
@@ -99,16 +114,21 @@ async fn edit_file_returns_compact_diff_view() {
     std::env::set_current_dir(&dir).unwrap();
     std::fs::write("sample.txt", "one\ntwo\nthree\nfour\nfive\n").unwrap();
 
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute(
-            &ToolName::Edit.name(),
-            &json!({
-                "file_path": "sample.txt",
-                "old_string": "three\n",
-                "new_string": "THREE\n"
-            }),
-        )
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute(
+        &ToolName::Edit.name(),
+        &json!({
+            "file_path": "sample.txt",
+            "old_string": "three\n",
+            "new_string": "THREE\n"
+        }),
+    )
+    .await;
 
     std::env::set_current_dir(original_dir).unwrap();
     let updated = std::fs::read_to_string(dir.join("sample.txt")).unwrap();
@@ -141,9 +161,14 @@ async fn glob_returns_relative_paths() {
     std::fs::write(dir.join("nested/sample.txt"), "content").unwrap();
     std::env::set_current_dir(&dir).unwrap();
 
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute("glob", &json!({ "query": "*.txt", "path": "nested" }))
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute("glob", &json!({ "query": "*.txt", "path": "nested" }))
+    .await;
 
     std::env::set_current_dir(original_dir).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
@@ -163,12 +188,17 @@ async fn grep_returns_relative_paths() {
     std::fs::write(dir.join("nested/sample.txt"), "match this\n").unwrap();
     std::env::set_current_dir(&dir).unwrap();
 
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute(
-            "grep",
-            &json!({ "query": "match", "path": "nested/sample.txt" }),
-        )
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute(
+        "grep",
+        &json!({ "query": "match", "path": "nested/sample.txt" }),
+    )
+    .await;
 
     std::env::set_current_dir(original_dir).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
@@ -194,7 +224,7 @@ async fn skill_tool_returns_body_for_existing_skill() {
         body: "Skill instructions here".to_string(),
     });
 
-    let result = ToolEngine::new(repo, 30000, 60)
+    let result = ToolEngine::new(repo, std::env::current_dir().unwrap(), 30000, 60)
         .execute(
             "skill",
             &json!({
@@ -213,14 +243,19 @@ async fn skill_tool_returns_body_for_existing_skill() {
 
 #[tokio::test]
 async fn skill_tool_returns_error_for_missing_skill() {
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute(
-            "skill",
-            &json!({
-                "name": "nonexistent"
-            }),
-        )
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute(
+        "skill",
+        &json!({
+            "name": "nonexistent"
+        }),
+    )
+    .await;
 
     match result {
         ToolResult::Error(text) => {
@@ -232,9 +267,14 @@ async fn skill_tool_returns_error_for_missing_skill() {
 
 #[tokio::test]
 async fn skill_tool_requires_name() {
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute("skill", &json!({}))
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute("skill", &json!({}))
+    .await;
 
     match result {
         ToolResult::Failure(text) => {
@@ -294,9 +334,14 @@ async fn webfetch_returns_cleaned_html_text() {
          <script>alert('leak')</script>\
          <style>.x{display:none}</style></body></html>",
     );
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute("webfetch", &json!({ "url": url }))
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute("webfetch", &json!({ "url": url }))
+    .await;
 
     match result {
         ToolResult::Text(text) => {
@@ -319,9 +364,14 @@ async fn webfetch_returns_cleaned_html_text() {
 #[tokio::test]
 async fn webfetch_returns_raw_text_for_non_html() {
     let url = spawn_test_server("200 OK", "application/json", "{\"hello\":\"world\"}");
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute("webfetch", &json!({ "url": url }))
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute("webfetch", &json!({ "url": url }))
+    .await;
 
     match result {
         ToolResult::Text(text) => {
@@ -334,9 +384,14 @@ async fn webfetch_returns_raw_text_for_non_html() {
 #[tokio::test]
 async fn webfetch_returns_error_on_non_success() {
     let url = spawn_test_server("404 Not Found", "text/plain", "not found");
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute("webfetch", &json!({ "url": url }))
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute("webfetch", &json!({ "url": url }))
+    .await;
 
     match result {
         ToolResult::Error(text) => {
@@ -348,9 +403,14 @@ async fn webfetch_returns_error_on_non_success() {
 
 #[tokio::test]
 async fn webfetch_requires_url() {
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute("webfetch", &json!({}))
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute("webfetch", &json!({}))
+    .await;
 
     match result {
         ToolResult::Failure(text) => {
@@ -362,9 +422,14 @@ async fn webfetch_requires_url() {
 
 #[tokio::test]
 async fn webfetch_rejects_unsupported_scheme() {
-    let result = ToolEngine::new(SkillRepo::default(), 30000, 60)
-        .execute("webfetch", &json!({ "url": "file:///etc/passwd" }))
-        .await;
+    let result = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    )
+    .execute("webfetch", &json!({ "url": "file:///etc/passwd" }))
+    .await;
 
     match result {
         ToolResult::Failure(text) => {
@@ -376,7 +441,12 @@ async fn webfetch_rejects_unsupported_scheme() {
 
 #[test]
 fn build_tools_applies_agent_include_and_exclude_filters() {
-    let engine = ToolEngine::new(SkillRepo::default(), 30000, 60);
+    let engine = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    );
     let filters = AgentTools {
         include: vec!["read".into(), "bash".into(), "grep".into()],
         exclude: vec!["bash".into()],
@@ -390,7 +460,12 @@ fn build_tools_applies_agent_include_and_exclude_filters() {
 
 #[test]
 fn test_build_tools_without_plan() {
-    let engine = ToolEngine::new(SkillRepo::default(), 30000, 60);
+    let engine = ToolEngine::new(
+        SkillRepo::default(),
+        std::env::current_dir().unwrap(),
+        30000,
+        60,
+    );
     let tools = engine.build_tools(false, None);
 
     let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -416,7 +491,7 @@ fn test_build_tools_without_plan() {
         description: "description".into(),
         body: "body".into(),
     });
-    let engine = ToolEngine::new(skill_repo, 30000, 60);
+    let engine = ToolEngine::new(skill_repo, std::env::current_dir().unwrap(), 30000, 60);
     let tools = engine.build_tools(true, None);
     assert_eq!(tools.len(), ToolName::ALL.len());
 }

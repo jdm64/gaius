@@ -402,8 +402,8 @@ impl Render {
         let visible_rows = (row_count as u16).clamp(1, 10);
         let width = spec.max_width.min(area.width.saturating_sub(4).max(1));
         let height = visible_rows + 2;
-        let x = area.x + 2;
-        let y = area.y - height;
+        let x = area.x.saturating_add(2);
+        let y = area.y.saturating_add(area.height).saturating_sub(height);
         let rect = Rect::new(x, y, width, height);
 
         let selected_row = picker.selected_row_index().unwrap_or(0);

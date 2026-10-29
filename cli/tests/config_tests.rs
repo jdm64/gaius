@@ -148,9 +148,7 @@ fn a_provider_name_cannot_escape_the_data_directory() {
 // binary mutating `HOME` on its own would race this one.
 #[test]
 fn saving_a_session_creates_the_sessions_directory() {
-    use gaius::session::Session;
-    use gaius::token_usage::TokenUsageLedger;
-    use genai::chat::ChatRequest;
+    use gaius::session::{Session, SessionFile};
 
     with_temp_home(|_| {
         let sessions = Dirs::sessions_dir().unwrap();
@@ -158,7 +156,7 @@ fn saving_a_session_creates_the_sessions_directory() {
 
         let session = Session::new_named("a-session".to_string()).unwrap();
         session
-            .save(&ChatRequest::new(vec![]), &TokenUsageLedger::default())
+            .save(SessionFile::default().as_ref())
             .expect("save a session into a home that has no sessions directory");
 
         assert!(sessions.is_dir());

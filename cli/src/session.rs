@@ -8,7 +8,7 @@ use crate::{
     token_usage::{TokenUsageLedger, TokenUsageSpan, UsageInfo},
 };
 use chrono::{DateTime, Local};
-use genai::chat::{ChatMessage, ChatRequest, ChatRole, MessageContent};
+use genai::chat::{ChatMessage, ChatRole, MessageContent};
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -17,16 +17,34 @@ use std::{
     error::Error,
     fs::{self, File},
     io::BufReader,
-    path::Path,
+    path::{Path, PathBuf},
     time::{self, SystemTime},
 };
 use uuid::Uuid;
 
+#[derive(Default)]
 pub struct SessionFile {
-    _ver: i32,
-    name: String,
-    messages: Option<Vec<ChatMessage>>,
-    token_usage: Option<TokenUsageLedger>,
+    pub _ver: i32,
+    pub name: String,
+    pub proj_dir: PathBuf,
+    pub messages: Vec<ChatMessage>,
+    pub token_usage: TokenUsageLedger,
+}
+
+impl SessionFile {
+    pub fn as_ref(&self) -> SessionFileRef<'_> {
+        SessionFileRef {
+            proj_dir: &self.proj_dir,
+            messages: &self.messages,
+            token_usage: &self.token_usage,
+        }
+    }
+}
+
+pub struct SessionFileRef<'a> {
+    pub proj_dir: &'a PathBuf,
+    pub messages: &'a Vec<ChatMessage>,
+    pub token_usage: &'a TokenUsageLedger,
 }
 
 pub struct Session {
@@ -169,21 +187,32 @@ impl Session {
 
         let version: i32 = Deserialize::deserialize(&mut des)?;
         let name: String = Deserialize::deserialize(&mut des)?;
-        let mut messages: Option<Vec<ChatMessage>> = None;
-        let mut token_usage: Option<TokenUsageLedger> = None;
+        let proj_dir = if version >= 4 {
+            Deserialize::deserialize(&mut des)?
+        } else {
+            current_dir().unwrap_or_default()
+        };
+        let messages: Vec<ChatMessage>;
+        let token_usage: TokenUsageLedger;
         if read_msgs {
             messages = Deserialize::deserialize(&mut des)?;
             if version >= 3 {
-                token_usage = Some(Deserialize::deserialize(&mut des)?);
+                token_usage = Deserialize::deserialize(&mut des)?;
             } else if version == 2 {
                 let v2: TokenUsageLedgerV2 = Deserialize::deserialize(&mut des)?;
-                token_usage = Some(v2.into());
+                token_usage = v2.into();
+            } else {
+                token_usage = TokenUsageLedger::default();
             }
+        } else {
+            messages = Vec::new();
+            token_usage = TokenUsageLedger::default()
         }
 
         Ok(SessionFile {
             _ver: version,
             name,
+            proj_dir,
             messages,
             token_usage,
         })
@@ -192,8 +221,7 @@ impl Session {
     fn serialize_session(
         &self,
         path: &Path,
-        history: &ChatRequest,
-        token_usage: &TokenUsageLedger,
+        session_file: SessionFileRef,
     ) -> Result<(), Box<dyn Error>> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -202,40 +230,40 @@ impl Session {
         let file = File::create(path)?;
         let mut ser = Serializer::new(file).with_struct_map();
 
-        3.serialize(&mut ser)?;
-        let name = self.name.clone().unwrap_or(Self::derived_name(history));
+        4.serialize(&mut ser)?;
+        let name = self
+            .name
+            .clone()
+            .unwrap_or_else(|| Self::derived_name(session_file.messages));
         name.serialize(&mut ser)?;
-        history.messages.serialize(&mut ser)?;
-        token_usage.serialize(&mut ser)?;
+        session_file.proj_dir.serialize(&mut ser)?;
+        session_file.messages.serialize(&mut ser)?;
+        session_file.token_usage.serialize(&mut ser)?;
 
         Ok(())
     }
 
-    pub fn load(&self) -> Result<(ChatRequest, TokenUsageLedger), Box<dyn Error>> {
+    pub fn load(&self) -> Result<SessionFile, Box<dyn Error>> {
         let Some(session_id) = self.id.clone() else {
-            return Ok((ChatRequest::new(vec![]), TokenUsageLedger::default()));
+            return Ok(SessionFile::default());
         };
 
         let path = Dirs::session_file(session_id.as_str())?;
         if path.is_file() {
-            let data = Self::deserialize_session(path.as_path(), true)?;
-            Ok((
-                ChatRequest::new(data.messages.unwrap_or_default()),
-                data.token_usage.unwrap_or_default(),
-            ))
+            Ok(Self::deserialize_session(path.as_path(), true)?)
         } else {
-            Ok((ChatRequest::new(vec![]), TokenUsageLedger::default()))
+            Ok(SessionFile {
+                name: self.name.clone().unwrap_or_default(),
+                proj_dir: current_dir().unwrap_or_default(),
+                ..SessionFile::default()
+            })
         }
     }
 
-    pub fn save(
-        &self,
-        history: &ChatRequest,
-        token_usage: &TokenUsageLedger,
-    ) -> Result<(), Box<dyn Error>> {
+    pub fn save(&self, session_file: SessionFileRef) -> Result<(), Box<dyn Error>> {
         if let Some(session_id) = &self.id {
             let path = Dirs::session_file(session_id.as_str())?;
-            self.serialize_session(path.as_path(), history, token_usage)?;
+            self.serialize_session(path.as_path(), session_file)?;
         }
 
         Ok(())
@@ -301,17 +329,17 @@ impl Session {
     }
 
     pub fn rename(&mut self, new_name: String) -> Result<(), Box<dyn Error>> {
-        let Some(session_id) = &self.id else {
+        let Some(session_id) = self.id.clone() else {
             return Err("Cannot rename a session without an id".into());
         };
 
-        let (history, token_usage) = self.load()?;
+        let session_file = self.load()?;
         let path = Dirs::session_file(session_id.as_str())?;
         let tmp_path = path.with_extension("tmp");
 
         self.name = Some(new_name);
-        self.serialize_session(tmp_path.as_path(), &history, &token_usage)?;
-        std::fs::rename(&tmp_path, &path)?;
+        self.serialize_session(tmp_path.as_path(), session_file.as_ref())?;
+        fs::rename(&tmp_path, &path)?;
 
         Ok(())
     }
@@ -340,6 +368,7 @@ impl Session {
         let export_data = serde_json::json!({
             "version": data._ver,
             "name": data.name,
+            "proj_dir": data.proj_dir,
             "messages": data.messages,
             "token_usage": data.token_usage,
         });
@@ -352,13 +381,12 @@ impl Session {
             .map_or(session_id.clone(), |f| f.to_string_lossy().to_string()))
     }
 
-    fn derived_name(history: &ChatRequest) -> String {
+    fn derived_name(messages: &[ChatMessage]) -> String {
         fn first_text(content: &MessageContent) -> Option<String> {
             content.first_text().map(|s| s.to_string())
         }
 
-        history
-            .messages
+        messages
             .iter()
             .find(|m| m.role == ChatRole::User)
             .and_then(|m| first_text(&m.content))

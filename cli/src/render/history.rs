@@ -126,43 +126,9 @@ impl Render {
             self.theme.selected_color(),
         );
 
-        let snapshot = &app.snapshot;
-        let agent_label = if snapshot.plan_mode_on {
-            format!("{}/plan", snapshot.agent_name)
-        } else {
-            snapshot.agent_name.clone()
-        };
-
-        let mut model_name = match &snapshot.model.reasoning {
-            Some(reasoning) => format!("{}:{}", snapshot.model.id, reasoning),
-            None => snapshot.model.id.clone(),
-        };
-        if model_name.is_empty() {
-            model_name = "[no model]".to_string();
-        }
-
-        let parts: Vec<String> = [
-            Some(format!("Gaius - {} - {}", model_name, agent_label)),
-            app.context_tokens
-                .map(|tokens| match snapshot.model.context_len {
-                    Some(context_len) if context_len > 0 => {
-                        let pct = tokens as f64 / context_len as f64 * 100.0;
-                        format!(" - {} {:.0}%", tokens, pct)
-                    }
-                    _ => format!(" - {}", tokens),
-                }),
-            snapshot.total_cost.map(|cost| format!(" ${:.3}", cost)),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-
-        let title = format!(" {} ", parts.join(""));
-
         let history = Paragraph::new(Text::from(lines))
             .block(
                 Block::default()
-                    .title(title)
                     .borders(Borders::TOP)
                     .padding(Padding::horizontal(1)),
             )

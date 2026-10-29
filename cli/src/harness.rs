@@ -17,7 +17,7 @@ use crate::{
     diff_view::DiffView,
     harness::prompt_queue::PromptQueue,
     models::ModelDef,
-    session::Session,
+    session::{Session, SessionFileRef},
     skills::{Skill, SkillRepo},
     token_usage::{SessionInfo, TokenUsageLedger},
     tool_engine::{ToolEngine, ToolStatus},
@@ -25,6 +25,7 @@ use crate::{
 use genai::chat::{ChatRequest, ChatResponse};
 use std::{
     error::Error,
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
@@ -74,6 +75,7 @@ pub enum HarnessEvent {
 #[derive(Clone, Debug, Default)]
 pub struct HarnessSnapshot {
     pub session_id: Option<String>,
+    pub proj_dir: PathBuf,
     pub has_history: bool,
     pub model: ModelDef,
     pub agent_name: String,
@@ -115,6 +117,13 @@ impl Harness {
         session_id: Option<String>,
         create_session: bool,
     ) -> Result<Self, Box<dyn Error>> {
+        let session = match session_id {
+            Some(id) => Session::new_named(id)?,
+            None if create_session => Session::new(),
+            None => Session::new_empty(),
+        };
+        let session_file = session.load()?;
+
         let skill_repo = SkillRepo::load().unwrap_or_else(|e| {
             eprintln!("Warning: Failed to load skills: {}", e);
             SkillRepo::default()
@@ -122,27 +131,22 @@ impl Harness {
         let tool_config = config.tools_config();
         let tool_engine = ToolEngine::new(
             skill_repo,
+            session_file.proj_dir,
             tool_config.max_output,
             tool_config.max_output_split,
         );
-        let session = match session_id {
-            Some(id) => Session::new_named(id)?,
-            None if create_session => Session::new(),
-            None => Session::new_empty(),
-        };
 
-        let (history, token_usage) = session.load()?;
         let live_info = Arc::new(Mutex::new(SessionInfo {
             id: session.id.clone(),
-            usage: token_usage.usage(),
+            usage: session_file.token_usage.usage(),
         }));
 
         let mut harness = Self {
-            history,
+            history: ChatRequest::new(session_file.messages),
             client: LLMClient::new(),
             tool_engine,
             session,
-            token_usage,
+            token_usage: session_file.token_usage,
             streaming: true,
             cancel: CancelHandle::new(),
             last_plan_content: None,
@@ -245,9 +249,10 @@ impl Harness {
 
     pub fn load_session(&mut self, session: Session) -> Result<(), Box<dyn Error>> {
         self.session = session;
-        let (history, token_usage) = self.session.load()?;
-        self.history = history;
-        self.token_usage = token_usage;
+        let session_file = self.session.load()?;
+        self.tool_engine.proj_dir = session_file.proj_dir;
+        self.history = ChatRequest::new(session_file.messages);
+        self.token_usage = session_file.token_usage;
         self.last_plan_content = None;
         self.update_session_info();
         self.build_sys_prompt();
@@ -298,6 +303,7 @@ impl Harness {
     pub fn snapshot(&self) -> HarnessSnapshot {
         HarnessSnapshot {
             session_id: self.session_id(),
+            proj_dir: self.tool_engine.proj_dir.clone(),
             has_history: !self.history().messages.is_empty(),
             model: self.client.model().clone(),
             agent_name: self.client.agent().name.to_string(),
@@ -331,7 +337,12 @@ impl Harness {
     }
 
     pub fn save_history(&mut self) -> Result<(), Box<dyn Error>> {
-        self.session.save(&self.history, &self.token_usage)?;
+        let session_file = SessionFileRef {
+            proj_dir: &self.tool_engine.proj_dir,
+            messages: &self.history.messages,
+            token_usage: &self.token_usage,
+        };
+        self.session.save(session_file)?;
         self.update_session_info();
         Ok(())
     }
