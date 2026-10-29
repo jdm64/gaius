@@ -163,8 +163,7 @@ impl InputMode {
                 let selected_id = session.id.clone();
                 match session.rename(new_name.clone()) {
                     Ok(()) => {
-                        let (sessions, filtered) =
-                            Session::picker_rows(Session::list(), &app.editor.input);
+                        let (sessions, filtered) = Session::picker_rows(Session::list(), "");
                         picker.replace_rows(sessions, filtered);
                         if let Some(selected_id) = selected_id {
                             picker.selected = picker
