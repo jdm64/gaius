@@ -55,7 +55,7 @@ impl ReasoningEffort {
     pub fn to_genai(&self) -> Option<genai::chat::ReasoningEffort> {
         match self {
             ReasoningEffort::Default => None,
-            ReasoningEffort::None => Some(genai::chat::ReasoningEffort::None),
+            ReasoningEffort::None => Some(genai::chat::ReasoningEffort::Zero),
             ReasoningEffort::Low => Some(genai::chat::ReasoningEffort::Low),
             ReasoningEffort::Medium => Some(genai::chat::ReasoningEffort::Medium),
             ReasoningEffort::High => Some(genai::chat::ReasoningEffort::High),

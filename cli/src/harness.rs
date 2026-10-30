@@ -143,7 +143,7 @@ impl Harness {
 
         let mut harness = Self {
             history: ChatRequest::new(session_file.messages),
-            client: LLMClient::new(),
+            client: LLMClient::new()?,
             tool_engine,
             session,
             token_usage: session_file.token_usage,

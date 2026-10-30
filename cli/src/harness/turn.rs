@@ -257,7 +257,9 @@ impl Harness {
                 *stream_end = Some(end);
                 false
             }
-            ChatStreamEvent::Start | ChatStreamEvent::ToolCallChunk(_) => false,
+            ChatStreamEvent::Start
+            | ChatStreamEvent::ToolCallChunk(_)
+            | ChatStreamEvent::Heartbeat => false,
         }
     }
 }

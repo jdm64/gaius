@@ -350,6 +350,7 @@ fn genai_rate_limit_true_for_http_429() {
         status: StatusCode::TOO_MANY_REQUESTS,
         canonical_reason: "Too Many Requests".to_string(),
         body: String::new(),
+        headers: Box::default(),
     };
     assert!(is_rate_limit_error(&err));
 }
@@ -360,6 +361,7 @@ fn genai_rate_limit_false_for_http_500() {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         canonical_reason: "Internal Server Error".to_string(),
         body: String::new(),
+        headers: Box::default(),
     };
     assert!(!is_rate_limit_error(&err));
 }
@@ -391,6 +393,7 @@ fn genai_rate_limit_true_for_web_stream_429() {
             status: StatusCode::TOO_MANY_REQUESTS,
             canonical_reason: "Too Many Requests".to_string(),
             body: String::new(),
+            headers: Box::default(),
         }),
     };
     assert!(is_rate_limit_error(&err));
@@ -419,6 +422,7 @@ fn genai_rate_limit_true_for_http_400_with_nested_429() {
         status: StatusCode::BAD_REQUEST,
         canonical_reason: "Bad Request".to_string(),
         body: body.to_string(),
+        headers: Box::default(),
     };
     assert!(is_rate_limit_error(&err));
 }
@@ -440,6 +444,7 @@ fn genai_rate_limit_false_for_http_400_with_nested_400() {
         status: StatusCode::BAD_REQUEST,
         canonical_reason: "Bad Request".to_string(),
         body: body.to_string(),
+        headers: Box::default(),
     };
     assert!(!is_rate_limit_error(&err));
 }
@@ -456,6 +461,7 @@ fn genai_rate_limit_false_for_http_400_without_previous_errors() {
         status: StatusCode::BAD_REQUEST,
         canonical_reason: "Bad Request".to_string(),
         body: body.to_string(),
+        headers: Box::default(),
     };
     assert!(!is_rate_limit_error(&err));
 }
@@ -466,6 +472,7 @@ fn genai_rate_limit_false_for_http_400_with_malformed_body() {
         status: StatusCode::BAD_REQUEST,
         canonical_reason: "Bad Request".to_string(),
         body: "not json".to_string(),
+        headers: Box::default(),
     };
     assert!(!is_rate_limit_error(&err));
 }
@@ -483,6 +490,7 @@ fn genai_rate_limit_false_for_http_400_with_empty_previous_errors() {
         status: StatusCode::BAD_REQUEST,
         canonical_reason: "Bad Request".to_string(),
         body: body.to_string(),
+        headers: Box::default(),
     };
     assert!(!is_rate_limit_error(&err));
 }

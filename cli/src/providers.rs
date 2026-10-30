@@ -134,32 +134,34 @@ impl ProviderDef {
 
     pub async fn create_client(&self, model: String) -> Result<Client, Box<dyn Error>> {
         match self {
-            ProviderDef::Codex { auth, .. } => Ok(Self::raw_create_client(
+            ProviderDef::Codex { auth, .. } => Self::raw_create_client(
                 AdapterKind::OpenAIResp,
                 CODEX_RESPONSES.to_string(),
                 auth.access_token().await?,
                 model,
-            )),
-            ProviderDef::Grok { auth, .. } => Ok(Self::raw_create_client(
+            )
+            .map_err(Into::into),
+            ProviderDef::Grok { auth, .. } => Self::raw_create_client(
                 AdapterKind::Xai,
                 GROK_RESPONSES.to_string(),
                 auth.access_token().await?,
                 model,
-            )),
+            )
+            .map_err(Into::into),
             ProviderDef::ApiKey { kind, url, key, .. } => {
                 let kind = AdapterKind::from_lower_str(&kind.to_lowercase())
                     .ok_or_else(|| format!("Invalid provider kind '{}'.", kind))?;
-                Ok(Self::raw_create_client(
-                    kind,
-                    url.clone(),
-                    key.clone(),
-                    model,
-                ))
+                Self::raw_create_client(kind, url.clone(), key.clone(), model).map_err(Into::into)
             }
         }
     }
 
-    fn raw_create_client(kind: AdapterKind, url: String, key: String, model: String) -> Client {
+    fn raw_create_client(
+        kind: AdapterKind,
+        url: String,
+        key: String,
+        model: String,
+    ) -> Result<Client, genai::Error> {
         let resolver = ServiceTargetResolver::from_resolver_fn(
             move |mut service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
                 service_target.endpoint = Endpoint::from_owned(url.clone());
