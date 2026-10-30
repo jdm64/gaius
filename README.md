@@ -68,7 +68,10 @@ gaius --prompt-file prompt.txt
 gaius --session <session-id>
 
 # OAuth login to Codex or Grok
-gaius --login <provider>
+gaius login <provider>
+
+# Check and download a newer version
+gaius upgrade
 
 # Show help
 gaius --help
