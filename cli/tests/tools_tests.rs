@@ -23,20 +23,6 @@ fn tool_names_are_single_source_of_truth() {
     assert_eq!(names.len(), ToolName::ALL.len());
 }
 
-#[test]
-fn detects_too_loose_glob_patterns() {
-    for pattern in ["", "*", "**", "**/*", "*/**"] {
-        assert!(ToolEngine::is_glob_too_loose(pattern), "{pattern:?}");
-    }
-}
-
-#[test]
-fn allows_glob_patterns_with_literal_characters() {
-    for pattern in ["*.rs", "src/**/*.toml", "foo/**/bar"] {
-        assert!(!ToolEngine::is_glob_too_loose(pattern), "{pattern:?}");
-    }
-}
-
 #[tokio::test]
 async fn plan_tool_returns_plan_text() {
     let result = ToolEngine::new(

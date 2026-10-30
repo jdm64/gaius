@@ -9,13 +9,14 @@ use crate::{
     tools::{ArgName, ToolName},
 };
 use genai::chat::Tool;
-use glob::glob;
+use ignore::{Walk, WalkBuilder, overrides::OverrideBuilder};
 use regex::Regex;
 use serde_json::Value;
 use std::{
+    cmp::Reverse,
     io::{ErrorKind, Write},
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant, SystemTime},
 };
 use tokio::process::Command;
 use url::Url;
@@ -455,44 +456,63 @@ impl ToolEngine {
             Some(p) => p,
             None => return Self::required_arg(ArgName::Query),
         };
-        if Self::is_glob_too_loose(pattern) {
-            return ToolResult::Failure(
-                "Glob pattern must contain at least one non-wildcard character".to_string(),
-            );
-        }
         let path_prefix = args
             .get(ArgName::Path)
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        let full_pattern = if path_prefix.is_empty() {
-            pattern.to_string()
+        let root = if path_prefix.starts_with('/') {
+            PathBuf::from(path_prefix)
         } else {
-            format!("{}/{}", path_prefix, pattern)
+            self.proj_dir.join(path_prefix)
         };
-        let full_pattern = if full_pattern.starts_with('/') {
-            full_pattern
-        } else {
-            self.proj_dir
-                .join(&full_pattern)
-                .to_string_lossy()
-                .into_owned()
+
+        let walker = match Self::create_file_walker(&root, Some(pattern)) {
+            Ok(walker) => walker,
+            Err(error) => return error,
         };
-        match glob(&full_pattern) {
-            Ok(entries) => {
-                let mut results = Vec::new();
-                for entry in entries.filter_map(Result::ok) {
-                    results.push(
-                        entry
-                            .strip_prefix(&self.proj_dir)
-                            .unwrap_or(&entry)
-                            .to_string_lossy()
-                            .into_owned(),
-                    );
-                }
-                ToolResult::Text(results.join("\n"))
+        let mut hits: Vec<(SystemTime, PathBuf)> = Vec::new();
+        let mut timed_out = false;
+        let start = Instant::now();
+        for entry in walker {
+            if start.elapsed() >= Duration::from_secs(10) {
+                timed_out = true;
+                break;
             }
-            Err(e) => ToolResult::Error(format!("Error in glob pattern: {}", e)),
+            let Ok(entry) = entry else { continue };
+            if !entry
+                .file_type()
+                .is_some_and(|file_type| file_type.is_file())
+            {
+                continue;
+            }
+            let modified = entry
+                .metadata()
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            hits.push((modified, entry.into_path()));
         }
+
+        hits.sort_by_key(|i| Reverse(i.0));
+        const LIMIT: usize = 100;
+        let truncated = timed_out || hits.len() > LIMIT;
+        hits.truncate(LIMIT);
+        let mut results: Vec<String> = hits
+            .into_iter()
+            .map(|(_, path)| {
+                path.strip_prefix(&self.proj_dir)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        if truncated {
+            results.push(
+                "[Warning: glob results were limited to 100 files or 10 seconds. Please provide a more specific search pattern.]"
+                    .to_string(),
+            );
+        }
+        ToolResult::Text(results.join("\n"))
     }
 
     fn question_tool(&self, args: &Value) -> ToolResult {
@@ -585,29 +605,44 @@ impl ToolEngine {
         include_pattern: Option<&str>,
         results: &mut Vec<String>,
     ) {
-        let include_regex = match include_pattern {
-            Some(p) => match glob::Pattern::new(p) {
-                Ok(pat) => Some(pat),
-                Err(_) => return,
-            },
-            None => None,
+        let Ok(walker) = Self::create_file_walker(dir, include_pattern) else {
+            return;
         };
-        let walker = walkdir::WalkDir::new(dir).into_iter();
         for entry in walker.filter_map(Result::ok) {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(pat) = &include_regex {
-                    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    if !pat.matches(filename) {
-                        continue;
-                    }
-                }
-                self.grep_file(path, regex, results);
+            if entry
+                .file_type()
+                .is_some_and(|file_type| file_type.is_file())
+            {
+                self.grep_file(entry.path(), regex, results);
             }
         }
     }
 
-    pub fn is_glob_too_loose(pattern: &str) -> bool {
-        !pattern.chars().any(|c| c != '*' && c != '/')
+    fn create_file_walker(path: &Path, pattern: Option<&str>) -> Result<Walk, ToolResult> {
+        let overrides = if let Some(pattern) = pattern {
+            let mut builder = OverrideBuilder::new(path);
+            if let Err(e) = builder.add(pattern) {
+                return Err(ToolResult::Error(format!("Error in glob pattern: {e}")));
+            }
+            match builder.build() {
+                Ok(overrides) => Some(overrides),
+                Err(e) => return Err(ToolResult::Error(format!("Error in glob pattern: {e}"))),
+            }
+        } else {
+            None
+        };
+
+        let mut builder = WalkBuilder::new(path);
+        if let Some(overrides) = overrides {
+            builder.overrides(overrides);
+        }
+        Ok(builder
+            .hidden(true)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .require_git(false)
+            .follow_links(false)
+            .build())
     }
 }
