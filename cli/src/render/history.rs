@@ -343,7 +343,7 @@ impl Render {
         style: Style,
     ) {
         match name {
-            Some(ToolName::Question) => {
+            Some(ToolName::Ask) => {
                 let answers = result
                     .split("\n")
                     .map(|l| " - ".to_string() + l)

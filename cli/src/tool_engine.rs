@@ -131,7 +131,7 @@ impl ToolEngine {
             Some(ToolName::Bash) => self.bash_tool(args).await,
             Some(ToolName::Glob) => self.glob_tool(args),
             Some(ToolName::Grep) => self.grep_tool(args),
-            Some(ToolName::Question) => self.question_tool(args),
+            Some(ToolName::Ask) => self.ask_tool(args),
             Some(ToolName::Plan) => self.plan_tool(args),
             Some(ToolName::Skill) => self.skill_tool(args),
             Some(ToolName::WebFetch) => Self::webfetch_tool(args).await,
@@ -515,7 +515,7 @@ impl ToolEngine {
         ToolResult::Text(results.join("\n"))
     }
 
-    fn question_tool(&self, args: &Value) -> ToolResult {
+    fn ask_tool(&self, args: &Value) -> ToolResult {
         let title = match args.get(ArgName::Question).and_then(|v| v.as_str()) {
             Some(t) => t,
             None => return Self::required_arg(ArgName::Question),

@@ -41,7 +41,7 @@ pub enum ToolName {
     Bash,
     Glob,
     Grep,
-    Question,
+    Ask,
     Plan,
     Skill,
     WebFetch,
@@ -56,7 +56,7 @@ impl ToolName {
         ToolName::Bash,
         ToolName::Glob,
         ToolName::Grep,
-        ToolName::Question,
+        ToolName::Ask,
         ToolName::Plan,
         ToolName::Skill,
         ToolName::WebFetch,
@@ -75,7 +75,7 @@ impl ToolName {
             ToolName::Bash => "bash",
             ToolName::Glob => "glob",
             ToolName::Grep => "grep",
-            ToolName::Question => "question",
+            ToolName::Ask => "ask",
             ToolName::Plan => "plan",
             ToolName::Skill => "skill",
             ToolName::WebFetch => "webfetch",
@@ -98,7 +98,7 @@ impl ToolName {
             ToolName::Bash => &[ArgName::Command],
             ToolName::Glob => &[ArgName::Path, ArgName::Query],
             ToolName::Grep => &[ArgName::Path, ArgName::FilePattern, ArgName::Query],
-            ToolName::Question => &[ArgName::Question],
+            ToolName::Ask => &[ArgName::Question],
             ToolName::Plan => &[],
             ToolName::Skill => &[ArgName::Name],
             ToolName::WebFetch => &[ArgName::Url],
@@ -237,7 +237,7 @@ impl ToolName {
                     },
                     "required": [ArgName::Name],
                 })),
-            ToolName::Question => Tool::new(self.as_str())
+            ToolName::Ask => Tool::new(self.as_str())
                 .with_description("Ask user a question, optionally with choices")
                 .with_schema(json!({
                     "type": "object",
