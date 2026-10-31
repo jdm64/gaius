@@ -124,7 +124,7 @@ impl ToolName {
                         ArgName::MaxLines: {
                             "type": "integer",
                             "minimum": 0,
-                            "description": "Line limit; 0 or omitted reads the whole file"
+                            "description": "Maximum number of lines to read (default: 0, no limit)"
                         }
                     },
                     "required": [ArgName::FilePath]
