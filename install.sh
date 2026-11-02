@@ -6,11 +6,20 @@
 set -eu
 
 BUILD="latest"
+BIN_NAME="gaius"
+DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
 
 usage() {
     echo "Usage: $0 [--build <latest|branch|version>]"
 }
 
+# Sanity checks -------------------------------------------------------------
+command -v curl >/dev/null 2>&1 || {
+    echo "error: 'curl' is required but was not found in PATH." >&2
+    exit 1
+}
+
+# Release -------------------------------------------------------------------
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --build)
@@ -88,19 +97,90 @@ case "${OS}" in
         ;;
 esac
 
-REPO_URL="https://github.com/jdm64/gaius/releases/${RELEASE}/${ASSET}"
-BIN_NAME="gaius"
-INSTALL_DIR="${HOME}/.local/bin"
+# Install path --------------------------------------------------------------
+# Offer each PATH entry as an install location, plus the traditional default.
+PATH_OPTIONS=""
+NEWLINE='
+'
+PATH_REMAINDER="${PATH-}:"
+while [ -n "$PATH_REMAINDER" ]; do
+    PATH_ENTRY="${PATH_REMAINDER%%:*}"
+    PATH_REMAINDER="${PATH_REMAINDER#*:}"
+    # An empty PATH component means the current directory. Only offer
+    # existing writable PATH directories; the default is added separately.
+    [ -n "$PATH_ENTRY" ] || PATH_ENTRY="."
+    if [ -d "$PATH_ENTRY" ] && [ -w "$PATH_ENTRY" ]; then
+        case "${NEWLINE}${PATH_OPTIONS}${NEWLINE}" in
+            *"${NEWLINE}${PATH_ENTRY}${NEWLINE}"*) ;;
+            *) PATH_OPTIONS="${PATH_OPTIONS}${PATH_ENTRY}${NEWLINE}" ;;
+        esac
+    fi
+    [ "$PATH_REMAINDER" = "" ] && break
+    # The sentinel colon allows the final (possibly empty) PATH component
+    # to be processed by the loop.
+done
+case "${NEWLINE}${PATH_OPTIONS}${NEWLINE}" in
+    *"${NEWLINE}${DEFAULT_INSTALL_DIR}${NEWLINE}"*) ;;
+    *) PATH_OPTIONS="${PATH_OPTIONS}${DEFAULT_INSTALL_DIR}${NEWLINE}" ;;
+esac
+
+DEFAULT_INSTALL_INDEX=0
+OPTION_INDEX=0
+OPTIONS_REMAINDER="$PATH_OPTIONS"
+while [ -n "$OPTIONS_REMAINDER" ]; do
+    OPTION_DIR="${OPTIONS_REMAINDER%%
+*}"
+    OPTIONS_REMAINDER="${OPTIONS_REMAINDER#*
+}"
+    [ -n "$OPTION_DIR" ] || break
+    OPTION_INDEX=$((OPTION_INDEX + 1))
+    [ "$OPTION_DIR" = "$DEFAULT_INSTALL_DIR" ] && DEFAULT_INSTALL_INDEX="$OPTION_INDEX"
+done
+
+printf '%s\n' "Select an installation directory (press Enter for ${DEFAULT_INSTALL_DIR}):"
+OPTION_INDEX=0
+OPTIONS_REMAINDER="$PATH_OPTIONS"
+while [ -n "$OPTIONS_REMAINDER" ]; do
+    OPTION_DIR="${OPTIONS_REMAINDER%%
+*}"
+    OPTIONS_REMAINDER="${OPTIONS_REMAINDER#*
+}"
+    [ -n "$OPTION_DIR" ] || break
+    OPTION_INDEX=$((OPTION_INDEX + 1))
+    printf '  %s) %s\n' "$OPTION_INDEX" "$OPTION_DIR"
+done
+printf 'Choice [%s]: ' "$DEFAULT_INSTALL_INDEX"
+IFS= read -r INSTALL_CHOICE || INSTALL_CHOICE=""
+[ -n "$INSTALL_CHOICE" ] || INSTALL_CHOICE="$DEFAULT_INSTALL_INDEX"
+case "$INSTALL_CHOICE" in
+    *[!0-9]*|"")
+        echo "error: select a listed directory number." >&2
+        exit 1
+        ;;
+esac
+INSTALL_DIR=""
+OPTION_INDEX=0
+OPTIONS_REMAINDER="$PATH_OPTIONS"
+while [ -n "$OPTIONS_REMAINDER" ]; do
+    OPTION_DIR="${OPTIONS_REMAINDER%%
+*}"
+    OPTIONS_REMAINDER="${OPTIONS_REMAINDER#*
+}"
+    [ -n "$OPTION_DIR" ] || break
+    OPTION_INDEX=$((OPTION_INDEX + 1))
+    if [ "$OPTION_INDEX" -eq "$INSTALL_CHOICE" ]; then
+        INSTALL_DIR="$OPTION_DIR"
+        break
+    fi
+done
+if [ -z "$INSTALL_DIR" ]; then
+    echo "error: select a listed directory number." >&2
+    exit 1
+fi
 INSTALL_PATH="${INSTALL_DIR}/${BIN_NAME}"
 
-# Sanity checks -------------------------------------------------------------
-
-command -v curl >/dev/null 2>&1 || {
-    echo "error: 'curl' is required but was not found in PATH." >&2
-    exit 1
-}
-
 # Download ------------------------------------------------------------------
+REPO_URL="https://github.com/jdm64/gaius/releases/${RELEASE}/${ASSET}"
 echo "==> Creating ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
 
