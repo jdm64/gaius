@@ -154,7 +154,7 @@ impl ToolName {
                     "required": [ArgName::FilePath, ArgName::OldString, ArgName::NewString]
                 })),
             ToolName::Write => Tool::new(self.as_str())
-                .with_description("Create or replace file")
+                .with_description(format!("Create or replace file; Requires {}=true to replace existing file", ArgName::Overwrite))
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
@@ -174,7 +174,7 @@ impl ToolName {
                     "required": [ArgName::FilePath, ArgName::Content]
                 })),
             ToolName::Bash => Tool::new(self.as_str())
-                .with_description("Execute shell command in the workspace")
+                .with_description("Execute shell command in current workspace")
                 .with_schema(json!({
                     "type": "object",
                     "properties": {
