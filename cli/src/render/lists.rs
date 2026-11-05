@@ -300,7 +300,7 @@ impl Render {
         let width = 56u16.min(area.width.saturating_sub(4).max(1));
         let height = lines.len() as u16 + 2;
         let x = area.x + 2;
-        let y = area.y.saturating_sub(height);
+        let y = area.y.saturating_add(area.height).saturating_sub(height);
         let rect = Rect::new(x, y, width, height);
 
         let block = Block::default()
