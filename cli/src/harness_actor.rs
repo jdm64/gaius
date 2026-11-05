@@ -9,140 +9,93 @@ use crate::{
     skills::Skill,
     token_usage::SessionInfo,
 };
-use std::{io::Error, thread};
+use futures::executor;
+use std::{
+    io::{self, Error},
+    thread,
+};
 use tokio::{
     runtime::Builder,
     sync::{
-        mpsc::{self, Receiver, UnboundedSender},
-        oneshot::{self, error::RecvError},
+        mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
+        oneshot,
     },
 };
 
-type CommandResult = Result<HarnessSnapshot, String>;
+pub type OperationResult<T> = Result<T, String>;
+pub type AnswerSender = oneshot::Sender<String>;
 
-trait CommandReply: Sized {
-    type Output;
-
-    fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String>;
-    fn no_reply() -> Self::Output;
-}
-
-impl CommandReply for () {
-    type Output = ();
-
-    fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String> {
-        reply.map_err(|_| "Harness actor stopped".to_string())
-    }
-
-    fn no_reply() -> Self::Output {}
-}
-
-impl CommandReply for Result<HarnessSnapshot, String> {
-    type Output = HarnessSnapshot;
-
-    fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String> {
-        reply.map_err(|_| "Harness actor stopped".to_string())?
-    }
-
-    fn no_reply() -> Self::Output {
-        unreachable!("commands without a reply should use `()`")
-    }
-}
-
-impl CommandReply for Result<SessionInfo, String> {
-    type Output = SessionInfo;
-
-    fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String> {
-        reply.map_err(|_| "Harness actor stopped".to_string())?
-    }
-
-    fn no_reply() -> Self::Output {
-        unreachable!("commands without a reply should use `()`")
-    }
-}
-
-impl CommandReply for Result<Vec<Skill>, String> {
-    type Output = Vec<Skill>;
-
-    fn from_reply(reply: Result<Self, RecvError>) -> Result<Self::Output, String> {
-        reply.map_err(|_| "Harness actor stopped".to_string())?
-    }
-
-    fn no_reply() -> Self::Output {
-        unreachable!("commands without a reply should use `()`")
-    }
-}
+const ACTOR_STOPPED: &str = "Harness actor stopped";
 
 #[derive(Debug)]
 pub enum HarnessActorEvent {
     Harness(HarnessEvent),
+    Command(CommandReply),
     AskUser {
         title: String,
         options: Vec<String>,
-        answer_tx: oneshot::Sender<String>,
+        answer_tx: AnswerSender,
     },
     TurnFinished(HarnessSnapshot),
     RequestFailed(String, HarnessSnapshot),
     HistoryReplayed(Vec<HarnessEvent>),
+    ShutdownComplete(OperationResult<HarnessSnapshot>),
 }
 
 pub enum HarnessCommand {
     RunPrompt(String),
     RunSkill(String),
-    SetModel {
-        model: ModelDef,
-        reply_tx: oneshot::Sender<CommandResult>,
-    },
-    SetAgent {
-        agent: AgentDefinition,
-        reply_tx: oneshot::Sender<CommandResult>,
-    },
-    NewSession {
-        reply_tx: oneshot::Sender<CommandResult>,
-    },
-    ForkSession {
-        reply_tx: oneshot::Sender<CommandResult>,
-    },
-    LoadSession {
-        session_id: String,
-        reply_tx: oneshot::Sender<CommandResult>,
-    },
-    ToggleStreaming {
-        reply_tx: oneshot::Sender<CommandResult>,
-    },
-    TogglePlanMode {
-        reply_tx: oneshot::Sender<CommandResult>,
-    },
-    ReplayHistory {
-        reply_tx: oneshot::Sender<CommandResult>,
-    },
+    SetModel(ModelDef),
+    SetAgent(AgentDefinition),
+    NewSession,
+    ForkSession,
+    LoadSession(String),
+    ToggleStreaming,
+    TogglePlanMode,
+    ReplayHistory,
     Compact,
     Cancel,
-    Info {
-        reply_tx: oneshot::Sender<Result<SessionInfo, String>>,
-    },
-    GetSkills {
-        reply_tx: oneshot::Sender<Result<Vec<Skill>, String>>,
-    },
-    ReloadSkills {
-        reply_tx: oneshot::Sender<Result<Vec<Skill>, String>>,
-    },
-    RebuildAgent {
-        agent: AgentDefinition,
-        reply_tx: oneshot::Sender<CommandResult>,
-    },
-    Shutdown {
-        reply_tx: oneshot::Sender<CommandResult>,
-    },
+    Info,
+    GetSkills,
+    ReloadSkills,
+    RebuildAgent(AgentDefinition),
+    Shutdown,
 }
 
-pub struct HarnessActorHandle {
-    tx: mpsc::Sender<HarnessCommand>,
-    pub rx: mpsc::UnboundedReceiver<HarnessActorEvent>,
+#[derive(Debug)]
+pub enum CommandReply {
+    ModelSet {
+        result: OperationResult<HarnessSnapshot>,
+        model: ModelDef,
+    },
+    AgentSet {
+        result: OperationResult<HarnessSnapshot>,
+        name: String,
+    },
+    AgentRebuilt(OperationResult<HarnessSnapshot>),
+    SessionCreated(OperationResult<HarnessSnapshot>),
+    SessionForked(OperationResult<HarnessSnapshot>),
+    SessionLoaded(OperationResult<HarnessSnapshot>),
+    StreamingToggled(OperationResult<HarnessSnapshot>),
+    PlanModeToggled(OperationResult<HarnessSnapshot>),
+    SkillsListed(OperationResult<Vec<Skill>>),
+    SkillsReloaded(OperationResult<Vec<Skill>>),
+    SessionInfo(OperationResult<SessionInfo>),
 }
 
-impl HarnessActorHandle {
-    pub fn new(harness: Harness) -> std::io::Result<HarnessActorHandle> {
+impl From<CommandReply> for HarnessActorEvent {
+    fn from(reply: CommandReply) -> Self {
+        HarnessActorEvent::Command(reply)
+    }
+}
+
+pub struct HarnessActorClient {
+    tx: Sender<HarnessCommand>,
+    pub rx: UnboundedReceiver<HarnessActorEvent>,
+}
+
+impl HarnessActorClient {
+    pub fn new(harness: Harness) -> io::Result<HarnessActorClient> {
         let (tx, command_rx) = mpsc::channel(64);
         let (event_tx, rx) = mpsc::unbounded_channel();
 
@@ -159,357 +112,325 @@ impl HarnessActorHandle {
                     }
                 };
                 let _ = ready_tx.send(Ok(()));
-                rt.block_on(run_actor(harness, command_rx, event_tx));
+                let mut server = HarnessActorServer::new(harness, command_rx, event_tx);
+                rt.block_on(server.run_actor());
             })?;
 
         ready_rx
             .recv()
             .map_err(|_| Error::other("harness actor thread panicked during startup"))??;
 
-        Ok(HarnessActorHandle { tx, rx })
+        Ok(HarnessActorClient { tx, rx })
     }
 
-    pub async fn run_prompt(&self, prompt: String) -> Result<(), String> {
-        self.send_command::<()>(HarnessCommand::RunPrompt(prompt), None)
-            .await
-    }
-
-    pub async fn run_skill(&self, name: String) -> Result<(), String> {
-        self.send_command::<()>(HarnessCommand::RunSkill(name), None)
-            .await
-    }
-
-    pub async fn get_skills(&self) -> Result<Vec<Skill>, String> {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::GetSkills { reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    pub async fn reload_skills(&self) -> Result<Vec<Skill>, String> {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::ReloadSkills { reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    pub async fn rebuild_agent(&self, agent: AgentDefinition) -> CommandResult {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(
-            HarnessCommand::RebuildAgent { agent, reply_tx },
-            Some(reply_rx),
-        )
-        .await
-    }
-
-    pub async fn set_model(&self, model: ModelDef) -> CommandResult {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::SetModel { model, reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    pub async fn set_agent(&self, agent: AgentDefinition) -> CommandResult {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::SetAgent { agent, reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    pub async fn new_session(&self) -> CommandResult {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::NewSession { reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    pub async fn fork_session(&self) -> CommandResult {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::ForkSession { reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    pub async fn load_session(&self, session_id: String) -> CommandResult {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(
-            HarnessCommand::LoadSession {
-                session_id,
-                reply_tx,
-            },
-            Some(reply_rx),
-        )
-        .await
-    }
-
-    pub async fn toggle_streaming(&self) -> CommandResult {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::ToggleStreaming { reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    pub async fn toggle_plan_mode(&self) -> CommandResult {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::TogglePlanMode { reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    pub async fn replay_history(&self) -> CommandResult {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::ReplayHistory { reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    pub async fn compact(&self) -> Result<(), String> {
-        self.send_command::<()>(HarnessCommand::Compact, None).await
-    }
-
-    pub async fn cancel(&self) -> Result<(), String> {
-        self.send_command::<()>(HarnessCommand::Cancel, None).await
-    }
-
-    pub async fn info(&self) -> Result<SessionInfo, String> {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::Info { reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    pub async fn shutdown(&self) -> CommandResult {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.send_command(HarnessCommand::Shutdown { reply_tx }, Some(reply_rx))
-            .await
-    }
-
-    async fn send_command<T>(
-        &self,
-        command: HarnessCommand,
-        reply_rx: Option<oneshot::Receiver<T>>,
-    ) -> Result<T::Output, String>
-    where
-        T: CommandReply,
-    {
+    pub async fn send(&self, command: HarnessCommand) -> Result<(), String> {
         self.tx
             .send(command)
             .await
-            .map_err(|_| "Harness actor stopped".to_string())?;
+            .map_err(|_| ACTOR_STOPPED.to_string())
+    }
 
-        if let Some(reply_rx) = reply_rx {
-            T::from_reply(reply_rx.await)
-        } else {
-            Ok(T::no_reply())
-        }
+    pub async fn run_prompt(&self, prompt: String) -> Result<(), String> {
+        self.send(HarnessCommand::RunPrompt(prompt)).await
+    }
+
+    pub async fn run_skill(&self, name: String) -> Result<(), String> {
+        self.send(HarnessCommand::RunSkill(name)).await
+    }
+
+    pub async fn get_skills(&self) -> Result<(), String> {
+        self.send(HarnessCommand::GetSkills).await
+    }
+
+    pub async fn reload_skills(&self) -> Result<(), String> {
+        self.send(HarnessCommand::ReloadSkills).await
+    }
+
+    pub async fn rebuild_agent(&self, agent: AgentDefinition) -> Result<(), String> {
+        self.send(HarnessCommand::RebuildAgent(agent)).await
+    }
+
+    pub async fn set_model(&self, model: ModelDef) -> Result<(), String> {
+        self.send(HarnessCommand::SetModel(model)).await
+    }
+
+    pub async fn set_agent(&self, agent: AgentDefinition) -> Result<(), String> {
+        self.send(HarnessCommand::SetAgent(agent)).await
+    }
+
+    pub async fn new_session(&self) -> Result<(), String> {
+        self.send(HarnessCommand::NewSession).await
+    }
+
+    pub async fn fork_session(&self) -> Result<(), String> {
+        self.send(HarnessCommand::ForkSession).await
+    }
+
+    pub async fn load_session(&self, session_id: String) -> Result<(), String> {
+        self.send(HarnessCommand::LoadSession(session_id)).await
+    }
+
+    pub async fn toggle_streaming(&self) -> Result<(), String> {
+        self.send(HarnessCommand::ToggleStreaming).await
+    }
+
+    pub async fn toggle_plan_mode(&self) -> Result<(), String> {
+        self.send(HarnessCommand::TogglePlanMode).await
+    }
+
+    pub async fn replay_history(&self) -> Result<(), String> {
+        self.send(HarnessCommand::ReplayHistory).await
+    }
+
+    pub async fn compact(&self) -> Result<(), String> {
+        self.send(HarnessCommand::Compact).await
+    }
+
+    pub async fn cancel(&self) -> Result<(), String> {
+        self.send(HarnessCommand::Cancel).await
+    }
+
+    pub async fn info(&self) -> Result<(), String> {
+        self.send(HarnessCommand::Info).await
+    }
+
+    pub async fn shutdown(&self) -> Result<(), String> {
+        self.send(HarnessCommand::Shutdown).await
     }
 }
 
-async fn run_turn(
-    harness: &mut Harness,
-    command_rx: &mut Receiver<HarnessCommand>,
-    event_tx: &UnboundedSender<HarnessActorEvent>,
-    request: UserRequest,
-) -> Result<(), String> {
-    let info_ref = harness.session_info();
-    let cancel_flag = harness.cancel_handle();
-    let prompt_queue = harness.prompt_queue();
+pub struct HarnessActorServer {
+    harness: Harness,
+    rx: Receiver<HarnessCommand>,
+    tx: UnboundedSender<HarnessActorEvent>,
+}
 
-    let on_event = {
-        let event_tx = event_tx.clone();
-        move |event: HarnessEvent| -> Option<String> {
-            match event {
-                HarnessEvent::AskUser { title, options } => {
-                    let (answer_tx, answer_rx) = oneshot::channel();
-                    let _ = event_tx.send(HarnessActorEvent::AskUser {
-                        title,
-                        options,
-                        answer_tx,
-                    });
-                    Some(futures::executor::block_on(answer_rx).unwrap_or_default())
+impl HarnessActorServer {
+    pub fn new(
+        harness: Harness,
+        rx: Receiver<HarnessCommand>,
+        tx: UnboundedSender<HarnessActorEvent>,
+    ) -> Self {
+        Self { harness, rx, tx }
+    }
+
+    async fn run_turn(&mut self, request: UserRequest) -> Result<(), String> {
+        let info_ref = self.harness.session_info();
+        let cancel_flag = self.harness.cancel_handle();
+        let prompt_queue = self.harness.prompt_queue();
+
+        let on_event = {
+            let event_tx = self.tx.clone();
+            move |event: HarnessEvent| -> Option<String> {
+                match event {
+                    HarnessEvent::AskUser { title, options } => {
+                        let (answer_tx, answer_rx) = oneshot::channel();
+                        let _ = event_tx.send(HarnessActorEvent::AskUser {
+                            title,
+                            options,
+                            answer_tx,
+                        });
+                        Some(executor::block_on(answer_rx).unwrap_or_default())
+                    }
+                    event => {
+                        let _ = event_tx.send(HarnessActorEvent::Harness(event));
+                        None
+                    }
                 }
-                event => {
-                    let _ = event_tx.send(HarnessActorEvent::Harness(event));
-                    None
+            }
+        };
+
+        let mut turn = Box::pin(self.harness.run_turn(request, on_event));
+        let result: Result<(), String> = loop {
+            tokio::select! {
+                result = &mut turn => {
+                    break result.map_err(|err| err.to_string());
                 }
+                cmd = self.rx.recv() => {
+                    match cmd {
+                        Some(HarnessCommand::Cancel) => {
+                            cancel_flag.cancel();
+                        }
+                        Some(HarnessCommand::Info) => {
+                            let info = info_ref.lock().unwrap().clone();
+                            let _ = self.tx.send(CommandReply::SessionInfo(Ok(info)).into());
+                        }
+                        Some(HarnessCommand::RunPrompt(prompt)) => {
+                            prompt_queue.push(prompt, &self.tx);
+                        }
+                        Some(_) => {}
+                        None => break Err("Actor channel closed".into()),
+                    }
+                }
+            }
+        };
+
+        drop(turn);
+
+        let current = self.harness.snapshot();
+        match &result {
+            Ok(()) => {
+                let _ = self.tx.send(HarnessActorEvent::TurnFinished(current));
+            }
+            Err(err) => {
+                let _ = self
+                    .tx
+                    .send(HarnessActorEvent::RequestFailed(err.clone(), current));
             }
         }
-    };
 
-    let mut turn = Box::pin(harness.run_turn(request, on_event));
-    let result: Result<(), String> = loop {
-        tokio::select! {
-            result = &mut turn => {
-                break result.map_err(|err| err.to_string());
-            }
-            cmd = command_rx.recv() => {
-                match cmd {
-                    Some(HarnessCommand::Cancel) => {
-                        cancel_flag.cancel();
-                    }
-                    Some(HarnessCommand::Info { reply_tx }) => {
-                        let _ = reply_tx.send(Ok(info_ref.lock().unwrap().clone()));
+        result
+    }
+
+    async fn run_compaction(&mut self) -> Result<(), String> {
+        let info_ref = self.harness.session_info();
+        let cancel_flag = self.harness.cancel_handle();
+        let prompt_queue = self.harness.prompt_queue();
+        let event_tx_for_callback = self.tx.clone();
+        let mut on_event = move |event: HarnessEvent| -> Option<String> {
+            let _ = event_tx_for_callback.send(HarnessActorEvent::Harness(event));
+            None
+        };
+
+        let mut compaction = Box::pin(self.harness.compact(&mut on_event));
+        let result: Result<(), String> = loop {
+            tokio::select! {
+                result = &mut compaction => break result.map_err(|err| err.to_string()),
+                cmd = self.rx.recv() => match cmd {
+                    Some(HarnessCommand::Cancel) => cancel_flag.cancel(),
+                    Some(HarnessCommand::Info) => {
+                        let info = info_ref.lock().unwrap().clone();
+                        let _ = self.tx.send(CommandReply::SessionInfo(Ok(info)).into());
                     }
                     Some(HarnessCommand::RunPrompt(prompt)) => {
-                        prompt_queue.push(prompt, event_tx);
+                        prompt_queue.push(prompt, &self.tx);
                     }
                     Some(_) => {}
                     None => break Err("Actor channel closed".into()),
-                }
+                },
+            }
+        };
+
+        drop(compaction);
+        let snapshot = self.harness.snapshot();
+        match &result {
+            Ok(()) => {
+                let _ = self.tx.send(HarnessActorEvent::TurnFinished(snapshot));
+            }
+            Err(err) => {
+                let _ = self
+                    .tx
+                    .send(HarnessActorEvent::RequestFailed(err.clone(), snapshot));
             }
         }
-    };
-
-    drop(turn);
-
-    let current = harness.snapshot();
-    match &result {
-        Ok(()) => {
-            let _ = event_tx.send(HarnessActorEvent::TurnFinished(current));
-        }
-        Err(err) => {
-            let _ = event_tx.send(HarnessActorEvent::RequestFailed(err.clone(), current));
-        }
+        result
     }
 
-    result
-}
-
-async fn run_compaction(
-    harness: &mut Harness,
-    command_rx: &mut mpsc::Receiver<HarnessCommand>,
-    event_tx: &mpsc::UnboundedSender<HarnessActorEvent>,
-) -> Result<(), String> {
-    let info_ref = harness.session_info();
-    let cancel_flag = harness.cancel_handle();
-    let prompt_queue = harness.prompt_queue();
-    let event_tx_for_callback = event_tx.clone();
-    let mut on_event = move |event: HarnessEvent| -> Option<String> {
-        let _ = event_tx_for_callback.send(HarnessActorEvent::Harness(event));
-        None
-    };
-
-    let mut compaction = Box::pin(harness.compact(&mut on_event));
-    let result: Result<(), String> = loop {
-        tokio::select! {
-            result = &mut compaction => break result.map_err(|err| err.to_string()),
-            cmd = command_rx.recv() => match cmd {
-                Some(HarnessCommand::Cancel) => cancel_flag.cancel(),
-                Some(HarnessCommand::Info { reply_tx }) => {
-                    let _ = reply_tx.send(Ok(info_ref.lock().unwrap().clone()));
+    async fn run_actor(&mut self) {
+        while let Some(command) = self.rx.recv().await {
+            match command {
+                HarnessCommand::RunPrompt(prompt) => {
+                    let _ = self.run_turn(UserRequest::Prompt(prompt)).await;
                 }
-                Some(HarnessCommand::RunPrompt(prompt)) => {
-                    prompt_queue.push(prompt, event_tx);
+                HarnessCommand::RunSkill(name) => {
+                    let _ = self.run_turn(UserRequest::Skill(name)).await;
                 }
-                Some(_) => {}
-                None => break Err("Actor channel closed".into()),
-            },
-        }
-    };
-
-    drop(compaction);
-    let snapshot = harness.snapshot();
-    match &result {
-        Ok(()) => {
-            let _ = event_tx.send(HarnessActorEvent::TurnFinished(snapshot));
-        }
-        Err(err) => {
-            let _ = event_tx.send(HarnessActorEvent::RequestFailed(err.clone(), snapshot));
-        }
-    }
-    result
-}
-
-async fn run_actor(
-    mut harness: Harness,
-    mut command_rx: mpsc::Receiver<HarnessCommand>,
-    event_tx: mpsc::UnboundedSender<HarnessActorEvent>,
-) {
-    while let Some(command) = command_rx.recv().await {
-        match command {
-            HarnessCommand::RunPrompt(prompt) => {
-                let _ = run_turn(
-                    &mut harness,
-                    &mut command_rx,
-                    &event_tx,
-                    UserRequest::Prompt(prompt),
-                )
-                .await;
-            }
-            HarnessCommand::RunSkill(name) => {
-                let _ = run_turn(
-                    &mut harness,
-                    &mut command_rx,
-                    &event_tx,
-                    UserRequest::Skill(name),
-                )
-                .await;
-            }
-            HarnessCommand::GetSkills { reply_tx } => {
-                let skills = harness.list_skills();
-                let _ = reply_tx.send(Ok(skills));
-            }
-            HarnessCommand::ReloadSkills { reply_tx } => {
-                let skills = harness.reload_skills();
-                let _ = reply_tx.send(Ok(skills));
-            }
-            HarnessCommand::RebuildAgent { agent, reply_tx } => {
-                harness.reload_agent(agent);
-                let _ = reply_tx.send(Ok(harness.snapshot()));
-            }
-            HarnessCommand::SetModel { model, reply_tx } => {
-                let result = harness
-                    .set_model(model)
-                    .await
-                    .map(|_| harness.snapshot())
-                    .map_err(|err| err.to_string());
-                let _ = reply_tx.send(result);
-            }
-            HarnessCommand::SetAgent { agent, reply_tx } => {
-                harness.set_agent(agent);
-                let _ = reply_tx.send(Ok(harness.snapshot()));
-            }
-            HarnessCommand::NewSession { reply_tx } => {
-                let result = harness
-                    .new_session()
-                    .map(|_| harness.snapshot())
-                    .map_err(|err| err.to_string());
-                let _ = reply_tx.send(result);
-            }
-            HarnessCommand::ForkSession { reply_tx } => {
-                let result = harness
-                    .fork_session()
-                    .map(|_| harness.snapshot())
-                    .map_err(|err| err.to_string());
-                let _ = reply_tx.send(result);
-            }
-            HarnessCommand::LoadSession {
-                session_id,
-                reply_tx,
-            } => {
-                let result = harness
-                    .load_session_by_id(&session_id)
-                    .map(|_| harness.snapshot())
-                    .map_err(|err| err.to_string());
-                let _ = reply_tx.send(result);
-            }
-            HarnessCommand::ToggleStreaming { reply_tx } => {
-                harness.set_streaming(!harness.streaming());
-                let _ = reply_tx.send(Ok(harness.snapshot()));
-            }
-            HarnessCommand::TogglePlanMode { reply_tx } => {
-                harness.set_plan_mode(!harness.plan_mode());
-                let _ = reply_tx.send(Ok(harness.snapshot()));
-            }
-            HarnessCommand::ReplayHistory { reply_tx } => {
-                let mut events = Vec::new();
-                harness.replay_history(|event| events.push(event));
-                let _ = event_tx.send(HarnessActorEvent::HistoryReplayed(events));
-                let _ = reply_tx.send(Ok(harness.snapshot()));
-            }
-            HarnessCommand::Compact => {
-                let _ = run_compaction(&mut harness, &mut command_rx, &event_tx).await;
-            }
-            HarnessCommand::Cancel => {
-                harness.set_cancel(true);
-            }
-            HarnessCommand::Info { reply_tx } => {
-                let info = harness.session_info();
-                let _ = reply_tx.send(Ok(info.lock().unwrap().clone()));
-            }
-            HarnessCommand::Shutdown { reply_tx } => {
-                let _ = reply_tx.send(Ok(harness.snapshot()));
-                break;
+                HarnessCommand::GetSkills => {
+                    let skills = self.harness.list_skills();
+                    let _ = self.tx.send(CommandReply::SkillsListed(Ok(skills)).into());
+                }
+                HarnessCommand::ReloadSkills => {
+                    let skills = self.harness.reload_skills();
+                    let _ = self
+                        .tx
+                        .send(CommandReply::SkillsReloaded(Ok(skills)).into());
+                }
+                HarnessCommand::RebuildAgent(agent) => {
+                    self.harness.reload_agent(agent);
+                    let _ = self
+                        .tx
+                        .send(CommandReply::AgentRebuilt(Ok(self.harness.snapshot())).into());
+                }
+                HarnessCommand::SetModel(model) => {
+                    let result = self
+                        .harness
+                        .set_model(model.clone())
+                        .await
+                        .map(|_| self.harness.snapshot())
+                        .map_err(|err| err.to_string());
+                    let _ = self
+                        .tx
+                        .send(CommandReply::ModelSet { result, model }.into());
+                }
+                HarnessCommand::SetAgent(agent) => {
+                    let name = agent.name.clone();
+                    self.harness.set_agent(agent);
+                    let _ = self.tx.send(
+                        CommandReply::AgentSet {
+                            result: Ok(self.harness.snapshot()),
+                            name,
+                        }
+                        .into(),
+                    );
+                }
+                HarnessCommand::NewSession => {
+                    let result = self
+                        .harness
+                        .new_session()
+                        .map(|_| self.harness.snapshot())
+                        .map_err(|err| err.to_string());
+                    let _ = self.tx.send(CommandReply::SessionCreated(result).into());
+                }
+                HarnessCommand::ForkSession => {
+                    let result = self
+                        .harness
+                        .fork_session()
+                        .map(|_| self.harness.snapshot())
+                        .map_err(|err| err.to_string());
+                    let _ = self.tx.send(CommandReply::SessionForked(result).into());
+                }
+                HarnessCommand::LoadSession(session_id) => {
+                    let result = self
+                        .harness
+                        .load_session_by_id(&session_id)
+                        .map(|_| self.harness.snapshot())
+                        .map_err(|err| err.to_string());
+                    let _ = self.tx.send(CommandReply::SessionLoaded(result).into());
+                }
+                HarnessCommand::ToggleStreaming => {
+                    self.harness.set_streaming(!self.harness.streaming());
+                    let _ = self
+                        .tx
+                        .send(CommandReply::StreamingToggled(Ok(self.harness.snapshot())).into());
+                }
+                HarnessCommand::TogglePlanMode => {
+                    self.harness.set_plan_mode(!self.harness.plan_mode());
+                    let _ = self
+                        .tx
+                        .send(CommandReply::PlanModeToggled(Ok(self.harness.snapshot())).into());
+                }
+                HarnessCommand::ReplayHistory => {
+                    let mut events = Vec::new();
+                    self.harness.replay_history(|event| events.push(event));
+                    let _ = self.tx.send(HarnessActorEvent::HistoryReplayed(events));
+                }
+                HarnessCommand::Compact => {
+                    let _ = self.run_compaction().await;
+                }
+                HarnessCommand::Cancel => {
+                    self.harness.set_cancel(true);
+                }
+                HarnessCommand::Info => {
+                    let info = self.harness.session_info();
+                    let info = info.lock().unwrap().clone();
+                    let _ = self.tx.send(CommandReply::SessionInfo(Ok(info)).into());
+                }
+                HarnessCommand::Shutdown => {
+                    let _ = self.tx.send(HarnessActorEvent::ShutdownComplete(Ok(self
+                        .harness
+                        .snapshot())));
+                    break;
+                }
             }
         }
     }

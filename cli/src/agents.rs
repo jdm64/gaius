@@ -135,12 +135,16 @@ impl Agents {
     }
 
     pub fn save_last(agent: &AgentDefinition) -> Result<(), Box<dyn Error>> {
+        Self::save_last_name(&agent.name)
+    }
+
+    pub fn save_last_name(name: &str) -> Result<(), Box<dyn Error>> {
         let path = Dirs::last_agent()?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        std::fs::write(path, serde_json::to_string(&agent.name)?)?;
+        std::fs::write(path, serde_json::to_string(&name)?)?;
         Ok(())
     }
 

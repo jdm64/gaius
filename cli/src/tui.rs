@@ -7,7 +7,7 @@ use crate::{
     config::Config,
     diff_view::DiffView,
     harness::{Harness, HarnessEvent, HarnessSnapshot},
-    harness_actor::{HarnessActorEvent, HarnessActorHandle},
+    harness_actor::{HarnessActorClient, HarnessActorEvent, HarnessCommand},
     input::{InputMode, PromptEditor},
     render::{Render, history::DisplayPrefs, layout::HistoryLayout},
     selection::Selection,
@@ -29,10 +29,14 @@ use std::{
     io::{self, Stdout},
     time::Duration,
 };
-use tokio::time::{self, Instant};
+use tokio::{
+    sync::mpsc,
+    time::{self, Instant},
+};
 
 const STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 15);
 const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 60);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub enum RenderReason {
     UserUI,
@@ -135,11 +139,11 @@ impl TuiApp {
         if let Err(e) = self.editor.load_prompt_history() {
             eprintln!("Failed to load prompt history: {}", e);
         }
-        let mut latest_snapshot = harness.snapshot();
-        let mut actor = HarnessActorHandle::new(harness)?;
-        self.save_snapshot(&latest_snapshot);
+        let initial_snapshot = harness.snapshot();
+        let mut actor = HarnessActorClient::new(harness)?;
+        self.save_snapshot(&initial_snapshot);
 
-        if latest_snapshot.model.id.is_empty() {
+        if initial_snapshot.model.id.is_empty() {
             self.push_message(TuiMessage::SystemMessage(
                 "No model selected, use /models to configure a model first".to_string(),
             ));
@@ -174,8 +178,10 @@ impl TuiApp {
                         _ => RenderReason::UserUI,
                     };
 
-                    if let Some(snapshot) = self.handle_actor_event(actor_event) {
-                        latest_snapshot = snapshot;
+                    if let Some(command) = self.handle_actor_event(actor_event)
+                        && let Err(err) = actor.send(command).await
+                    {
+                        self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
                     }
                 }
                 _ = time::sleep_until(next_render.unwrap_or(Instant::now())), if next_render.is_some() => {
@@ -215,19 +221,22 @@ impl TuiApp {
         }
 
         if self.actor_busy {
-            Ok(latest_snapshot)
-        } else {
-            match actor.shutdown().await {
-                Ok(snapshot) => Ok(snapshot),
-                Err(_) => Ok(latest_snapshot),
-            }
+            return Ok(self.snapshot.clone());
         }
+
+        let _ = actor.shutdown().await;
+        if let Some(snapshot) = wait_for_shutdown(&mut actor.rx).await {
+            self.save_snapshot(&snapshot);
+            return Ok(snapshot);
+        }
+
+        Ok(self.snapshot.clone())
     }
 
     async fn handle_terminal_event(
         &mut self,
         event: Event,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
     ) -> Result<(), Box<dyn Error>> {
         let key = match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => key,
@@ -286,7 +295,7 @@ impl TuiApp {
     pub async fn queue_prompt(
         &mut self,
         prompt: String,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
     ) -> Result<(), Box<dyn Error>> {
         self.agents.mark_recent(&self.snapshot.agent_name);
         self.editor.update_prompt_history(prompt.clone());
@@ -301,12 +310,12 @@ impl TuiApp {
         Ok(())
     }
 
-    fn handle_actor_event(&mut self, event: HarnessActorEvent) -> Option<HarnessSnapshot> {
+    pub fn handle_actor_event(&mut self, event: HarnessActorEvent) -> Option<HarnessCommand> {
         match event {
             HarnessActorEvent::Harness(event) => {
                 self.apply_harness_event(event);
-                None
             }
+            HarnessActorEvent::Command(reply) => return self.handle_command_reply(reply),
             HarnessActorEvent::AskUser {
                 title,
                 options,
@@ -319,14 +328,12 @@ impl TuiApp {
                     options,
                     selected: 0,
                 };
-                None
             }
             HarnessActorEvent::TurnFinished(snapshot) => {
                 self.actor_busy = false;
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
                 self.editor.set_status("");
-                Some(snapshot)
             }
             HarnessActorEvent::RequestFailed(err, snapshot) => {
                 self.actor_busy = false;
@@ -334,16 +341,31 @@ impl TuiApp {
                 self.save_snapshot(&snapshot);
                 self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
                 self.editor.set_status("Agent request failed");
-                Some(snapshot)
             }
             HarnessActorEvent::HistoryReplayed(events) => {
                 self.clear_messages();
                 for event in events {
                     self.apply_harness_event(event);
                 }
-                None
+            }
+            HarnessActorEvent::ShutdownComplete(result) => {
+                if let Ok(snapshot) = result {
+                    self.save_snapshot(&snapshot);
+                }
             }
         }
+        None
+    }
+
+    pub fn waiting_for_answer(&self) -> bool {
+        matches!(self.editor.mode, InputMode::Question { .. })
+    }
+
+    pub fn set_mode(&mut self, mode: InputMode) {
+        if self.waiting_for_answer() {
+            return;
+        }
+        self.editor.mode = mode;
     }
 
     pub fn save_snapshot(&mut self, snapshot: &HarnessSnapshot) {
@@ -535,4 +557,22 @@ impl TuiApp {
             break;
         }
     }
+}
+
+async fn wait_for_shutdown(
+    rx: &mut mpsc::UnboundedReceiver<HarnessActorEvent>,
+) -> Option<HarnessSnapshot> {
+    let shutdown = async {
+        while let Some(event) = rx.recv().await {
+            if let HarnessActorEvent::ShutdownComplete(result) = event {
+                return result.ok();
+            }
+        }
+        None
+    };
+
+    time::timeout(SHUTDOWN_TIMEOUT, shutdown)
+        .await
+        .ok()
+        .flatten()
 }

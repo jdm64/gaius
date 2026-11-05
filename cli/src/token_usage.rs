@@ -101,7 +101,7 @@ impl UsageInfo {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SessionInfo {
     pub id: Option<String>,
     pub usage: UsageInfo,

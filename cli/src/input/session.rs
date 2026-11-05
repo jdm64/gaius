@@ -4,7 +4,7 @@
 
 use crate::{
     commands::Command,
-    harness_actor::HarnessActorHandle,
+    harness_actor::HarnessActorClient,
     input::{InputMode, PromptEditor, picklist::PickList},
     session::{Session, SessionPickerRow},
     token_usage::SessionInfo,
@@ -17,7 +17,7 @@ impl InputMode {
         app: &mut TuiApp,
         key: KeyEvent,
         mut picker: PickList<SessionPickerRow>,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
     ) -> Self {
         app.editor.handle_input_cursor(key);
         match key.code {
@@ -42,26 +42,9 @@ impl InputMode {
                     if let Some(busy) = Command::busy_status(app, "loading a session") {
                         app.editor.set_status(busy);
                     } else {
-                        match actor.load_session(session_id.clone()).await {
-                            Ok(snapshot) => {
-                                app.save_snapshot(&snapshot);
-                                app.clear_messages();
-                                app.history.scroll_bottom();
-                                app.editor.set_status(format!(
-                                    "Loaded session: {}",
-                                    session.display_name()
-                                ));
-                                app.context_tokens = None;
-                                match actor.replay_history().await {
-                                    Ok(snapshot) => app.save_snapshot(&snapshot),
-                                    Err(err) => app.editor.set_status(err),
-                                }
-                                return Self::PromptInput;
-                            }
-                            Err(e) => {
-                                app.editor
-                                    .set_status(format!("Error loading session: {}", e));
-                            }
+                        if let Err(err) = actor.load_session(session_id.clone()).await {
+                            app.editor
+                                .set_status(format!("Error loading session: {}", err));
                         }
                     }
                 } else {

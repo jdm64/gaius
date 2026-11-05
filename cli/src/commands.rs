@@ -5,14 +5,13 @@
 use crate::{
     agents::Agents,
     dirs::Dirs,
-    harness_actor::HarnessActorHandle,
+    harness_actor::HarnessActorClient,
     input::{InputMode, picklist::PickList},
     models::ReasoningEffort,
     session::Session,
     theme::ColorTheme,
-    tui::{TuiApp, TuiMessage},
+    tui::TuiApp,
 };
-use std::future::Future;
 
 macro_rules! define_commands {
     ($($variant:ident => $name:literal, $description:literal;)*) => {
@@ -81,36 +80,24 @@ impl Command {
 
     pub async fn execute(
         app: &mut TuiApp,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
         command: Command,
     ) -> InputMode {
         match command {
             Self::New => {
-                match Self::when_idle(app, "creating a session", actor.new_session()).await {
-                    Ok(snapshot) => {
-                        app.save_snapshot(&snapshot);
-                        app.clear_messages();
-                        app.history.scroll_bottom();
-                        app.editor.set_status("New session created");
-                        app.context_tokens = None;
-                    }
-                    Err(e) => app.editor.set_status(e),
+                if let Some(busy) = Self::busy_status(app, "creating a session") {
+                    app.editor.set_status(busy);
+                } else if let Err(err) = actor.new_session().await {
+                    app.editor.set_status(err);
                 }
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
             Self::Fork => {
-                match Self::when_idle(app, "forking a session", actor.fork_session()).await {
-                    Ok(snapshot) => {
-                        app.save_snapshot(&snapshot);
-                        app.push_message(TuiMessage::SystemMessage(format!(
-                            "Session forked: {}",
-                            snapshot.session_id.unwrap_or("<unknown>".to_string()),
-                        )));
-                        app.editor.set_status("Forked session");
-                        app.history.scroll_bottom();
-                    }
-                    Err(e) => app.editor.set_status(e),
+                if let Some(busy) = Self::busy_status(app, "forking a session") {
+                    app.editor.set_status(busy);
+                } else if let Err(err) = actor.fork_session().await {
+                    app.editor.set_status(err);
                 }
                 app.editor.clear_input();
                 InputMode::PromptInput
@@ -136,18 +123,12 @@ impl Command {
                 }
             }
             Self::Skills => {
-                let skills = match actor.get_skills().await {
-                    Ok(skills) => skills,
-                    Err(err) => {
-                        app.editor
-                            .set_status(format!("Error loading skills: {}", err));
-                        Vec::new()
-                    }
-                };
-                app.editor.clear_input();
-                InputMode::Skills {
-                    picker: PickList::all(skills),
+                app.editor.status_clear_input("Loading skills...");
+                if let Err(err) = actor.get_skills().await {
+                    app.editor
+                        .set_status(format!("Error loading skills: {}", err));
                 }
+                InputMode::PromptInput
             }
             Self::Rebuild => {
                 if let Some(busy) = Self::busy_status(app, "rebuilding") {
@@ -181,12 +162,8 @@ impl Command {
                         .cloned()
                         .unwrap_or_else(|| app.agents.default_agent().clone());
 
-                    match actor.rebuild_agent(agent).await {
-                        Ok(snapshot) => {
-                            app.save_snapshot(&snapshot);
-                            app.editor.set_status("Rebuilt agent and system prompt");
-                        }
-                        Err(err) => app.editor.set_status(err),
+                    if let Err(err) = actor.rebuild_agent(agent).await {
+                        app.editor.set_status(err);
                     }
                 }
                 app.editor.clear_input();
@@ -207,25 +184,19 @@ impl Command {
                 app.editor.clear_input();
                 InputMode::PromptInput
             }
-            Self::Info => match actor.info().await {
-                Ok(info) => {
-                    app.editor.clear_input();
-                    InputMode::SessionInfo { info }
-                }
-                Err(e) => {
+            Self::Info => {
+                if let Err(err) = actor.info().await {
                     app.editor
-                        .status_clear_input(format!("Error getting session info: {}", e));
-                    InputMode::PromptInput
+                        .status_clear_input(format!("Error getting session info: {}", err));
                 }
-            },
+                app.editor.clear_input();
+                InputMode::PromptInput
+            }
             Self::Streaming => {
-                match Self::when_idle(app, "changing streaming", actor.toggle_streaming()).await {
-                    Ok(snapshot) => {
-                        app.save_snapshot(&snapshot);
-                        app.editor
-                            .set_status(format!("Streaming = {}", snapshot.streaming));
-                    }
-                    Err(e) => app.editor.set_status(e),
+                if let Some(busy) = Self::busy_status(app, "changing streaming") {
+                    app.editor.set_status(busy);
+                } else if let Err(err) = actor.toggle_streaming().await {
+                    app.editor.set_status(err);
                 }
                 app.editor.clear_input();
                 InputMode::PromptInput
@@ -269,13 +240,10 @@ impl Command {
                 InputMode::PromptInput
             }
             Self::Plan => {
-                match Self::when_idle(app, "changing plan mode", actor.toggle_plan_mode()).await {
-                    Ok(snapshot) => {
-                        app.save_snapshot(&snapshot);
-                        app.editor
-                            .set_status(format!("Plan mode = {}", snapshot.plan_mode_on));
-                    }
-                    Err(e) => app.editor.set_status(e),
+                if let Some(busy) = Self::busy_status(app, "changing plan mode") {
+                    app.editor.set_status(busy);
+                } else if let Err(err) = actor.toggle_plan_mode().await {
+                    app.editor.set_status(err);
                 }
                 app.editor.clear_input();
                 InputMode::PromptInput
@@ -298,16 +266,5 @@ impl Command {
 
     pub fn busy_status(app: &TuiApp, action: &str) -> Option<String> {
         (!app.harness_idle()).then(|| format!("Agent is busy; finish current turn before {action}"))
-    }
-
-    pub async fn when_idle<T>(
-        app: &TuiApp,
-        action: &str,
-        fut: impl Future<Output = Result<T, String>>,
-    ) -> Result<T, String> {
-        match Self::busy_status(app, action) {
-            Some(status) => Err(status),
-            None => fut.await,
-        }
     }
 }

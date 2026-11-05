@@ -3,9 +3,9 @@
  */
 
 use crate::{
-    agents::{AgentDefinition, Agents},
+    agents::AgentDefinition,
     commands::Command,
-    harness_actor::HarnessActorHandle,
+    harness_actor::HarnessActorClient,
     input::{InputMode, PromptEditor, picklist::PickList},
     skills::Skill,
     tui::TuiApp,
@@ -17,7 +17,7 @@ impl InputMode {
         app: &mut TuiApp,
         key: KeyEvent,
         mut picker: PickList<AgentDefinition>,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
     ) -> Self {
         app.editor.handle_input_cursor(key);
         match key.code {
@@ -43,19 +43,8 @@ impl InputMode {
                     app.editor.set_status(busy);
                     return Self::Agents { picker };
                 }
-                match actor.set_agent(selected_agent.clone()).await {
-                    Ok(snapshot) => {
-                        app.save_snapshot(&snapshot);
-                        app.snapshot.agent_name = selected_agent.name.clone();
-                        if let Err(err) = Agents::save_last(&selected_agent) {
-                            app.editor
-                                .set_status(format!("Failed to save last agent: {}", err));
-                        }
-                        app.editor
-                            .status_clear_input(format!("Selected agent: {}", selected_agent.name));
-                        return Self::PromptInput;
-                    }
-                    Err(err) => app.editor.set_status(err),
+                if let Err(err) = actor.set_agent(selected_agent).await {
+                    app.editor.set_status(err);
                 }
             }
             _ if PromptEditor::input_changed_key(key) => {
@@ -71,7 +60,7 @@ impl InputMode {
         app: &mut TuiApp,
         key: KeyEvent,
         mut picker: PickList<Skill>,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
     ) -> Self {
         app.editor.handle_input_cursor(key);
         match key.code {
@@ -108,18 +97,10 @@ impl InputMode {
                 }
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let skills = match actor.reload_skills().await {
-                    Ok(skills) => skills,
-                    Err(err) => {
-                        app.editor
-                            .set_status(format!("Error reloading skills: {}", err));
-                        Vec::new()
-                    }
-                };
-                let filtered = filter_skills(&app.editor.input, &skills);
-                picker.replace_rows(skills, filtered);
-                app.editor
-                    .set_status(format!("Reloaded {} skills", picker.rows.len()));
+                if let Err(err) = actor.reload_skills().await {
+                    app.editor
+                        .set_status(format!("Error reloading skills: {}", err));
+                }
             }
             _ if PromptEditor::input_changed_key(key) => {
                 picker.replace_filter(filter_skills(&app.editor.input, &picker.rows));
@@ -141,7 +122,7 @@ fn filter_agents(input: &str, agents: &[AgentDefinition]) -> Vec<usize> {
         .collect()
 }
 
-fn filter_skills(input: &str, skills: &[Skill]) -> Vec<usize> {
+pub fn filter_skills(input: &str, skills: &[Skill]) -> Vec<usize> {
     let query = input.trim().to_lowercase();
     skills
         .iter()

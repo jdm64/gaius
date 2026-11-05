@@ -27,5 +27,6 @@ pub mod token_usage;
 pub mod tool_engine;
 pub mod tools;
 pub mod tui;
+pub mod tui_actor;
 pub mod upgrade;
 pub mod util;

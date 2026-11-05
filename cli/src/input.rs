@@ -9,10 +9,10 @@ pub mod picklist;
 pub mod session;
 
 use crate::{
-    agents::{AgentDefinition, Agents},
+    agents::AgentDefinition,
     commands::Command,
     dirs::Dirs,
-    harness_actor::HarnessActorHandle,
+    harness_actor::HarnessActorClient,
     input::{file::FileEntry, model::ProviderInfoRow, picklist::PickList},
     models::{ModelPickerRow, ReasoningEffort},
     session::SessionPickerRow,
@@ -77,7 +77,7 @@ impl InputMode {
     pub async fn handle_mode(
         app: &mut TuiApp,
         key: KeyEvent,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
     ) -> Result<(), Box<dyn Error>> {
         let mode = std::mem::replace(&mut app.editor.mode, Self::PromptInput);
         app.editor.mode = match mode {
@@ -106,7 +106,7 @@ impl InputMode {
     pub async fn handle_prompt_input(
         app: &mut TuiApp,
         key: KeyEvent,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
     ) -> Result<Self, Box<dyn Error>> {
         app.editor.handle_input_cursor(key);
         match key.code {
@@ -144,19 +144,8 @@ impl InputMode {
                         app.editor.set_status(
                             "Agent is busy; finish current turn before changing agents",
                         );
-                    } else {
-                        let name = agent.name.clone();
-                        match actor.set_agent(agent.clone()).await {
-                            Ok(snapshot) => {
-                                app.save_snapshot(&snapshot);
-                                app.snapshot.agent_name = name;
-                                if let Err(err) = Agents::save_last(&agent) {
-                                    app.editor
-                                        .set_status(format!("Failed to save last agent: {}", err));
-                                }
-                            }
-                            Err(err) => app.editor.set_status(err),
-                        }
+                    } else if let Err(err) = actor.set_agent(agent).await {
+                        app.editor.set_status(err);
                     }
                 }
             }
@@ -192,7 +181,7 @@ impl InputMode {
         app: &mut TuiApp,
         key: KeyEvent,
         mut picker: PickList<Command>,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
     ) -> Self {
         app.editor.handle_input_cursor(key);
         match key.code {

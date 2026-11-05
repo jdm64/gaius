@@ -5,7 +5,7 @@
 use crate::{
     commands::Command,
     config::{Config, ProviderConfig},
-    harness_actor::HarnessActorHandle,
+    harness_actor::HarnessActorClient,
     input::{InputMode, PromptEditor, picklist::PickList},
     models::{ModelPickerRow, Models, ReasoningEffort, RecentModelDef},
     providers::ProviderDef,
@@ -18,7 +18,7 @@ impl InputMode {
         app: &mut TuiApp,
         key: KeyEvent,
         mut picker: PickList<ModelPickerRow>,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
     ) -> Self {
         app.editor.handle_input_cursor(key);
         match key.code {
@@ -61,18 +61,8 @@ impl InputMode {
                     return Self::Models { picker };
                 };
 
-                match actor.set_model(selected_model.clone()).await {
-                    Ok(snapshot) => {
-                        app.save_snapshot(&snapshot);
-                        app.snapshot.model = selected_model.clone();
-                        let _ = RecentModelDef::add(selected_model);
-                        app.editor.status_clear_input(format!(
-                            "Selected model: {}",
-                            selected_model.label()
-                        ));
-                        return Self::PromptInput;
-                    }
-                    Err(err) => app.editor.set_status(err),
+                if let Err(err) = actor.set_model(selected_model.clone()).await {
+                    app.editor.set_status(err);
                 }
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -228,7 +218,7 @@ impl InputMode {
         app: &mut TuiApp,
         key: KeyEvent,
         mut picker: PickList<ReasoningEffort>,
-        actor: &HarnessActorHandle,
+        actor: &HarnessActorClient,
     ) -> Self {
         app.editor.handle_input_cursor(key);
         match key.code {
@@ -262,16 +252,8 @@ impl InputMode {
                     Some(selected.clone())
                 };
 
-                match actor.set_model(model.clone()).await {
-                    Ok(snapshot) => {
-                        app.save_snapshot(&snapshot);
-                        app.snapshot.model = model;
-                        let _ = RecentModelDef::add(&app.snapshot.model);
-                        app.editor
-                            .status_clear_input(format!("Reasoning effort = {}", selected.label()));
-                        return Self::PromptInput;
-                    }
-                    Err(err) => app.editor.set_status(err),
+                if let Err(err) = actor.set_model(model).await {
+                    app.editor.set_status(err);
                 }
             }
             _ => {}
