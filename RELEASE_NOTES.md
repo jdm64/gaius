@@ -1,3 +1,11 @@
+## v0.5.1
+
+### Improvements
+- The installer now lets you choose an installation directory from writable locations on your `PATH`, with `~/.local/bin` as the default.
+- The theme picker now highlights the current theme, restores the saved theme when cancelled, and supports exiting with Ctrl+C.
+- Fixed the positioning of the info menu.
+- Clarified the `write` and `bash` tool descriptions, including the requirement to set `overwrite=true` when replacing an existing file.
+
 ## v0.5.0
 
 ### New features
