@@ -237,11 +237,18 @@ impl Command {
             }
             Self::Theme => {
                 app.editor.clear_input();
-                InputMode::Theme {
-                    picker: PickList::all(
-                        ColorTheme::names().iter().map(|n| n.to_string()).collect(),
-                    ),
-                }
+                let names: Vec<String> = ColorTheme::names()
+                    .iter()
+                    .map(|name| name.to_string())
+                    .collect();
+                let current = app.display_prefs.theme.name().to_string();
+                let mut picker = PickList::all(names);
+                picker.selected = picker
+                    .filtered
+                    .iter()
+                    .position(|&index| picker.rows[index] == current)
+                    .unwrap_or(0);
+                InputMode::Theme { picker, current }
             }
             Self::Reasoning => {
                 let efforts: Vec<ReasoningEffort> = ReasoningEffort::all().to_vec();

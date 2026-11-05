@@ -320,6 +320,7 @@ impl Render {
         frame: &mut Frame<'_>,
         area: Rect,
         picker: &PickList<String>,
+        current: &str,
     ) -> Option<Vec<(&'static str, &'static str)>> {
         self.draw_pick_list(
             frame,
@@ -331,7 +332,10 @@ impl Render {
                 empty_text: "No themes",
                 background: Style::default(),
             },
-            |name, _| ListItem::new(name.as_str()),
+            |name, _| {
+                let prefix = if name == current { ">" } else { " " };
+                ListItem::new(format!("{}{}", prefix, name))
+            },
         );
         Some(vec![
             ("Up/Down", "select"),

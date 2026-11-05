@@ -17,6 +17,7 @@ use crate::{
     models::{ModelPickerRow, ReasoningEffort},
     session::SessionPickerRow,
     skills::Skill,
+    theme::ColorTheme,
     token_usage::SessionInfo,
     tui::TuiApp,
     util::time_now_sec,
@@ -68,6 +69,7 @@ pub enum InputMode {
     },
     Theme {
         picker: PickList<String>,
+        current: String,
     },
 }
 
@@ -89,7 +91,7 @@ impl InputMode {
             Self::Files { picker } => app.editor.handle_files(key, picker).await,
             Self::Skills { picker } => Self::handle_skills(app, key, picker, actor).await,
             Self::Reasoning { picker } => Self::handle_reasoning(app, key, picker, actor).await,
-            Self::Theme { picker } => Self::handle_theme(app, key, picker),
+            Self::Theme { picker, current } => Self::handle_theme(app, key, picker, current),
             Self::Question {
                 title: _,
                 options: _,
@@ -224,21 +226,30 @@ impl InputMode {
         Self::Command { picker }
     }
 
-    pub fn handle_theme(app: &mut TuiApp, key: KeyEvent, mut picker: PickList<String>) -> Self {
+    pub fn handle_theme(
+        app: &mut TuiApp,
+        key: KeyEvent,
+        mut picker: PickList<String>,
+        current: String,
+    ) -> Self {
         match key.code {
             KeyCode::Esc => {
+                app.display_prefs.theme = ColorTheme::from_name(&current);
                 return Self::PromptInput;
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Self::Exit;
             }
             KeyCode::Up => {
                 picker.move_up();
                 if let Some(name) = picker.selected_row() {
-                    app.display_prefs.theme = crate::theme::ColorTheme::from_name(name);
+                    app.display_prefs.theme = ColorTheme::from_name(name);
                 }
             }
             KeyCode::Down => {
                 picker.move_down();
                 if let Some(name) = picker.selected_row() {
-                    app.display_prefs.theme = crate::theme::ColorTheme::from_name(name);
+                    app.display_prefs.theme = ColorTheme::from_name(name);
                 }
             }
             KeyCode::Enter => {
@@ -250,7 +261,7 @@ impl InputMode {
             }
             _ => {}
         }
-        Self::Theme { picker }
+        Self::Theme { picker, current }
     }
 }
 

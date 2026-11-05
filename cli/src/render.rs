@@ -109,7 +109,7 @@ impl Render {
             InputMode::Reasoning { picker } => {
                 self.draw_reasoning(frame, area, picker, app.snapshot.model.reasoning.clone())
             }
-            InputMode::Theme { picker } => self.draw_theme(frame, area, picker),
+            InputMode::Theme { picker, current } => self.draw_theme(frame, area, picker, current),
         }
     }
 
