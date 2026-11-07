@@ -193,23 +193,12 @@ impl Render {
                 arguments,
                 start_time,
             } => {
-                let style = self.theme.toolcall_style();
-                let json_args = from_str::<Value>(arguments).unwrap_or_default();
-                let tool_name = ToolName::from_name(name.as_str());
-                let display = tool_name.map_or_else(String::new, |tool| {
-                    Self::arguments_json_fields(&json_args, tool.display_fields())
-                });
-
-                let mut lines = vec![Line::from(vec![
-                    Span::styled(name.clone(), style.add_modifier(Modifier::BOLD)),
-                    Span::raw(" "),
-                    Span::styled(display, style.add_modifier(Modifier::ITALIC)),
-                ])];
-
+                let mut lines = vec![];
+                self.render_tool_call(name, arguments, Some(text_width), &mut lines);
                 if *start_time != 0 {
+                    let style = self.theme.toolcall_style();
                     lines.push(RenderUtil::duration_line(*start_time, style));
                 }
-
                 lines
             }
             TuiMessage::ToolResult {
@@ -217,24 +206,9 @@ impl Render {
                 result,
                 status,
             } => {
-                let style = self.theme.toolcall_style();
-                let json_args = Value::Null;
-                let tool_name = ToolName::from_name(name.as_str());
-                let mut ret = Vec::new();
-                if *status != ToolStatus::Valid {
-                    let mut e_style = self.theme.error_style();
-                    if *status == ToolStatus::Failure {
-                        e_style = e_style.crossed_out().dim()
-                    }
-                    let error_lines: Vec<&str> = result.split('\n').collect();
-                    for i in error_lines {
-                        if !i.is_empty() {
-                            ret.push(Line::from(Span::styled(format!("  {}", i), e_style)));
-                        }
-                    }
-                }
-                Self::render_tool_results(tool_name, &json_args, result, &mut ret, style);
-                ret
+                let mut lines = vec![];
+                self.render_tool_results(name, result, status, &mut lines);
+                lines
             }
             TuiMessage::SystemMessage(text) => {
                 let style = self.theme.error_style().add_modifier(Modifier::BOLD);
@@ -335,31 +309,66 @@ impl Render {
         lines
     }
 
-    fn render_tool_results(
-        name: Option<ToolName>,
-        args: &Value,
-        result: &str,
+    fn render_tool_call(
+        &self,
+        name: &str,
+        arguments: &str,
+        width: Option<u16>,
         lines: &mut Vec<Line>,
-        style: Style,
     ) {
-        match name {
-            Some(ToolName::Ask) => {
-                let answers = result
-                    .split("\n")
-                    .map(|l| " - ".to_string() + l)
-                    .collect::<Vec<_>>();
-                for l in answers {
-                    lines.push(Line::from(Span::styled::<String, Style>(l, style)));
+        let style = self.theme.toolcall_style();
+        let json_args = from_str::<Value>(arguments).unwrap_or_default();
+        let tool_name = ToolName::from_name(name);
+        let display = tool_name.map_or_else(String::new, |tool| {
+            Self::arguments_json_fields(&json_args, tool.display_fields())
+        });
+
+        lines.push(Line::from(vec![
+            Span::styled(name.to_string(), style.add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::styled(display, style.add_modifier(Modifier::ITALIC)),
+        ]));
+
+        if tool_name == Some(ToolName::Plan) {
+            let plan = RenderUtil::plan_to_md(&json_args);
+            if !plan.is_empty() {
+                lines.push(Line::raw(" "));
+                lines.extend(Self::render_markdown(&plan, width, None));
+                lines.push(Line::raw(" "));
+            }
+        }
+    }
+
+    fn render_tool_results(
+        &self,
+        name: &str,
+        result: &str,
+        status: &ToolStatus,
+        lines: &mut Vec<Line>,
+    ) {
+        let style = self.theme.toolcall_style();
+        let tool_name = ToolName::from_name(name);
+        if *status != ToolStatus::Valid {
+            let mut e_style = self.theme.error_style();
+            if *status == ToolStatus::Failure {
+                e_style = e_style.crossed_out().dim()
+            }
+            let error_lines: Vec<&str> = result.split('\n').collect();
+            for i in error_lines {
+                if !i.is_empty() {
+                    lines.push(Line::from(Span::styled(format!("  {}", i), e_style)));
                 }
             }
-            Some(ToolName::Plan) => {
-                let md = RenderUtil::plan_to_md(args);
-                let rendered_lines = Self::render_markdown(&md, None, None);
-                lines.push(Line::raw(" "));
-                lines.extend(rendered_lines);
-                lines.push(Line::raw(" "));
+        }
+
+        if tool_name == Some(ToolName::Ask) {
+            let answers = result
+                .split("\n")
+                .map(|l| " - ".to_string() + l)
+                .collect::<Vec<_>>();
+            for l in answers {
+                lines.push(Line::from(Span::styled::<String, Style>(l, style)));
             }
-            _ => {}
         }
     }
 

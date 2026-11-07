@@ -7,6 +7,7 @@ use crate::{
     diff_view::DiffView,
     render::util::RenderUtil,
     tool_engine::{ToolResult, ToolStatus},
+    tools::ToolName,
     util::time_now,
 };
 use genai::chat::{ChatMessage, ContentPart, CustomPart, ToolCall, ToolResponse};
@@ -36,7 +37,7 @@ impl Harness {
                     self.send_tool_result_event(tc, answer, status, on_event);
                 }
                 ToolResult::Text(text) => {
-                    if tc.fn_name == "plan" {
+                    if tc.fn_name == ToolName::Plan.as_str() {
                         let plan_text = RenderUtil::plan_to_md(&tc.fn_arguments);
                         self.last_plan_content = Some(plan_text);
                     }

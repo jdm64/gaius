@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::util::time_now;
+use crate::{tools::ArgName, util::time_now};
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
@@ -94,7 +94,7 @@ impl RenderUtil {
     }
 
     pub fn plan_to_md(args: &Value) -> String {
-        args.get("content")
+        args.get(ArgName::Plan)
             .and_then(|g| g.as_str())
             .unwrap_or_default()
             .to_string()
