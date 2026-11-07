@@ -39,14 +39,14 @@ async fn skills_command_answers_with_the_skill_list() {
 }
 
 #[tokio::test]
-async fn toggle_streaming_answers_with_the_new_snapshot() {
+async fn toggle_streaming_answers_with_the_new_value() {
     let (mut actor, initial) = actor();
 
     actor.toggle_streaming().await.unwrap();
 
     match actor.rx.recv().await {
-        Some(HarnessActorEvent::Command(CommandReply::StreamingToggled(Ok(snapshot)))) => {
-            assert_eq!(snapshot.streaming, !initial.streaming);
+        Some(HarnessActorEvent::Command(CommandReply::StreamingToggled(Ok(streaming)))) => {
+            assert_eq!(streaming, !initial.streaming);
         }
         other => panic!("expected a StreamingToggled event, got {other:?}"),
     }

@@ -16,8 +16,8 @@ use crate::{
 impl TuiApp {
     pub fn handle_command_reply(&mut self, reply: CommandReply) -> Option<HarnessCommand> {
         match reply {
-            CommandReply::ModelSet { result, model } => self.handle_model_set(result, model),
-            CommandReply::AgentSet { result, name } => self.handle_agent_set(result, name),
+            CommandReply::ModelSet(result) => self.handle_model_set(result),
+            CommandReply::AgentSet(result) => self.handle_agent_set(result),
             CommandReply::AgentRebuilt(result) => self.handle_agent_rebuilt(result),
             CommandReply::SessionCreated(result) => self.handle_session_created(result),
             CommandReply::SessionForked(result) => self.handle_session_forked(result),
@@ -31,10 +31,9 @@ impl TuiApp {
         None
     }
 
-    pub fn handle_model_set(&mut self, result: OperationResult<HarnessSnapshot>, model: ModelDef) {
+    pub fn handle_model_set(&mut self, result: OperationResult<ModelDef>) {
         match result {
-            Ok(snapshot) => {
-                self.save_snapshot(&snapshot);
+            Ok(model) => {
                 self.snapshot.model = model.clone();
                 let _ = RecentModelDef::add(&model);
                 if self.waiting_for_answer() {
@@ -48,10 +47,9 @@ impl TuiApp {
         }
     }
 
-    pub fn handle_agent_set(&mut self, result: OperationResult<HarnessSnapshot>, name: String) {
+    pub fn handle_agent_set(&mut self, result: OperationResult<String>) {
         match result {
-            Ok(snapshot) => {
-                self.save_snapshot(&snapshot);
+            Ok(name) => {
                 self.snapshot.agent_name = name.clone();
                 if let Err(err) = Agents::save_last_name(&name) {
                     self.editor
@@ -68,10 +66,10 @@ impl TuiApp {
         }
     }
 
-    pub fn handle_agent_rebuilt(&mut self, result: OperationResult<HarnessSnapshot>) {
+    pub fn handle_agent_rebuilt(&mut self, result: OperationResult<String>) {
         match result {
-            Ok(snapshot) => {
-                self.save_snapshot(&snapshot);
+            Ok(name) => {
+                self.snapshot.agent_name = name;
                 self.editor.set_status("Rebuilt agent and system prompt");
             }
             Err(err) => self.editor.set_status(err),
@@ -135,23 +133,21 @@ impl TuiApp {
         }
     }
 
-    pub fn handle_streaming_toggled(&mut self, result: OperationResult<HarnessSnapshot>) {
+    pub fn handle_streaming_toggled(&mut self, result: OperationResult<bool>) {
         match result {
-            Ok(snapshot) => {
-                self.save_snapshot(&snapshot);
-                self.editor
-                    .set_status(format!("Streaming = {}", snapshot.streaming));
+            Ok(streaming) => {
+                self.snapshot.streaming = streaming;
+                self.editor.set_status(format!("Streaming = {}", streaming));
             }
             Err(err) => self.editor.set_status(err),
         }
     }
 
-    pub fn handle_plan_mode_toggled(&mut self, result: OperationResult<HarnessSnapshot>) {
+    pub fn handle_plan_mode_toggled(&mut self, result: OperationResult<bool>) {
         match result {
-            Ok(snapshot) => {
-                self.save_snapshot(&snapshot);
-                self.editor
-                    .set_status(format!("Plan mode = {}", snapshot.plan_mode_on));
+            Ok(plan_mode) => {
+                self.snapshot.plan_mode_on = plan_mode;
+                self.editor.set_status(format!("Plan mode = {}", plan_mode));
             }
             Err(err) => self.editor.set_status(err),
         }

@@ -64,20 +64,14 @@ pub enum HarnessCommand {
 
 #[derive(Debug)]
 pub enum CommandReply {
-    ModelSet {
-        result: OperationResult<HarnessSnapshot>,
-        model: ModelDef,
-    },
-    AgentSet {
-        result: OperationResult<HarnessSnapshot>,
-        name: String,
-    },
-    AgentRebuilt(OperationResult<HarnessSnapshot>),
+    ModelSet(OperationResult<ModelDef>),
+    AgentSet(OperationResult<String>),
+    AgentRebuilt(OperationResult<String>),
     SessionCreated(OperationResult<HarnessSnapshot>),
     SessionForked(OperationResult<HarnessSnapshot>),
     SessionLoaded(OperationResult<HarnessSnapshot>),
-    StreamingToggled(OperationResult<HarnessSnapshot>),
-    PlanModeToggled(OperationResult<HarnessSnapshot>),
+    StreamingToggled(OperationResult<bool>),
+    PlanModeToggled(OperationResult<bool>),
     SkillsListed(OperationResult<Vec<Skill>>),
     SkillsReloaded(OperationResult<Vec<Skill>>),
     SessionInfo(OperationResult<SessionInfo>),
@@ -346,32 +340,23 @@ impl HarnessActorServer {
                         .send(CommandReply::SkillsReloaded(Ok(skills)).into());
                 }
                 HarnessCommand::RebuildAgent(agent) => {
+                    let name = agent.name.clone();
                     self.harness.reload_agent(agent);
-                    let _ = self
-                        .tx
-                        .send(CommandReply::AgentRebuilt(Ok(self.harness.snapshot())).into());
+                    let _ = self.tx.send(CommandReply::AgentRebuilt(Ok(name)).into());
                 }
                 HarnessCommand::SetModel(model) => {
                     let result = self
                         .harness
                         .set_model(model.clone())
                         .await
-                        .map(|_| self.harness.snapshot())
+                        .map(|_| model.clone())
                         .map_err(|err| err.to_string());
-                    let _ = self
-                        .tx
-                        .send(CommandReply::ModelSet { result, model }.into());
+                    let _ = self.tx.send(CommandReply::ModelSet(result).into());
                 }
                 HarnessCommand::SetAgent(agent) => {
                     let name = agent.name.clone();
                     self.harness.set_agent(agent);
-                    let _ = self.tx.send(
-                        CommandReply::AgentSet {
-                            result: Ok(self.harness.snapshot()),
-                            name,
-                        }
-                        .into(),
-                    );
+                    let _ = self.tx.send(CommandReply::AgentSet(Ok(name)).into());
                 }
                 HarnessCommand::NewSession => {
                     let result = self
@@ -398,16 +383,18 @@ impl HarnessActorServer {
                     let _ = self.tx.send(CommandReply::SessionLoaded(result).into());
                 }
                 HarnessCommand::ToggleStreaming => {
-                    self.harness.set_streaming(!self.harness.streaming());
+                    let streaming = !self.harness.streaming();
+                    self.harness.set_streaming(streaming);
                     let _ = self
                         .tx
-                        .send(CommandReply::StreamingToggled(Ok(self.harness.snapshot())).into());
+                        .send(CommandReply::StreamingToggled(Ok(streaming)).into());
                 }
                 HarnessCommand::TogglePlanMode => {
-                    self.harness.set_plan_mode(!self.harness.plan_mode());
+                    let plan_mode = !self.harness.plan_mode();
+                    self.harness.set_plan_mode(plan_mode);
                     let _ = self
                         .tx
-                        .send(CommandReply::PlanModeToggled(Ok(self.harness.snapshot())).into());
+                        .send(CommandReply::PlanModeToggled(Ok(plan_mode)).into());
                 }
                 HarnessCommand::ReplayHistory => {
                     let mut events = Vec::new();
