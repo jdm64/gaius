@@ -100,6 +100,8 @@ impl Command {
         actor: &HarnessActorClient,
         command: Command,
     ) -> InputMode {
+        app.editor.clear_input();
+
         match command {
             Self::New => {
                 if let Some(busy) = Self::busy_status(app, "creating a session") {
@@ -107,8 +109,6 @@ impl Command {
                 } else if let Err(err) = actor.new_session().await {
                     app.editor.set_status(err);
                 }
-                app.editor.clear_input();
-                InputMode::PromptInput
             }
             Self::Fork => {
                 if let Some(busy) = Self::busy_status(app, "forking a session") {
@@ -116,27 +116,23 @@ impl Command {
                 } else if let Err(err) = actor.fork_session().await {
                     app.editor.set_status(err);
                 }
-                app.editor.clear_input();
-                InputMode::PromptInput
             }
             Self::Sessions => {
-                let sessions = Session::list();
-                app.editor.clear_input();
-                InputMode::Session {
-                    picker: Session::picker_rows(sessions, ""),
-                }
+                return InputMode::Session {
+                    picker: Session::picker_rows(Session::list(), ""),
+                };
             }
             Self::Models => {
                 app.editor.status_clear_input("Loading models...");
-                app.editor.build_models(&app.config).await
+                return app.editor.build_models(&app.config).await;
             }
             Self::Agents => {
                 let agents = app.config.agents().all().to_vec();
                 app.editor
                     .status_clear_input(format!("Loaded {} agents", agents.len()));
-                InputMode::Agents {
+                return InputMode::Agents {
                     picker: PickList::all(agents),
-                }
+                };
             }
             Self::Skills => {
                 app.editor.status_clear_input("Loading skills...");
@@ -144,7 +140,6 @@ impl Command {
                     app.editor
                         .set_status(format!("Error loading skills: {}", err));
                 }
-                InputMode::PromptInput
             }
             Self::Rebuild => {
                 if let Some(busy) = Self::busy_status(app, "rebuilding") {
@@ -182,8 +177,6 @@ impl Command {
                         app.editor.set_status(err);
                     }
                 }
-                app.editor.clear_input();
-                InputMode::PromptInput
             }
             Self::Compact => {
                 if let Some(busy) = Self::busy_status(app, "compacting") {
@@ -197,16 +190,12 @@ impl Command {
                     }
                     app.actor_busy = false;
                 }
-                app.editor.clear_input();
-                InputMode::PromptInput
             }
             Self::Info => {
                 if let Err(err) = actor.info().await {
                     app.editor
                         .status_clear_input(format!("Error getting session info: {}", err));
                 }
-                app.editor.clear_input();
-                InputMode::PromptInput
             }
             Self::Streaming => {
                 if let Some(busy) = Self::busy_status(app, "changing streaming") {
@@ -214,16 +203,11 @@ impl Command {
                 } else if let Err(err) = actor.toggle_streaming().await {
                     app.editor.set_status(err);
                 }
-                app.editor.clear_input();
-                InputMode::PromptInput
             }
             Self::ShowThinking => {
                 app.toggle_thinking();
-                app.editor.clear_input();
-                InputMode::PromptInput
             }
             Self::Theme => {
-                app.editor.clear_input();
                 let names: Vec<String> = ColorTheme::names()
                     .iter()
                     .map(|name| name.to_string())
@@ -235,25 +219,19 @@ impl Command {
                     .iter()
                     .position(|&index| picker.rows[index] == current)
                     .unwrap_or(0);
-                InputMode::Theme { picker, current }
+                return InputMode::Theme { picker, current };
             }
             Self::Reasoning => {
                 let efforts: Vec<ReasoningEffort> = ReasoningEffort::all().to_vec();
-                let filtered = (0..efforts.len()).collect();
-                app.editor.clear_input();
-                InputMode::Reasoning {
-                    picker: PickList::new(efforts, filtered),
-                }
+                return InputMode::Reasoning {
+                    picker: PickList::all(efforts),
+                };
             }
             Self::ShowTokens => {
                 app.toggle_token_info();
-                app.editor.clear_input();
-                InputMode::PromptInput
             }
             Self::ShowDiff => {
                 app.toggle_diff_view();
-                app.editor.clear_input();
-                InputMode::PromptInput
             }
             Self::Plan => {
                 if let Some(busy) = Self::busy_status(app, "changing plan mode") {
@@ -261,10 +239,10 @@ impl Command {
                 } else if let Err(err) = actor.toggle_plan_mode().await {
                     app.editor.set_status(err);
                 }
-                app.editor.clear_input();
-                InputMode::PromptInput
             }
         }
+
+        InputMode::PromptInput
     }
 
     pub fn busy_status(app: &TuiApp, action: &str) -> Option<String> {
