@@ -222,10 +222,19 @@ impl Command {
                 return InputMode::Theme { picker, current };
             }
             Self::Reasoning => {
-                let efforts: Vec<ReasoningEffort> = ReasoningEffort::all().to_vec();
-                return InputMode::Reasoning {
-                    picker: PickList::all(efforts),
-                };
+                let mut picker = PickList::all(ReasoningEffort::all().to_vec());
+                let current = app
+                    .snapshot
+                    .model
+                    .reasoning
+                    .clone()
+                    .unwrap_or(ReasoningEffort::Default);
+                picker.selected = picker
+                    .filtered
+                    .iter()
+                    .position(|&index| picker.rows[index] == current)
+                    .unwrap_or(0);
+                return InputMode::Reasoning { picker };
             }
             Self::ShowTokens => {
                 app.toggle_token_info();
