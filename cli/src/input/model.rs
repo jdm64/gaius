@@ -217,7 +217,6 @@ impl InputMode {
         mut picker: PickList<ReasoningEffort>,
         actor: &HarnessActorClient,
     ) -> Self {
-        app.editor.handle_input_cursor(key);
         match key.code {
             KeyCode::Esc => {
                 app.editor.clear_input();
