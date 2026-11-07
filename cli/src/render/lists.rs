@@ -188,6 +188,7 @@ impl Render {
         frame: &mut Frame<'_>,
         area: Rect,
         picker: &PickList<AgentDefinition>,
+        current_agent: &str,
     ) -> Option<Vec<(&'static str, &'static str)>> {
         self.draw_pick_list(
             frame,
@@ -199,7 +200,14 @@ impl Render {
                 empty_text: "No matching agents",
                 background: Style::default(),
             },
-            |agent, _index| ListItem::new(format!("{}: {}", agent.name.as_str(), agent.desc)),
+            |agent, _index| {
+                let marker = if agent.name == current_agent {
+                    ">"
+                } else {
+                    " "
+                };
+                ListItem::new(format!("{marker}{}: {}", agent.name, agent.desc))
+            },
         );
         Some(vec![
             ("Type", "filter"),

@@ -130,9 +130,13 @@ impl Command {
                 let agents = app.config.agents().all().to_vec();
                 app.editor
                     .status_clear_input(format!("Loaded {} agents", agents.len()));
-                return InputMode::Agents {
-                    picker: PickList::all(agents),
-                };
+                let mut picker = PickList::all(agents);
+                picker.selected = picker
+                    .filtered
+                    .iter()
+                    .position(|&index| picker.rows[index].name == app.snapshot.agent_name)
+                    .unwrap_or(0);
+                return InputMode::Agents { picker };
             }
             Self::Skills => {
                 app.editor.status_clear_input("Loading skills...");

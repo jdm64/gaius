@@ -100,7 +100,9 @@ impl Render {
             InputMode::AddProvider { picker } => {
                 self.draw_add_provider(frame, area, picker, app.editor.input.as_str())
             }
-            InputMode::Agents { picker } => self.draw_agents(frame, area, picker),
+            InputMode::Agents { picker } => {
+                self.draw_agents(frame, area, picker, &app.snapshot.agent_name)
+            }
             InputMode::Files { picker } => self.draw_files(frame, area, picker),
             InputMode::Skills { picker } => self.draw_skills(frame, area, picker),
             InputMode::PromptInput | InputMode::Exit => None,
