@@ -4,7 +4,7 @@
 
 use crate::{
     dirs::Dirs,
-    input::picklist::PickList,
+    input::picklist::{PickList, PickListFilter},
     token_usage::{TokenUsageLedger, TokenUsageSpan, UsageInfo},
 };
 use chrono::{DateTime, Local};
@@ -67,6 +67,24 @@ impl SessionPickerRow {
     }
 }
 
+impl PickListFilter for SessionPickerRow {
+    fn matches_query(&self, query: &str) -> bool {
+        match self {
+            Self::Header(_) => false,
+            Self::Session(session) => {
+                query.is_empty()
+                    || session.display_name().to_lowercase().contains(query)
+                    || session
+                        .id
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_lowercase()
+                        .contains(query)
+            }
+        }
+    }
+}
+
 impl PickList<SessionPickerRow> {
     pub fn selected_session(&self) -> Option<&Session> {
         self.selected_row().and_then(|x| match x {
@@ -115,36 +133,24 @@ impl PickList<SessionPickerRow> {
 }
 
 impl Session {
-    pub fn picker_rows(sessions: Vec<Session>, query: &str) -> (Vec<SessionPickerRow>, Vec<usize>) {
-        let query = query.trim().to_lowercase();
+    pub fn picker_rows(sessions: Vec<Session>, query: &str) -> PickList<SessionPickerRow> {
         let mut rows = Vec::new();
-        let mut filtered = Vec::new();
         let mut current_day = None;
 
         for session in sessions {
             let date: DateTime<Local> = session.modified.into();
             let day = date.date_naive();
-            let matches = query.is_empty()
-                || session.display_name().to_lowercase().contains(&query)
-                || session
-                    .id
-                    .as_deref()
-                    .unwrap_or_default()
-                    .to_lowercase()
-                    .contains(&query);
             if current_day != Some(day) {
                 rows.push(SessionPickerRow::Header(
                     date.format("%a, %d %b %Y").to_string(),
                 ));
                 current_day = Some(day);
             }
-            let session_index = rows.len();
             rows.push(SessionPickerRow::Session(session));
-            if matches {
-                filtered.push(session_index);
-            }
         }
-        (rows, filtered)
+        let mut picker = PickList::all(rows);
+        picker.filter(query);
+        picker
     }
 }
 

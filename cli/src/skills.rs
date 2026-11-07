@@ -2,17 +2,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::dirs::Dirs;
+use crate::{dirs::Dirs, input::picklist::PickListFilter};
 use regex::Regex;
-use std::collections::HashMap;
-use std::error::Error;
-use std::path::Path;
+use std::{collections::HashMap, error::Error, path::Path};
 
 #[derive(Debug, Clone)]
 pub struct Skill {
     pub name: String,
     pub description: String,
     pub body: String,
+}
+
+impl PickListFilter for Skill {
+    fn matches_query(&self, query: &str) -> bool {
+        query.is_empty()
+            || self.name.to_lowercase().contains(query)
+            || self.description.to_lowercase().contains(query)
+    }
 }
 
 #[derive(Debug, Clone, Default)]

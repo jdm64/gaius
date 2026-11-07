@@ -2,7 +2,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::input::{InputMode, PromptEditor, picklist::PickList};
+use crate::input::{
+    InputMode, PromptEditor,
+    picklist::{PickList, PickListFilter},
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;
 
@@ -10,6 +13,20 @@ use std::path::PathBuf;
 pub struct FileEntry {
     pub name: String,
     pub path: PathBuf,
+}
+
+impl PickListFilter for FileEntry {
+    fn normalize_query(input: &str) -> String {
+        input
+            .strip_prefix('@')
+            .unwrap_or(input)
+            .trim()
+            .to_lowercase()
+    }
+
+    fn matches_query(&self, query: &str) -> bool {
+        query.is_empty() || self.name.to_lowercase().contains(query)
+    }
 }
 
 impl PromptEditor {
@@ -46,8 +63,7 @@ impl PromptEditor {
             }
             _ if Self::input_changed_key(key) => {
                 if let Some(query) = Self::get_file_query(&self.input, self.cursor) {
-                    let filtered = Self::filter_files(&query, &picker.rows);
-                    picker.replace_filter(filtered);
+                    picker.filter(&query);
                 } else {
                     return InputMode::PromptInput;
                 }
@@ -56,21 +72,6 @@ impl PromptEditor {
         }
 
         InputMode::Files { picker }
-    }
-
-    pub fn filter_files(input: &str, files: &[FileEntry]) -> Vec<usize> {
-        let query = input
-            .strip_prefix('@')
-            .unwrap_or(input)
-            .trim()
-            .to_lowercase();
-        files
-            .iter()
-            .enumerate()
-            .filter_map(|(index, file)| {
-                (query.is_empty() || file.name.to_lowercase().contains(&query)).then_some(index)
-            })
-            .collect()
     }
 
     pub fn get_file_query(input: &str, cursor_pos: usize) -> Option<String> {

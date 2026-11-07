@@ -48,7 +48,7 @@ impl InputMode {
                 }
             }
             _ if PromptEditor::input_changed_key(key) => {
-                picker.replace_filter(filter_agents(&app.editor.input, &picker.rows));
+                picker.filter(&app.editor.input);
             }
             _ => {}
         }
@@ -103,35 +103,10 @@ impl InputMode {
                 }
             }
             _ if PromptEditor::input_changed_key(key) => {
-                picker.replace_filter(filter_skills(&app.editor.input, &picker.rows));
+                picker.filter(&app.editor.input);
             }
             _ => {}
         }
         Self::Skills { picker }
     }
-}
-
-fn filter_agents(input: &str, agents: &[AgentDefinition]) -> Vec<usize> {
-    let query = input.trim().to_lowercase();
-    agents
-        .iter()
-        .enumerate()
-        .filter_map(|(index, agent)| {
-            (query.is_empty() || agent.name.to_lowercase().contains(&query)).then_some(index)
-        })
-        .collect()
-}
-
-pub fn filter_skills(input: &str, skills: &[Skill]) -> Vec<usize> {
-    let query = input.trim().to_lowercase();
-    skills
-        .iter()
-        .enumerate()
-        .filter_map(|(index, skill)| {
-            (query.is_empty()
-                || skill.name.to_lowercase().contains(&query)
-                || skill.description.to_lowercase().contains(&query))
-            .then_some(index)
-        })
-        .collect()
 }

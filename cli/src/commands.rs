@@ -6,7 +6,10 @@ use crate::{
     agents::Agents,
     dirs::Dirs,
     harness_actor::HarnessActorClient,
-    input::{InputMode, picklist::PickList},
+    input::{
+        InputMode,
+        picklist::{PickList, PickListFilter},
+    },
     models::ReasoningEffort,
     session::Session,
     theme::ColorTheme,
@@ -73,6 +76,20 @@ define_commands! {
     Streaming => "streaming", "Toggle streaming mode";
 }
 
+impl PickListFilter for Command {
+    fn normalize_query(input: &str) -> String {
+        input
+            .strip_prefix('/')
+            .unwrap_or(input)
+            .trim()
+            .to_lowercase()
+    }
+
+    fn matches_query(&self, query: &str) -> bool {
+        self.name().to_lowercase().contains(query)
+    }
+}
+
 impl Command {
     pub fn list() -> Vec<Self> {
         Self::ALL.to_vec()
@@ -104,10 +121,9 @@ impl Command {
             }
             Self::Sessions => {
                 let sessions = Session::list();
-                let (rows, filtered) = Session::picker_rows(sessions, "");
                 app.editor.clear_input();
                 InputMode::Session {
-                    picker: PickList::new(rows, filtered),
+                    picker: Session::picker_rows(sessions, ""),
                 }
             }
             Self::Models => {
@@ -249,19 +265,6 @@ impl Command {
                 InputMode::PromptInput
             }
         }
-    }
-
-    pub fn filter_commands(input: &str, commands: &[Command]) -> Vec<usize> {
-        let query = input
-            .strip_prefix('/')
-            .unwrap_or(input)
-            .trim()
-            .to_lowercase();
-        commands
-            .iter()
-            .enumerate()
-            .filter_map(|(index, cmd)| cmd.name().to_lowercase().contains(&query).then_some(index))
-            .collect()
     }
 
     pub fn busy_status(app: &TuiApp, action: &str) -> Option<String> {

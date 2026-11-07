@@ -1,7 +1,8 @@
-use gaius::config::{Config, ProviderConfig};
-use gaius::input::model;
-use gaius::models::{CachedModelDef, ModelDef, ModelPickerRow, Models, RecentModelDef};
-use gaius::providers::ProviderDef;
+use gaius::{
+    config::{Config, ProviderConfig},
+    models::{CachedModelDef, ModelDef, ModelPickerRow, Models, RecentModelDef},
+    providers::ProviderDef,
+};
 use serde_json::json;
 
 fn provider_def(name: &str) -> ProviderDef {
@@ -174,10 +175,10 @@ fn model_picker_rows_deduplicate_recent_models_by_identity() {
     let available = vec![model_with_context("provider", "model-a", 128_000)];
     let recent = vec![model("provider", "model-a")];
 
-    let rows = Models::filter_rows("", &available, &recent);
+    let picklist = Models::picker_rows(&available, &recent, "");
 
     assert_eq!(
-        rows,
+        picklist.rows,
         vec![
             ModelPickerRow::Header("Recent".to_string()),
             ModelPickerRow::RecentModel(model("provider", "model-a")),
@@ -194,10 +195,10 @@ fn model_picker_rows_put_recent_models_first() {
     ];
     let recent = vec![model("provider", "model-b")];
 
-    let rows = Models::filter_rows("", &available, &recent);
+    let picklist = Models::picker_rows(&available, &recent, "");
 
     assert_eq!(
-        rows,
+        picklist.rows,
         vec![
             ModelPickerRow::Header("Recent".to_string()),
             ModelPickerRow::RecentModel(model("provider", "model-b")),
@@ -213,10 +214,10 @@ fn model_picker_rows_include_stale_recent_models() {
     let available = vec![model("provider", "model-a")];
     let recent = vec![model("provider", "stale-model")];
 
-    let rows = Models::filter_rows("", &available, &recent);
+    let picklist = Models::picker_rows(&available, &recent, "");
 
     assert_eq!(
-        rows,
+        picklist.rows,
         vec![
             ModelPickerRow::Header("Recent".to_string()),
             ModelPickerRow::RecentModel(model("provider", "stale-model")),
@@ -231,22 +232,21 @@ fn model_picker_rows_hide_empty_filtered_sections() {
     let available = vec![model("provider", "alpha"), model("provider", "beta")];
     let recent = vec![model("provider", "gamma")];
 
-    let rows = Models::filter_rows("alp", &available, &recent);
+    let mut picker = Models::picker_rows(&available, &recent, "");
+    picker.filter("alp");
 
-    assert_eq!(
-        rows,
-        vec![ModelPickerRow::Model(model("provider", "alpha"))]
-    );
+    assert_eq!(picker.display_rows(), vec![3]);
 }
 
 #[test]
 fn model_picker_filter_selects_only_model_rows() {
     let available = vec![model("provider", "alpha"), model("provider", "beta")];
     let recent = vec![model("provider", "beta")];
-    let rows = Models::filter_rows("", &available, &recent);
+    let mut picker = Models::picker_rows(&available, &recent, "");
 
-    assert_eq!(model::filter_model_rows("", &rows), vec![1, 3]);
-    assert_eq!(model::filter_model_rows("alp", &rows), vec![3]);
+    assert_eq!(picker.filtered, vec![1, 3]);
+    picker.filter("alp");
+    assert_eq!(picker.filtered, vec![3]);
 }
 
 #[test]

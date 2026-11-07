@@ -204,7 +204,7 @@ impl InputMode {
                 }
             }
             KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_) => {
-                picker.replace_filter(Command::filter_commands(&app.editor.input, &picker.rows));
+                picker.filter(&app.editor.input);
                 if picker.is_empty() {
                     return Self::PromptInput;
                 }
@@ -286,21 +286,19 @@ impl PromptEditor {
 
         if let Some(query) = Self::get_file_query(&self.input, self.cursor) {
             let files = Self::list_files();
-            let filtered = Self::filter_files(&query, &files);
+            let mut picker = PickList::all(files);
+            picker.filter(&query);
 
-            return Some(InputMode::Files {
-                picker: PickList::new(files, filtered),
-            });
+            return Some(InputMode::Files { picker });
         }
 
         if input.starts_with('/') {
             let commands = Command::list();
-            let filtered = Command::filter_commands(input, &commands);
+            let mut picker = PickList::all(commands);
+            picker.filter(input);
 
-            if !filtered.is_empty() {
-                return Some(InputMode::Command {
-                    picker: PickList::new(commands, filtered),
-                });
+            if !picker.is_empty() {
+                return Some(InputMode::Command { picker });
             }
         }
 

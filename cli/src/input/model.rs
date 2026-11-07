@@ -75,9 +75,9 @@ impl InputMode {
                     Ok(updated_recent) => {
                         if let Ok(models) = Models::list(&app.config).await {
                             let recent = RecentModelDef::from_cache(&updated_recent, &models);
-                            let rows = Models::filter_rows(&app.editor.input, &models, &recent);
-                            let filtered = filter_model_rows(&app.editor.input, &rows);
-                            picker.replace_rows(rows, filtered);
+                            let new_picker =
+                                Models::picker_rows(&models, &recent, &app.editor.input);
+                            picker.replace(new_picker);
                         }
                         app.editor
                             .set_status(format!("Removed from recent models: {}", model.id));
@@ -93,11 +93,10 @@ impl InputMode {
                 match Models::reload(&app.config).await {
                     Ok(reloaded_models) => {
                         let recent = RecentModelDef::load(&reloaded_models);
-                        let rows =
-                            Models::filter_rows(&app.editor.input, &reloaded_models, &recent);
-                        let filtered = filter_model_rows(&app.editor.input, &rows);
+                        let new_picker =
+                            Models::picker_rows(&reloaded_models, &recent, &app.editor.input);
                         let count = reloaded_models.len();
-                        picker.replace_rows(rows, filtered);
+                        picker.replace(new_picker);
                         app.editor.set_status(format!("Reloaded {} models", count));
                     }
                     Err(err) => {
@@ -107,7 +106,7 @@ impl InputMode {
                 }
             }
             _ if PromptEditor::input_changed_key(key) => {
-                picker.replace_filter(filter_model_rows(&app.editor.input, &picker.rows));
+                picker.filter(&app.editor.input);
             }
             _ => {}
         };
@@ -177,14 +176,12 @@ impl InputMode {
                         Ok(()) => match Models::reload(&app.config).await {
                             Ok(reloaded_models) => {
                                 let recent = RecentModelDef::load(&reloaded_models);
-                                let rows = Models::filter_rows("", &reloaded_models, &recent);
-                                let filtered = filter_model_rows("", &rows);
                                 app.editor.status_clear_input(format!(
                                     "Added provider; loaded {} models",
                                     reloaded_models.len()
                                 ));
                                 return Self::Models {
-                                    picker: PickList::new(rows, filtered),
+                                    picker: Models::picker_rows(&reloaded_models, &recent, ""),
                                 };
                             }
                             Err(err) => {
@@ -268,11 +265,9 @@ impl PromptEditor {
         match Models::list(config).await {
             Ok(models) => {
                 let recent = RecentModelDef::load(&models);
-                let rows = Models::filter_rows("", &models, &recent);
-                let filtered = filter_model_rows("", &rows);
                 self.set_status(format!("Loaded {} models", models.len()));
                 InputMode::Models {
-                    picker: PickList::new(rows, filtered),
+                    picker: Models::picker_rows(&models, &recent, ""),
                 }
             }
             Err(err) => {
@@ -337,22 +332,4 @@ impl PickList<ProviderInfoRow> {
             editor.cursor = editor.input.len();
         }
     }
-}
-
-pub fn filter_model_rows(input: &str, rows: &[ModelPickerRow]) -> Vec<usize> {
-    let query = input.trim().to_lowercase();
-    rows.iter()
-        .enumerate()
-        .filter_map(|(index, row)| match row {
-            ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model)
-                if query.is_empty() || model.id.to_lowercase().contains(&query) =>
-            {
-                Some(index)
-            }
-            ModelPickerRow::Header(_)
-            | ModelPickerRow::Separator
-            | ModelPickerRow::Model(_)
-            | ModelPickerRow::RecentModel(_) => None,
-        })
-        .collect()
 }

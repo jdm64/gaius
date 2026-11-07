@@ -2,7 +2,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{config::Config, dirs::Dirs, input::picklist::PickList, providers::ProviderDef};
+use crate::{
+    config::Config,
+    dirs::Dirs,
+    input::picklist::{PickList, PickListFilter},
+    providers::ProviderDef,
+};
 use genai::Client;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -114,6 +119,17 @@ pub enum ModelPickerRow {
     Separator,
     Model(ModelDef),
     RecentModel(ModelDef),
+}
+
+impl PickListFilter for ModelPickerRow {
+    fn matches_query(&self, query: &str) -> bool {
+        match self {
+            Self::Model(model) | Self::RecentModel(model) => {
+                query.is_empty() || model.id.to_lowercase().contains(query)
+            }
+            Self::Header(_) | Self::Separator => false,
+        }
+    }
 }
 
 impl PickList<ModelPickerRow> {
@@ -494,19 +510,20 @@ impl Models {
         Ok(models)
     }
 
-    pub fn filter_rows(
-        input: &str,
+    pub fn picker_rows(
         models: &[ModelDef],
         recent: &[ModelDef],
-    ) -> Vec<ModelPickerRow> {
-        let recent_models = Self::filter(input, recent);
-        let remaining_models: Vec<ModelDef> = Self::filter(input, models)
-            .into_iter()
+        query: &str,
+    ) -> PickList<ModelPickerRow> {
+        let recent_models = recent.to_vec();
+        let remaining_models: Vec<ModelDef> = models
+            .iter()
             .filter(|model| {
                 !recent
                     .iter()
                     .any(|recent_model| recent_model.similar(model))
             })
+            .cloned()
             .collect();
 
         let mut rows = Vec::new();
@@ -520,15 +537,8 @@ impl Models {
         }
 
         rows.extend(remaining_models.into_iter().map(ModelPickerRow::Model));
-        rows
-    }
-
-    fn filter(input: &str, models: &[ModelDef]) -> Vec<ModelDef> {
-        let query = input.trim().to_lowercase();
-        models
-            .iter()
-            .filter(|model| query.is_empty() || model.id.to_lowercase().contains(&query))
-            .cloned()
-            .collect()
+        let mut picker = PickList::all(rows);
+        picker.filter(query);
+        picker
     }
 }

@@ -6,7 +6,7 @@ use crate::{
     agents::Agents,
     harness::HarnessSnapshot,
     harness_actor::{CommandReply, HarnessCommand, OperationResult},
-    input::{InputMode, agent::filter_skills, picklist::PickList},
+    input::{InputMode, picklist::PickList},
     models::{ModelDef, RecentModelDef},
     skills::Skill,
     token_usage::SessionInfo,
@@ -179,9 +179,9 @@ impl TuiApp {
         match result {
             Ok(skills) => {
                 let count = skills.len();
-                let filtered = filter_skills(&self.editor.input, &skills);
                 if let InputMode::Skills { picker } = &mut self.editor.mode {
-                    picker.replace_rows(skills, filtered);
+                    picker.replace_rows(skills);
+                    picker.filter(&self.editor.input);
                 }
                 self.editor.set_status(format!("Reloaded {} skills", count));
             }

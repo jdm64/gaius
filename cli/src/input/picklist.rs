@@ -50,14 +50,34 @@ impl<T> PickList<T> {
         self.selected = wrap(self.selected as i32 + 1, self.filtered.len());
     }
 
+    pub fn filter(&mut self, input: &str)
+    where
+        T: PickListFilter,
+    {
+        let query = T::normalize_query(input);
+        let filtered = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| row.matches_query(&query).then_some(index))
+            .collect();
+        self.replace_filter(filtered);
+    }
+
     pub fn replace_filter(&mut self, filtered: Vec<usize>) {
         self.filtered = filtered;
         self.clamp_selected();
     }
 
-    pub fn replace_rows(&mut self, rows: Vec<T>, filtered: Vec<usize>) {
+    pub fn replace_rows(&mut self, rows: Vec<T>) {
+        self.filtered = (0..rows.len()).collect();
         self.rows = rows;
-        self.filtered = filtered;
+        self.clamp_selected();
+    }
+
+    pub fn replace(&mut self, new_picker: PickList<T>) {
+        self.rows = new_picker.rows;
+        self.filtered = new_picker.filtered;
         self.clamp_selected();
     }
 
@@ -72,6 +92,14 @@ impl<T> PickList<T> {
         let end = (start + visible).min(self.rows.len());
         (start, end)
     }
+}
+
+pub trait PickListFilter {
+    fn normalize_query(input: &str) -> String {
+        input.trim().to_lowercase()
+    }
+
+    fn matches_query(&self, query: &str) -> bool;
 }
 
 pub fn wrap(i: i32, n: usize) -> usize {

@@ -2,8 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::dirs::Dirs;
-use crate::tools::ToolName;
+use crate::{dirs::Dirs, input::picklist::PickListFilter, tools::ToolName};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{error::Error, path::Path};
 
@@ -25,6 +24,12 @@ impl Default for AgentDefinition {
             prompt: String::new(),
             tools: AgentTools::default(),
         }
+    }
+}
+
+impl PickListFilter for AgentDefinition {
+    fn matches_query(&self, query: &str) -> bool {
+        query.is_empty() || self.name.to_lowercase().contains(query)
     }
 }
 
