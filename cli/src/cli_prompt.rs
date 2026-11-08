@@ -4,7 +4,7 @@
 
 use crate::{
     diff_view::DiffLineKind,
-    harness::{Harness, HarnessEvent, HarnessSnapshot, UserRequest},
+    harness::{Harness, HarnessMsg, HarnessSnapshot, UserRequest},
     render::util::RenderUtil,
     token_usage::format_arrows,
     tool_engine::ToolStatus,
@@ -47,17 +47,17 @@ impl CliPrompt {
         let mut agent_started = false;
         self.harness
             .run_turn(UserRequest::Prompt(prompt), |event| match event {
-                HarnessEvent::UserPrompt(text) => {
+                HarnessMsg::UserPrompt(text) => {
                     println!("user> {}", text);
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessEvent::PlanMessage(text) => {
+                HarnessMsg::PlanMessage(text) => {
                     println!("plan> {}", text);
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessEvent::Thinking(text) => {
+                HarnessMsg::Thinking(text) => {
                     if !agent_started {
                         print!("agent> ");
                         agent_started = true;
@@ -66,7 +66,7 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessEvent::AgentMessage(text) => {
+                HarnessMsg::AgentMessage(text) => {
                     if !agent_started {
                         print!("agent> ");
                         agent_started = true;
@@ -75,7 +75,7 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessEvent::SystemMessage(text) => {
+                HarnessMsg::SystemMessage(text) => {
                     if !agent_started {
                         print!("agent> ");
                         agent_started = true;
@@ -84,12 +84,12 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessEvent::CompactStart { start_time: _ } => {
+                HarnessMsg::CompactStart { start_time: _ } => {
                     println!("{} Compaction {}", "─".repeat(14), "─".repeat(14));
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessEvent::CompactSummary(text) => {
+                HarnessMsg::CompactSummary(text) => {
                     if !agent_started {
                         print!("agent> ");
                         agent_started = true;
@@ -98,7 +98,7 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessEvent::ToolCall {
+                HarnessMsg::ToolCall {
                     name,
                     arguments,
                     start_time: _,
@@ -110,7 +110,7 @@ impl CliPrompt {
                     println!("tool-call> {} ({})", name, arguments);
                     None
                 }
-                HarnessEvent::ToolResult {
+                HarnessMsg::ToolResult {
                     name,
                     result,
                     status,
@@ -122,7 +122,7 @@ impl CliPrompt {
                     }
                     None
                 }
-                HarnessEvent::DiffView(diff) => {
+                HarnessMsg::DiffView(diff) => {
                     if agent_started {
                         println!();
                         agent_started = false;
@@ -147,7 +147,7 @@ impl CliPrompt {
                     }
                     None
                 }
-                HarnessEvent::TokenUsage {
+                HarnessMsg::TokenUsage {
                     prompt,
                     response,
                     total,
@@ -162,7 +162,7 @@ impl CliPrompt {
                     println!("tokens> {net} {total_str}");
                     None
                 }
-                HarnessEvent::AskUser { title, options } => {
+                HarnessMsg::AskUser { title, options } => {
                     if agent_started {
                         println!();
                         agent_started = false;
@@ -173,9 +173,9 @@ impl CliPrompt {
                     }
                     Self::get_input("answer> ").ok()
                 }
-                HarnessEvent::TurnStarted(_) => None,
-                HarnessEvent::QueueChanged(_) => None,
-                HarnessEvent::TurnDuration(duration_ms) => {
+                HarnessMsg::TurnStarted(_) => None,
+                HarnessMsg::QueueChanged(_) => None,
+                HarnessMsg::TurnDuration(duration_ms) => {
                     let time = RenderUtil::format_duration(duration_ms);
                     println!("timing> {}", time);
                     let _ = io::stdout().flush();

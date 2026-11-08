@@ -3,9 +3,9 @@
  */
 
 use crate::{
+    actor::{CommandReply, HarnessCommand, OperationResult},
     agents::Agents,
     harness::HarnessSnapshot,
-    harness_actor::{CommandReply, HarnessCommand, OperationResult},
     input::{InputMode, picklist::PickList},
     models::{ModelDef, RecentModelDef},
     skills::Skill,

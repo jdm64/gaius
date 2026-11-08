@@ -1,8 +1,8 @@
 use gaius::{
+    actor::{CommandReply, HarnessActorClient, HarnessCommand, HarnessEvent},
     commands::Command,
     config::Config,
     harness::{Harness, HarnessSnapshot},
-    harness_actor::{CommandReply, HarnessActorClient, HarnessActorEvent, HarnessCommand},
     input::InputMode,
     skills::Skill,
     token_usage::SessionInfo,
@@ -31,7 +31,7 @@ async fn skills_command_answers_with_the_skill_list() {
     actor.get_skills().await.unwrap();
 
     match actor.rx.recv().await {
-        Some(HarnessActorEvent::Command(CommandReply::SkillsListed(Ok(skills)))) => {
+        Some(HarnessEvent::Command(CommandReply::SkillsListed(Ok(skills)))) => {
             assert!(skills.is_empty());
         }
         other => panic!("expected a SkillsListed event, got {other:?}"),
@@ -45,7 +45,7 @@ async fn toggle_streaming_answers_with_the_new_value() {
     actor.toggle_streaming().await.unwrap();
 
     match actor.rx.recv().await {
-        Some(HarnessActorEvent::Command(CommandReply::StreamingToggled(Ok(streaming)))) => {
+        Some(HarnessEvent::Command(CommandReply::StreamingToggled(Ok(streaming)))) => {
             assert_eq!(streaming, !initial.streaming);
         }
         other => panic!("expected a StreamingToggled event, got {other:?}"),
@@ -59,7 +59,7 @@ async fn info_command_answers_with_the_session_info() {
     actor.info().await.unwrap();
 
     match actor.rx.recv().await {
-        Some(HarnessActorEvent::Command(CommandReply::SessionInfo(Ok(info)))) => {
+        Some(HarnessEvent::Command(CommandReply::SessionInfo(Ok(info)))) => {
             assert_eq!(info.id, initial.session_id);
         }
         other => panic!("expected a SessionInfo event, got {other:?}"),
@@ -73,7 +73,7 @@ async fn new_session_command_answers_with_a_snapshot() {
     actor.new_session().await.unwrap();
 
     match actor.rx.recv().await {
-        Some(HarnessActorEvent::Command(CommandReply::SessionCreated(Ok(snapshot)))) => {
+        Some(HarnessEvent::Command(CommandReply::SessionCreated(Ok(snapshot)))) => {
             assert!(snapshot.session_id.is_some());
         }
         other => panic!("expected a SessionCreated event, got {other:?}"),
@@ -88,7 +88,7 @@ async fn a_failing_operation_answers_with_an_error_payload() {
     actor.load_session(String::new()).await.unwrap();
 
     match actor.rx.recv().await {
-        Some(HarnessActorEvent::Command(CommandReply::SessionLoaded(Err(err)))) => {
+        Some(HarnessEvent::Command(CommandReply::SessionLoaded(Err(err)))) => {
             assert!(
                 !err.is_empty(),
                 "the error payload should say what went wrong"
@@ -105,7 +105,7 @@ async fn replay_history_answers_with_the_history_events() {
     actor.replay_history().await.unwrap();
 
     match actor.rx.recv().await {
-        Some(HarnessActorEvent::HistoryReplayed(events)) => {
+        Some(HarnessEvent::HistoryReplayed(events)) => {
             assert!(events.is_empty());
         }
         other => panic!("expected a HistoryReplayed event, got {other:?}"),
@@ -119,7 +119,7 @@ async fn shutdown_answers_with_the_final_snapshot() {
     actor.shutdown().await.unwrap();
 
     match actor.rx.recv().await {
-        Some(HarnessActorEvent::ShutdownComplete(Ok(snapshot))) => {
+        Some(HarnessEvent::ShutdownComplete(Ok(snapshot))) => {
             assert_eq!(snapshot.session_id, initial.session_id);
         }
         other => panic!("expected a ShutdownComplete event, got {other:?}"),
@@ -143,9 +143,9 @@ async fn a_stopped_actor_reports_an_error_for_new_commands() {
 async fn the_tui_opens_the_skill_picker_for_a_skill_list() {
     let mut app = TuiApp::new(Config::new());
 
-    app.handle_actor_event(HarnessActorEvent::Command(CommandReply::SkillsListed(Ok(
-        vec![skill("review")],
-    ))));
+    app.handle_actor_event(HarnessEvent::Command(CommandReply::SkillsListed(Ok(vec![
+        skill("review"),
+    ]))));
 
     match &app.editor.mode {
         InputMode::Skills { picker } => {
@@ -160,9 +160,9 @@ async fn the_tui_opens_the_skill_picker_for_a_skill_list() {
 async fn the_tui_reports_a_failed_operation() {
     let mut app = TuiApp::new(Config::new());
 
-    app.handle_actor_event(HarnessActorEvent::Command(CommandReply::SessionCreated(
-        Err("no session".to_string()),
-    )));
+    app.handle_actor_event(HarnessEvent::Command(CommandReply::SessionCreated(Err(
+        "no session".to_string(),
+    ))));
 
     assert_eq!(app.editor.status_visible(), Some(&"no session".to_string()));
 }
@@ -174,9 +174,9 @@ async fn the_tui_replays_the_history_of_a_loaded_session() {
         session_id: Some("session-1".to_string()),
         ..Default::default()
     };
-    let followup = app.handle_actor_event(HarnessActorEvent::Command(CommandReply::SessionLoaded(
-        Ok(snapshot),
-    )));
+    let followup = app.handle_actor_event(HarnessEvent::Command(CommandReply::SessionLoaded(Ok(
+        snapshot,
+    ))));
 
     assert_eq!(app.snapshot.session_id, Some("session-1".to_string()));
     assert_eq!(
@@ -195,9 +195,7 @@ async fn the_tui_shows_the_session_info() {
         usage: Default::default(),
     };
 
-    app.handle_actor_event(HarnessActorEvent::Command(CommandReply::SessionInfo(Ok(
-        info,
-    ))));
+    app.handle_actor_event(HarnessEvent::Command(CommandReply::SessionInfo(Ok(info))));
 
     match &app.editor.mode {
         InputMode::SessionInfo { info } => {

@@ -9,10 +9,10 @@ pub mod picklist;
 pub mod session;
 
 use crate::{
+    actor::HarnessActorClient,
     agents::AgentDefinition,
     commands::Command,
     dirs::Dirs,
-    harness_actor::HarnessActorClient,
     input::{file::FileEntry, model::ProviderInfoRow, picklist::PickList},
     models::{ModelPickerRow, ReasoningEffort},
     session::SessionPickerRow,

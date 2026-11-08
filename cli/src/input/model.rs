@@ -3,9 +3,9 @@
  */
 
 use crate::{
+    actor::HarnessActorClient,
     commands::Command,
     config::{Config, ProviderConfig},
-    harness_actor::HarnessActorClient,
     input::{InputMode, PromptEditor, picklist::PickList},
     models::{ModelPickerRow, Models, ReasoningEffort, RecentModelDef},
     providers::ProviderDef,

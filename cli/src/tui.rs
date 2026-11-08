@@ -3,11 +3,11 @@
  */
 
 use crate::{
+    actor::{HarnessActorClient, HarnessCommand, HarnessEvent},
     agents::Agents,
     config::Config,
     diff_view::DiffView,
-    harness::{Harness, HarnessEvent, HarnessSnapshot},
-    harness_actor::{HarnessActorClient, HarnessActorEvent, HarnessCommand},
+    harness::{Harness, HarnessMsg, HarnessSnapshot},
     input::{InputMode, PromptEditor},
     render::{Render, history::DisplayPrefs, layout::HistoryLayout},
     selection::Selection,
@@ -171,10 +171,10 @@ impl TuiApp {
                     };
 
                     render_reason = match &actor_event {
-                        HarnessActorEvent::Harness(HarnessEvent::QueueChanged(_)) => {
+                        HarnessEvent::Message(HarnessMsg::QueueChanged(_)) => {
                             RenderReason::UserUI
                         }
-                        HarnessActorEvent::Harness(_) => RenderReason::HarnessMsg,
+                        HarnessEvent::Message(_) => RenderReason::HarnessMsg,
                         _ => RenderReason::UserUI,
                     };
 
@@ -310,13 +310,13 @@ impl TuiApp {
         Ok(())
     }
 
-    pub fn handle_actor_event(&mut self, event: HarnessActorEvent) -> Option<HarnessCommand> {
+    pub fn handle_actor_event(&mut self, event: HarnessEvent) -> Option<HarnessCommand> {
         match event {
-            HarnessActorEvent::Harness(event) => {
+            HarnessEvent::Message(event) => {
                 self.apply_harness_event(event);
             }
-            HarnessActorEvent::Command(reply) => return self.handle_command_reply(reply),
-            HarnessActorEvent::AskUser {
+            HarnessEvent::Command(reply) => return self.handle_command_reply(reply),
+            HarnessEvent::AskUser {
                 title,
                 options,
                 answer_tx,
@@ -329,26 +329,26 @@ impl TuiApp {
                     selected: 0,
                 };
             }
-            HarnessActorEvent::TurnFinished(snapshot) => {
+            HarnessEvent::TurnFinished(snapshot) => {
                 self.actor_busy = false;
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
                 self.editor.set_status("");
             }
-            HarnessActorEvent::RequestFailed(err, snapshot) => {
+            HarnessEvent::RequestFailed(err, snapshot) => {
                 self.actor_busy = false;
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
                 self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
                 self.editor.set_status("Agent request failed");
             }
-            HarnessActorEvent::HistoryReplayed(events) => {
+            HarnessEvent::HistoryReplayed(events) => {
                 self.clear_messages();
                 for event in events {
                     self.apply_harness_event(event);
                 }
             }
-            HarnessActorEvent::ShutdownComplete(result) => {
+            HarnessEvent::ShutdownComplete(result) => {
                 if let Ok(snapshot) = result {
                     self.save_snapshot(&snapshot);
                 }
@@ -376,31 +376,31 @@ impl TuiApp {
         !self.actor_busy && self.snapshot.queued_prompts == 0
     }
 
-    fn apply_harness_event(&mut self, event: HarnessEvent) {
+    fn apply_harness_event(&mut self, event: HarnessMsg) {
         match event {
-            HarnessEvent::SystemMessage(text) => {
+            HarnessMsg::SystemMessage(text) => {
                 self.push_message(TuiMessage::SystemMessage(text));
             }
-            HarnessEvent::UserPrompt(prompt_msg) => {
+            HarnessMsg::UserPrompt(prompt_msg) => {
                 self.push_message(TuiMessage::UserPrompt(prompt_msg));
             }
-            HarnessEvent::PlanMessage(text) => {
+            HarnessMsg::PlanMessage(text) => {
                 self.push_message(TuiMessage::PlanMessage(text));
             }
-            HarnessEvent::AgentMessage(chunk) => {
+            HarnessMsg::AgentMessage(chunk) => {
                 self.append_agent_message(chunk, false);
             }
-            HarnessEvent::Thinking(chunk) => {
+            HarnessMsg::Thinking(chunk) => {
                 self.append_agent_message(chunk, true);
             }
-            HarnessEvent::CompactStart { start_time } => {
+            HarnessMsg::CompactStart { start_time } => {
                 self.push_message(TuiMessage::CompactionStart { start_time });
             }
-            HarnessEvent::CompactSummary(text) => {
+            HarnessMsg::CompactSummary(text) => {
                 self.finish_last_timer();
                 self.push_message(TuiMessage::AgentMessage(text));
             }
-            HarnessEvent::ToolCall {
+            HarnessMsg::ToolCall {
                 name,
                 arguments,
                 start_time,
@@ -411,7 +411,7 @@ impl TuiApp {
                     start_time,
                 });
             }
-            HarnessEvent::ToolResult {
+            HarnessMsg::ToolResult {
                 name,
                 result,
                 status,
@@ -424,10 +424,10 @@ impl TuiApp {
                 });
                 self.push_message(TuiMessage::Padding);
             }
-            HarnessEvent::DiffView(diff) => {
+            HarnessMsg::DiffView(diff) => {
                 self.push_message(TuiMessage::DiffView(diff));
             }
-            HarnessEvent::TokenUsage {
+            HarnessMsg::TokenUsage {
                 prompt,
                 response,
                 total,
@@ -438,16 +438,16 @@ impl TuiApp {
                 self.context_tokens = total;
                 self.snapshot.total_cost = cost;
             }
-            HarnessEvent::AskUser { .. } => {}
-            HarnessEvent::TurnStarted(turn_started) => {
+            HarnessMsg::AskUser { .. } => {}
+            HarnessMsg::TurnStarted(turn_started) => {
                 self.actor_busy = true;
                 self.snapshot.turn_started = Some(turn_started);
                 self.editor.set_status("Waiting for agent...");
             }
-            HarnessEvent::TurnDuration(duration_ms) => {
+            HarnessMsg::TurnDuration(duration_ms) => {
                 self.push_message(TuiMessage::TurnDuration(duration_ms));
             }
-            HarnessEvent::QueueChanged(count) => {
+            HarnessMsg::QueueChanged(count) => {
                 self.snapshot.queued_prompts = count;
             }
         }
@@ -560,11 +560,11 @@ impl TuiApp {
 }
 
 async fn wait_for_shutdown(
-    rx: &mut mpsc::UnboundedReceiver<HarnessActorEvent>,
+    rx: &mut mpsc::UnboundedReceiver<HarnessEvent>,
 ) -> Option<HarnessSnapshot> {
     let shutdown = async {
         while let Some(event) = rx.recv().await {
-            if let HarnessActorEvent::ShutdownComplete(result) = event {
+            if let HarnessEvent::ShutdownComplete(result) = event {
                 return result.ok();
             }
         }

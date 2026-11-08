@@ -1,8 +1,8 @@
 use gaius::{
+    actor::HarnessEvent,
     config::Config,
     diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
-    harness::{Harness, HarnessEvent, compact::Compact, history_replay, prompt_queue::PromptQueue},
-    harness_actor::HarnessActorEvent,
+    harness::{Harness, HarnessMsg, compact::Compact, history_replay, prompt_queue::PromptQueue},
     models::TokenPrice,
     rate_limit::{is_rate_limit_error, is_webc_rate_limit},
     token_usage::{TokenUsageLedger, TokenUsageSpan},
@@ -21,13 +21,13 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 
 /// `PromptQueue::push` reports `QueueChanged` to the actor over this channel.
 fn queue_channel() -> (
-    UnboundedSender<HarnessActorEvent>,
-    mpsc::UnboundedReceiver<HarnessActorEvent>,
+    UnboundedSender<HarnessEvent>,
+    mpsc::UnboundedReceiver<HarnessEvent>,
 ) {
     mpsc::unbounded_channel()
 }
 
-fn replay_events(messages: Vec<ChatMessage>) -> Vec<HarnessEvent> {
+fn replay_events(messages: Vec<ChatMessage>) -> Vec<HarnessMsg> {
     let mut events = Vec::new();
     let usage = TokenUsageLedger::default();
     history_replay::replay_messages(&messages, &usage, |event| events.push(event));
@@ -57,8 +57,8 @@ fn replay_reasoning_content_before_assistant_text() {
     assert_eq!(
         events,
         vec![
-            HarnessEvent::Thinking("thinking".to_string()),
-            HarnessEvent::AgentMessage("visible".to_string()),
+            HarnessMsg::Thinking("thinking".to_string()),
+            HarnessMsg::AgentMessage("visible".to_string()),
         ]
     );
 }
@@ -73,8 +73,8 @@ fn replay_thought_signature_before_assistant_text() {
     assert_eq!(
         events,
         vec![
-            HarnessEvent::Thinking("signed thought".to_string()),
-            HarnessEvent::AgentMessage("visible".to_string()),
+            HarnessMsg::Thinking("signed thought".to_string()),
+            HarnessMsg::AgentMessage("visible".to_string()),
         ]
     );
 }
@@ -85,7 +85,7 @@ fn replay_assistant_text_unchanged() {
 
     assert_eq!(
         events,
-        vec![HarnessEvent::AgentMessage("visible".to_string())]
+        vec![HarnessMsg::AgentMessage("visible".to_string())]
     );
 }
 
@@ -118,17 +118,17 @@ fn replay_diff_marker_after_tool_call() {
     assert_eq!(
         events,
         vec![
-            HarnessEvent::ToolCall {
+            HarnessMsg::ToolCall {
                 name: ToolName::Edit.name(),
                 arguments: json!({"file_path":"src/lib.rs"}).to_string(),
                 start_time: 0,
             },
-            HarnessEvent::ToolResult {
+            HarnessMsg::ToolResult {
                 name: ToolName::Edit.name(),
                 result: "File edited successfully".to_string(),
                 status: ToolStatus::Valid,
             },
-            HarnessEvent::DiffView(sample_diff()),
+            HarnessMsg::DiffView(sample_diff()),
         ]
     );
 }
@@ -156,12 +156,12 @@ fn replay_tool_error_marker_sets_error_flag() {
     assert_eq!(
         events,
         vec![
-            HarnessEvent::ToolCall {
+            HarnessMsg::ToolCall {
                 name: "search".to_string(),
                 arguments: json!({"query":"rust"}).to_string(),
                 start_time: 0,
             },
-            HarnessEvent::ToolResult {
+            HarnessMsg::ToolResult {
                 name: "search".to_string(),
                 result: "something failed".to_string(),
                 status: ToolStatus::Error,
@@ -189,12 +189,12 @@ fn replay_tool_error_marker_absent_defaults_false() {
     assert_eq!(
         events,
         vec![
-            HarnessEvent::ToolCall {
+            HarnessMsg::ToolCall {
                 name: "search".to_string(),
                 arguments: json!({"query":"rust"}).to_string(),
                 start_time: 0,
             },
-            HarnessEvent::ToolResult {
+            HarnessMsg::ToolResult {
                 name: "search".to_string(),
                 result: "ok".to_string(),
                 status: ToolStatus::Valid,
@@ -679,13 +679,13 @@ fn compacted_summary_replays_as_compaction_events() {
     assert_eq!(
         events,
         vec![
-            HarnessEvent::CompactStart { start_time: 0 },
-            HarnessEvent::CompactSummary(
+            HarnessMsg::CompactStart { start_time: 0 },
+            HarnessMsg::CompactSummary(
                 "The earlier part of this conversation was compacted into the following \
                  summary to free up context. Continue from where it leaves off.\n\nthe summary"
                     .to_string()
             ),
-            HarnessEvent::UserPrompt("three".to_string()),
+            HarnessMsg::UserPrompt("three".to_string()),
         ]
     );
 }
@@ -876,7 +876,7 @@ fn harness_record_usage_emits_event_and_updates_session_info() {
     // no total and leaves the context display alone
     assert_eq!(
         events,
-        vec![HarnessEvent::TokenUsage {
+        vec![HarnessMsg::TokenUsage {
             prompt: Some(500),
             response: Some(50),
             total: None,
@@ -902,7 +902,7 @@ fn prompt_queue_runs_prompts_in_the_order_they_arrived() {
     // every push reports the growing queue length to the actor
     for expected in [1, 2] {
         match events.try_recv().unwrap() {
-            HarnessActorEvent::Harness(HarnessEvent::QueueChanged(len)) => {
+            HarnessEvent::Message(HarnessMsg::QueueChanged(len)) => {
                 assert_eq!(len, expected);
             }
             other => panic!("expected QueueChanged({expected}), got {other:?}"),

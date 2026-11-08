@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{harness::HarnessEvent, harness_actor::HarnessActorEvent};
+use crate::{actor::HarnessEvent, harness::HarnessMsg};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
@@ -19,12 +19,10 @@ impl PromptQueue {
         Self::default()
     }
 
-    pub fn push(&self, prompt: String, event_tx: &UnboundedSender<HarnessActorEvent>) {
+    pub fn push(&self, prompt: String, event_tx: &UnboundedSender<HarnessEvent>) {
         let mut queue = self.prompts.lock().unwrap();
         queue.push_back(prompt);
-        let _ = event_tx.send(HarnessActorEvent::Harness(HarnessEvent::QueueChanged(
-            queue.len(),
-        )));
+        let _ = event_tx.send(HarnessEvent::Message(HarnessMsg::QueueChanged(queue.len())));
     }
 
     pub fn pop(&self) -> Option<String> {

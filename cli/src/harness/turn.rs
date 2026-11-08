@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use super::{Harness, HarnessEvent};
+use super::{Harness, HarnessMsg};
 use crate::{
     harness::UserRequest,
     harness::compact::{Compact, CompactOutcome},
@@ -22,11 +22,11 @@ impl Harness {
         mut on_event: F,
     ) -> Result<(), Box<dyn Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let start = time_now();
         self.turn_start = Some(start);
-        on_event(HarnessEvent::TurnStarted(start));
+        on_event(HarnessMsg::TurnStarted(start));
 
         let result = self.run_turn_with_events(request, &mut on_event).await;
         if result.is_err() || self.is_cancel() {
@@ -35,7 +35,7 @@ impl Harness {
 
         self.turn_start = None;
         let duration = time_now().saturating_sub(start);
-        on_event(HarnessEvent::TurnDuration(duration));
+        on_event(HarnessMsg::TurnDuration(duration));
 
         result
     }
@@ -46,7 +46,7 @@ impl Harness {
         mut on_event: F,
     ) -> Result<(), Box<dyn Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         self.set_cancel(false);
         self.update_session_info();
@@ -63,7 +63,7 @@ impl Harness {
             }
 
             if let Some(prompt) = self.prompt_queue.pop() {
-                on_event(HarnessEvent::QueueChanged(self.prompt_queue.len()));
+                on_event(HarnessMsg::QueueChanged(self.prompt_queue.len()));
                 self.send_user_message(prompt, &mut on_event);
                 continue;
             }
@@ -103,7 +103,7 @@ impl Harness {
         on_event: &mut F,
     ) -> Result<Vec<ToolCall>, Box<dyn std::error::Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let max_retries = 4;
         let mut delay = 3u64;
@@ -124,7 +124,7 @@ impl Harness {
                 "Rate limit hit. Retrying in {delay}s (attempt {}/{max_retries})...",
                 attempt + 1
             );
-            on_event(HarnessEvent::SystemMessage(message));
+            on_event(HarnessMsg::SystemMessage(message));
 
             tokio::select! {
                 _ = time::sleep(Duration::from_secs(delay)) => {}
@@ -145,14 +145,14 @@ impl Harness {
         on_event: &mut F,
     ) -> Result<Vec<ToolCall>, Box<dyn std::error::Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let prompt_idx = self.history.messages.len();
         let response = self.client.chat(self.history.clone()).await?;
 
         let full_text = response.content.texts().join("");
         if !full_text.is_empty() {
-            on_event(HarnessEvent::AgentMessage(full_text.clone()));
+            on_event(HarnessMsg::AgentMessage(full_text.clone()));
         }
 
         self.history
@@ -170,7 +170,7 @@ impl Harness {
         on_event: &mut F,
     ) -> Result<Vec<ToolCall>, Box<dyn std::error::Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let prompt_idx = self.history.messages.len();
         let mut response = self.client.chat_streaming(self.history.clone()).await?;
@@ -204,7 +204,7 @@ impl Harness {
         if !emitted_text {
             let text = content.texts().join("");
             if !text.is_empty() {
-                on_event(HarnessEvent::AgentMessage(text));
+                on_event(HarnessMsg::AgentMessage(text));
             }
         }
 
@@ -230,12 +230,12 @@ impl Harness {
         stream_end: &mut Option<StreamEnd>,
     ) -> bool
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         match event {
             ChatStreamEvent::Chunk(chunk) => {
                 if !chunk.content.is_empty() {
-                    on_event(HarnessEvent::AgentMessage(chunk.content));
+                    on_event(HarnessMsg::AgentMessage(chunk.content));
                     true
                 } else {
                     false
@@ -243,13 +243,13 @@ impl Harness {
             }
             ChatStreamEvent::ReasoningChunk(chunk) => {
                 if !chunk.content.is_empty() {
-                    on_event(HarnessEvent::Thinking(chunk.content));
+                    on_event(HarnessMsg::Thinking(chunk.content));
                 }
                 false
             }
             ChatStreamEvent::ThoughtSignatureChunk(chunk) => {
                 if !chunk.content.is_empty() {
-                    on_event(HarnessEvent::Thinking(chunk.content));
+                    on_event(HarnessMsg::Thinking(chunk.content));
                 }
                 false
             }

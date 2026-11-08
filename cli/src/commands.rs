@@ -3,9 +3,9 @@
  */
 
 use crate::{
+    actor::HarnessActorClient,
     agents::Agents,
     dirs::Dirs,
-    harness_actor::HarnessActorClient,
     input::{
         InputMode,
         picklist::{PickList, PickListFilter},

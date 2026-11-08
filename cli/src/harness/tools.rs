@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use super::{Harness, HarnessEvent};
+use super::{Harness, HarnessMsg};
 use crate::{
     diff_view::DiffView,
     render::util::RenderUtil,
@@ -16,7 +16,7 @@ use serde_json::json;
 impl Harness {
     pub(super) async fn call_tools<F>(&mut self, tool_calls: &[ToolCall], on_event: &mut F)
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         for tc in tool_calls {
             if self.is_cancel() {
@@ -33,7 +33,7 @@ impl Harness {
             match result {
                 ToolResult::Question(title, options) => {
                     let answer =
-                        on_event(HarnessEvent::AskUser { title, options }).unwrap_or_default();
+                        on_event(HarnessMsg::AskUser { title, options }).unwrap_or_default();
                     self.send_tool_result_event(tc, answer, status, on_event);
                 }
                 ToolResult::Text(text) => {
@@ -55,9 +55,9 @@ impl Harness {
 
     pub fn send_tool_call_event<F>(&mut self, tc: &ToolCall, on_event: &mut F)
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
-        on_event(HarnessEvent::ToolCall {
+        on_event(HarnessMsg::ToolCall {
             name: tc.fn_name.to_string(),
             arguments: tc.fn_arguments.to_string(),
             start_time: time_now(),
@@ -71,7 +71,7 @@ impl Harness {
         status: ToolStatus,
         on_event: &mut F,
     ) where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let result = self.tool_engine.truncate_output(result);
         let mut message: ChatMessage = ToolResponse::new(&tc.call_id, result.clone()).into();
@@ -80,7 +80,7 @@ impl Harness {
             data: json!({ "tool_error": status as i32 }),
         }));
         self.history.messages.push(message);
-        on_event(HarnessEvent::ToolResult {
+        on_event(HarnessMsg::ToolResult {
             name: tc.fn_name.to_string(),
             result,
             status,
@@ -94,17 +94,17 @@ impl Harness {
         diff: DiffView,
         on_event: &mut F,
     ) where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let marker = diff.to_part();
         let mut message: ChatMessage = ToolResponse::new(&tc.call_id, result.clone()).into();
         message.content.push(marker);
         self.history.messages.push(message);
-        on_event(HarnessEvent::ToolResult {
+        on_event(HarnessMsg::ToolResult {
             name: tc.fn_name.to_string(),
             result,
             status: ToolStatus::Valid,
         });
-        on_event(HarnessEvent::DiffView(diff));
+        on_event(HarnessMsg::DiffView(diff));
     }
 }

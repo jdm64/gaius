@@ -4,7 +4,7 @@
 
 use crate::{
     agents::AgentDefinition,
-    harness::{Harness, HarnessEvent, HarnessSnapshot, UserRequest},
+    harness::{Harness, HarnessMsg, HarnessSnapshot, UserRequest},
     models::ModelDef,
     skills::Skill,
     token_usage::SessionInfo,
@@ -28,8 +28,8 @@ pub type AnswerSender = oneshot::Sender<String>;
 const ACTOR_STOPPED: &str = "Harness actor stopped";
 
 #[derive(Debug)]
-pub enum HarnessActorEvent {
-    Harness(HarnessEvent),
+pub enum HarnessEvent {
+    Message(HarnessMsg),
     Command(CommandReply),
     AskUser {
         title: String,
@@ -38,7 +38,7 @@ pub enum HarnessActorEvent {
     },
     TurnFinished(HarnessSnapshot),
     RequestFailed(String, HarnessSnapshot),
-    HistoryReplayed(Vec<HarnessEvent>),
+    HistoryReplayed(Vec<HarnessMsg>),
     ShutdownComplete(OperationResult<HarnessSnapshot>),
 }
 
@@ -77,15 +77,15 @@ pub enum CommandReply {
     SessionInfo(OperationResult<SessionInfo>),
 }
 
-impl From<CommandReply> for HarnessActorEvent {
+impl From<CommandReply> for HarnessEvent {
     fn from(reply: CommandReply) -> Self {
-        HarnessActorEvent::Command(reply)
+        HarnessEvent::Command(reply)
     }
 }
 
 pub struct HarnessActorClient {
     tx: Sender<HarnessCommand>,
-    pub rx: UnboundedReceiver<HarnessActorEvent>,
+    pub rx: UnboundedReceiver<HarnessEvent>,
 }
 
 impl HarnessActorClient {
@@ -196,14 +196,14 @@ impl HarnessActorClient {
 pub struct HarnessActorServer {
     harness: Harness,
     rx: Receiver<HarnessCommand>,
-    tx: UnboundedSender<HarnessActorEvent>,
+    tx: UnboundedSender<HarnessEvent>,
 }
 
 impl HarnessActorServer {
     pub fn new(
         harness: Harness,
         rx: Receiver<HarnessCommand>,
-        tx: UnboundedSender<HarnessActorEvent>,
+        tx: UnboundedSender<HarnessEvent>,
     ) -> Self {
         Self { harness, rx, tx }
     }
@@ -215,11 +215,11 @@ impl HarnessActorServer {
 
         let on_event = {
             let event_tx = self.tx.clone();
-            move |event: HarnessEvent| -> Option<String> {
+            move |event: HarnessMsg| -> Option<String> {
                 match event {
-                    HarnessEvent::AskUser { title, options } => {
+                    HarnessMsg::AskUser { title, options } => {
                         let (answer_tx, answer_rx) = oneshot::channel();
-                        let _ = event_tx.send(HarnessActorEvent::AskUser {
+                        let _ = event_tx.send(HarnessEvent::AskUser {
                             title,
                             options,
                             answer_tx,
@@ -227,7 +227,7 @@ impl HarnessActorServer {
                         Some(executor::block_on(answer_rx).unwrap_or_default())
                     }
                     event => {
-                        let _ = event_tx.send(HarnessActorEvent::Harness(event));
+                        let _ = event_tx.send(HarnessEvent::Message(event));
                         None
                     }
                 }
@@ -252,7 +252,7 @@ impl HarnessActorServer {
                         Some(HarnessCommand::RunPrompt(prompt)) => {
                             prompt_queue.push(prompt, &self.tx);
                         }
-                        Some(_) => {}
+                        Some(_) => {},
                         None => break Err("Actor channel closed".into()),
                     }
                 }
@@ -264,12 +264,12 @@ impl HarnessActorServer {
         let current = self.harness.snapshot();
         match &result {
             Ok(()) => {
-                let _ = self.tx.send(HarnessActorEvent::TurnFinished(current));
+                let _ = self.tx.send(HarnessEvent::TurnFinished(current));
             }
             Err(err) => {
                 let _ = self
                     .tx
-                    .send(HarnessActorEvent::RequestFailed(err.clone(), current));
+                    .send(HarnessEvent::RequestFailed(err.clone(), current));
             }
         }
 
@@ -281,8 +281,8 @@ impl HarnessActorServer {
         let cancel_flag = self.harness.cancel_handle();
         let prompt_queue = self.harness.prompt_queue();
         let event_tx_for_callback = self.tx.clone();
-        let mut on_event = move |event: HarnessEvent| -> Option<String> {
-            let _ = event_tx_for_callback.send(HarnessActorEvent::Harness(event));
+        let mut on_event = move |event: HarnessMsg| -> Option<String> {
+            let _ = event_tx_for_callback.send(HarnessEvent::Message(event));
             None
         };
 
@@ -299,7 +299,7 @@ impl HarnessActorServer {
                     Some(HarnessCommand::RunPrompt(prompt)) => {
                         prompt_queue.push(prompt, &self.tx);
                     }
-                    Some(_) => {}
+                    Some(_) => {},
                     None => break Err("Actor channel closed".into()),
                 },
             }
@@ -309,12 +309,12 @@ impl HarnessActorServer {
         let snapshot = self.harness.snapshot();
         match &result {
             Ok(()) => {
-                let _ = self.tx.send(HarnessActorEvent::TurnFinished(snapshot));
+                let _ = self.tx.send(HarnessEvent::TurnFinished(snapshot));
             }
             Err(err) => {
                 let _ = self
                     .tx
-                    .send(HarnessActorEvent::RequestFailed(err.clone(), snapshot));
+                    .send(HarnessEvent::RequestFailed(err.clone(), snapshot));
             }
         }
         result
@@ -399,7 +399,7 @@ impl HarnessActorServer {
                 HarnessCommand::ReplayHistory => {
                     let mut events = Vec::new();
                     self.harness.replay_history(|event| events.push(event));
-                    let _ = self.tx.send(HarnessActorEvent::HistoryReplayed(events));
+                    let _ = self.tx.send(HarnessEvent::HistoryReplayed(events));
                 }
                 HarnessCommand::Compact => {
                     let _ = self.run_compaction().await;
@@ -413,9 +413,9 @@ impl HarnessActorServer {
                     let _ = self.tx.send(CommandReply::SessionInfo(Ok(info)).into());
                 }
                 HarnessCommand::Shutdown => {
-                    let _ = self.tx.send(HarnessActorEvent::ShutdownComplete(Ok(self
-                        .harness
-                        .snapshot())));
+                    let _ = self
+                        .tx
+                        .send(HarnessEvent::ShutdownComplete(Ok(self.harness.snapshot())));
                     break;
                 }
             }

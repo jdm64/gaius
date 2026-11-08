@@ -3,8 +3,8 @@
  */
 
 use crate::{
+    actor::HarnessActorClient,
     commands::Command,
-    harness_actor::HarnessActorClient,
     input::{InputMode, PromptEditor, picklist::PickList},
     session::{Session, SessionPickerRow},
     token_usage::SessionInfo,

@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::harness::{Harness, HarnessEvent};
+use crate::harness::{Harness, HarnessMsg};
 
 const CLEAR_OPTION: &str = "Clear Context";
 const KEEP_OPTION: &str = "Keep Context";
@@ -38,8 +38,8 @@ impl PlanHook {
         }
     }
 
-    fn ask_user() -> HarnessEvent {
-        HarnessEvent::AskUser {
+    fn ask_user() -> HarnessMsg {
+        HarnessMsg::AskUser {
             title: QUESTION_TITLE.to_string(),
             options: HOOK_OPTIONS.iter().map(|s| s.to_string()).collect(),
         }
@@ -59,7 +59,7 @@ impl PlanHook {
 
     pub fn run<F>(harness: &mut Harness, mut on_event: F) -> bool
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let Some(plan_text) = harness.plan_text().take() else {
             return false;

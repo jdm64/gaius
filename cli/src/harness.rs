@@ -36,7 +36,7 @@ pub enum UserRequest {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum HarnessEvent {
+pub enum HarnessMsg {
     UserPrompt(String),
     PlanMessage(String),
     AgentMessage(String),

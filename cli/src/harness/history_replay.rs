@@ -4,7 +4,7 @@
 
 use crate::{
     diff_view::DiffView,
-    harness::{Harness, HarnessEvent},
+    harness::{Harness, HarnessMsg},
     token_usage::TokenUsageLedger,
     tool_engine::ToolStatus,
 };
@@ -18,7 +18,7 @@ impl Harness {
     /// both live turns and previously-saved history.
     pub fn replay_history<F>(&self, on_event: F)
     where
-        F: FnMut(HarnessEvent),
+        F: FnMut(HarnessMsg),
     {
         replay_messages(&self.history.messages, &self.token_usage, on_event);
         self.update_session_info();
@@ -34,7 +34,7 @@ pub trait MessageExt {
 
     fn emit_diff_markers<F>(&self, on_event: &mut F)
     where
-        F: FnMut(HarnessEvent);
+        F: FnMut(HarnessMsg);
 }
 
 impl MessageExt for ChatMessage {
@@ -77,11 +77,11 @@ impl MessageExt for ChatMessage {
 
     fn emit_diff_markers<F>(&self, on_event: &mut F)
     where
-        F: FnMut(HarnessEvent),
+        F: FnMut(HarnessMsg),
     {
         for part in self.content.custom_parts() {
             if let Some(diff) = DiffView::from_marker(&part.data) {
-                on_event(HarnessEvent::DiffView(diff));
+                on_event(HarnessMsg::DiffView(diff));
             }
         }
     }
@@ -94,7 +94,7 @@ impl MessageExt for ChatMessage {
 /// both live turns and previously-saved history.
 pub fn replay_messages<F>(history: &[ChatMessage], token_usage: &TokenUsageLedger, mut on_event: F)
 where
-    F: FnMut(HarnessEvent),
+    F: FnMut(HarnessMsg),
 {
     let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
     let mut messages = history.iter().enumerate().peekable();
@@ -106,12 +106,12 @@ where
                 let text = message.content.texts().join("");
                 if !text.is_empty() {
                     if message.has_plan_marker() {
-                        on_event(HarnessEvent::PlanMessage(text));
+                        on_event(HarnessMsg::PlanMessage(text));
                     } else if message.has_compact_summary_marker() {
-                        on_event(HarnessEvent::CompactStart { start_time: 0 });
-                        on_event(HarnessEvent::CompactSummary(text));
+                        on_event(HarnessMsg::CompactStart { start_time: 0 });
+                        on_event(HarnessMsg::CompactSummary(text));
                     } else {
-                        on_event(HarnessEvent::UserPrompt(text));
+                        on_event(HarnessMsg::UserPrompt(text));
                     }
                 }
                 token_usage.emit_usage(index, &mut on_event);
@@ -126,7 +126,7 @@ where
                         | ContentPart::ReasoningContent(text)
                             if !text.is_empty() =>
                         {
-                            on_event(HarnessEvent::Thinking(text.clone()));
+                            on_event(HarnessMsg::Thinking(text.clone()));
                         }
                         _ => {}
                     }
@@ -138,7 +138,7 @@ where
                 }
 
                 if !text.is_empty() {
-                    on_event(HarnessEvent::AgentMessage(text));
+                    on_event(HarnessMsg::AgentMessage(text));
                 }
                 token_usage.emit_usage(index, &mut on_event);
 
@@ -158,12 +158,12 @@ where
                     let status = next_msg.tool_status();
                     for resp in responses {
                         if let Some((name, args)) = pending_tool_calls.first() {
-                            on_event(HarnessEvent::ToolCall {
+                            on_event(HarnessMsg::ToolCall {
                                 name: (*name).clone(),
                                 arguments: (*args).clone(),
                                 start_time: 0,
                             });
-                            on_event(HarnessEvent::ToolResult {
+                            on_event(HarnessMsg::ToolResult {
                                 name: (*name).clone(),
                                 result: resp.content.clone(),
                                 status,
@@ -178,12 +178,12 @@ where
                 // Any remaining unmatched calls — emit with empty result so
                 // the UI always renders something.
                 for (name, args) in pending_tool_calls.drain(..) {
-                    on_event(HarnessEvent::ToolCall {
+                    on_event(HarnessMsg::ToolCall {
                         name: name.clone(),
                         arguments: args,
                         start_time: 0,
                     });
-                    on_event(HarnessEvent::ToolResult {
+                    on_event(HarnessMsg::ToolResult {
                         name,
                         result: String::new(),
                         status: ToolStatus::Valid,
@@ -194,10 +194,10 @@ where
                 // Unmatched tool response — display inline as agent text.
                 let text = message.content.texts().join("");
                 if !text.is_empty() {
-                    on_event(HarnessEvent::AgentMessage(text));
+                    on_event(HarnessMsg::AgentMessage(text));
                 }
                 for tr in message.content.tool_responses() {
-                    on_event(HarnessEvent::AgentMessage(format!(
+                    on_event(HarnessMsg::AgentMessage(format!(
                         "[tool {}]: {}",
                         tr.call_id, tr.content
                     )));

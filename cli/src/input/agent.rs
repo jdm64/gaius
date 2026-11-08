@@ -3,9 +3,9 @@
  */
 
 use crate::{
+    actor::HarnessActorClient,
     agents::AgentDefinition,
     commands::Command,
-    harness_actor::HarnessActorClient,
     input::{InputMode, PromptEditor, picklist::PickList},
     skills::Skill,
     tui::TuiApp,

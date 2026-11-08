@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use super::{Harness, HarnessEvent};
+use super::{Harness, HarnessMsg};
 use crate::{token_usage::TokenUsageLedger, util::time_now};
 use genai::chat::{ChatMessage, ChatRequest, ChatRole, ContentPart, CustomPart, MessageContent};
 use serde_json::json;
@@ -43,7 +43,7 @@ pub enum CompactOutcome {
 impl Harness {
     pub async fn compact<F>(&mut self, on_event: &mut F) -> Result<(), Box<dyn Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         self.set_cancel(false);
         self.update_session_info();
@@ -80,12 +80,12 @@ impl Harness {
         on_event: &mut F,
     ) -> Result<(), Box<dyn Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         self.history.messages = messages;
         self.token_usage.compact(removed, summary_tokens);
         self.save_history()?;
-        on_event(HarnessEvent::TokenUsage {
+        on_event(HarnessMsg::TokenUsage {
             prompt: None,
             response: None,
             total: self.token_usage.total_tokens(),
@@ -103,7 +103,7 @@ impl Compact {
         on_event: &mut F,
     ) -> Result<CompactOutcome, Box<dyn Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         if Self::should_compact(harness) {
             Self::compact_now(harness, on_event).await
@@ -117,14 +117,14 @@ impl Compact {
         on_event: &mut F,
     ) -> Result<CompactOutcome, Box<dyn Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let Some(split) = Self::split_point(&harness.history().messages, harness.token_usage())
         else {
             return Ok(CompactOutcome::NothingToCompact);
         };
 
-        on_event(HarnessEvent::CompactStart {
+        on_event(HarnessMsg::CompactStart {
             start_time: time_now(),
         });
 
@@ -136,7 +136,7 @@ impl Compact {
                 if harness.is_cancel() {
                     return Ok(CompactOutcome::Cancelled);
                 }
-                on_event(HarnessEvent::SystemMessage(format!(
+                on_event(HarnessMsg::SystemMessage(format!(
                     "Context compaction failed: {err}"
                 )));
                 return Ok(CompactOutcome::Failed);
@@ -190,7 +190,7 @@ impl Compact {
         on_event: &mut F,
     ) -> Result<(String, Option<i32>), Box<dyn Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let content = harness
             .exec_chat_cancellable(Self::request(messages))
@@ -205,7 +205,7 @@ impl Compact {
 
         // The summary is shown as agent output, with the usage of the summary
         // request rendered under it.
-        on_event(HarnessEvent::CompactSummary(Self::summary_message_text(
+        on_event(HarnessMsg::CompactSummary(Self::summary_message_text(
             &summary,
         )));
         harness.record_side_usage(&content.usage, on_event);

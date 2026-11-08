@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+pub mod actor;
 pub mod agents;
 pub mod auth;
 pub mod cancel_handle;
@@ -12,7 +13,6 @@ pub mod config;
 pub mod diff_view;
 pub mod dirs;
 pub mod harness;
-pub mod harness_actor;
 pub mod input;
 pub mod models;
 pub mod plan_hook;

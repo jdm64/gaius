@@ -5,7 +5,7 @@
 use genai::chat::Usage;
 use serde::{Deserialize, Serialize};
 
-use crate::{harness::HarnessEvent, models::TokenPrice};
+use crate::{harness::HarnessMsg, models::TokenPrice};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TokenUsageSpan {
@@ -118,10 +118,10 @@ pub struct TokenUsageLedger {
 impl TokenUsageLedger {
     pub fn emit_usage<F>(&self, index: usize, on_event: &mut F)
     where
-        F: FnMut(HarnessEvent),
+        F: FnMut(HarnessMsg),
     {
         for span in self.spans_after_message(index) {
-            on_event(HarnessEvent::TokenUsage {
+            on_event(HarnessMsg::TokenUsage {
                 prompt: span.prompt,
                 response: span.response,
                 total: self.usage.context_tokens,
@@ -138,10 +138,10 @@ impl TokenUsageLedger {
         pricing: Option<&TokenPrice>,
         on_event: &mut F,
     ) where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         for span in self.record(prompt_index, response_index, usage, pricing) {
-            on_event(HarnessEvent::TokenUsage {
+            on_event(HarnessMsg::TokenUsage {
                 prompt: span.prompt,
                 response: span.response,
                 total: self.usage.context_tokens,

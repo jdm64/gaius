@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use super::{Harness, HarnessEvent};
+use super::{Harness, HarnessMsg};
 use crate::tool_engine::ToolResult;
 use genai::chat::{ChatMessage, ContentPart, CustomPart, MessageContent, ToolCall, Usage};
 use serde_json::json;
@@ -12,24 +12,24 @@ use uuid::Uuid;
 impl Harness {
     pub fn send_system_message<F>(&self, message: String, on_event: &mut F)
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
-        on_event(HarnessEvent::SystemMessage(message));
+        on_event(HarnessMsg::SystemMessage(message));
     }
 
     pub fn send_user_message<F>(&mut self, message: String, on_event: &mut F)
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         self.history
             .messages
             .push(ChatMessage::user(message.clone()));
-        on_event(HarnessEvent::UserPrompt(message));
+        on_event(HarnessMsg::UserPrompt(message));
     }
 
     pub fn send_plan_message<F>(&mut self, message: String, on_event: &mut F)
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let marker = ContentPart::Custom(CustomPart {
             model_iden: None,
@@ -38,7 +38,7 @@ impl Harness {
         let content = MessageContent::from_parts(vec![marker, ContentPart::Text(message.clone())]);
 
         self.history.messages.push(ChatMessage::user(content));
-        on_event(HarnessEvent::PlanMessage(message));
+        on_event(HarnessMsg::PlanMessage(message));
     }
 
     pub fn send_skill_message<F>(
@@ -47,7 +47,7 @@ impl Harness {
         mut on_event: F,
     ) -> Result<(), Box<dyn Error>>
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let skill_command = format!("/skill {}", name);
         self.send_user_message(skill_command, &mut on_event);
@@ -64,7 +64,7 @@ impl Harness {
             .push(ChatMessage::assistant(assistant_content.clone()));
 
         if let Some(text) = assistant_content.joined_texts() {
-            on_event(HarnessEvent::AgentMessage(text));
+            on_event(HarnessMsg::AgentMessage(text));
         }
 
         self.send_tool_call_event(&tc, &mut on_event);
@@ -85,13 +85,13 @@ impl Harness {
 
     pub fn drop_queued_prompts<F>(&self, on_event: &mut F)
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let dropped = self.prompt_queue.clear();
         if dropped > 0 {
-            on_event(HarnessEvent::QueueChanged(0));
+            on_event(HarnessMsg::QueueChanged(0));
             let plural = if dropped == 1 { "" } else { "s" };
-            on_event(HarnessEvent::SystemMessage(format!(
+            on_event(HarnessMsg::SystemMessage(format!(
                 "Dropped {dropped} queued prompt{plural}"
             )));
         }
@@ -104,7 +104,7 @@ impl Harness {
         usage_opt: Option<Usage>,
         on_event: &mut F,
     ) where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let Some(usage) = usage_opt else {
             return;
@@ -120,11 +120,11 @@ impl Harness {
     /// cost are counted in the session usage.
     pub fn record_side_usage<F>(&mut self, usage: &Usage, on_event: &mut F)
     where
-        F: FnMut(HarnessEvent) -> Option<String>,
+        F: FnMut(HarnessMsg) -> Option<String>,
     {
         let pricing = self.client.model().pricing.as_ref();
         self.token_usage.record_side_usage(usage, pricing);
-        on_event(HarnessEvent::TokenUsage {
+        on_event(HarnessMsg::TokenUsage {
             prompt: usage.prompt_tokens,
             response: usage.completion_tokens,
             // A side request (such as compaction) does not change the active
