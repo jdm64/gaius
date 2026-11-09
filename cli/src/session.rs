@@ -180,7 +180,10 @@ impl Session {
         }
     }
 
-    fn deserialize_session(path: &Path, read_msgs: bool) -> Result<SessionFile, Box<dyn Error>> {
+    pub fn deserialize_session(
+        path: &Path,
+        read_msgs: bool,
+    ) -> Result<SessionFile, Box<dyn Error>> {
         let file = File::open(path)?;
         let buf = BufReader::new(file);
         let mut des = Deserializer::new(buf);
@@ -195,7 +198,23 @@ impl Session {
         let messages: Vec<ChatMessage>;
         let token_usage: TokenUsageLedger;
         if read_msgs {
-            messages = Deserialize::deserialize(&mut des)?;
+            // genai's ModelName deserializer expects a string, while its serializer
+            // stores the internal enum representation in MessagePack. Normalize that
+            // representation before deserializing chat messages.
+            let mut raw_messages: Vec<serde_json::Value> = Deserialize::deserialize(&mut des)?;
+            for message in &mut raw_messages {
+                normalize_model_names(message);
+            }
+            messages = raw_messages
+                .into_iter()
+                .map(|message| -> Result<ChatMessage, Box<dyn Error>> {
+                    // Deserialize from a borrowing format: genai's ModelName currently
+                    // requests `&str`, which serde_json::Value cannot provide.
+                    let encoded = rmp_serde::to_vec(&message)?;
+                    let mut message_deserializer = Deserializer::from_read_ref(&encoded[..]);
+                    Ok(ChatMessage::deserialize(&mut message_deserializer)?)
+                })
+                .collect::<Result<_, _>>()?;
             if version >= 3 {
                 token_usage = Deserialize::deserialize(&mut des)?;
             } else if version == 2 {
@@ -218,7 +237,7 @@ impl Session {
         })
     }
 
-    fn serialize_session(
+    pub fn serialize_session(
         &self,
         path: &Path,
         session_file: SessionFileRef,
@@ -397,6 +416,33 @@ impl Session {
                     .collect::<String>()
             })
             .unwrap_or("<unamed>".to_string())
+    }
+}
+
+// ModelName doesn't round trip. There's an open PR with genai to fix this.
+fn normalize_model_names(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(object) => {
+            if let Some(serde_json::Value::Object(encoded_name)) = object.get("model_name")
+                && let Some(name) = encoded_name
+                    .get("Shared")
+                    .or_else(|| encoded_name.get("Static"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            {
+                object.insert("model_name".to_string(), serde_json::Value::String(name));
+            }
+
+            for child in object.values_mut() {
+                normalize_model_names(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                normalize_model_names(item);
+            }
+        }
+        _ => {}
     }
 }
 
