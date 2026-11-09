@@ -3,6 +3,7 @@
  */
 
 use gaius::{
+    acp::run_acp,
     agents::Agents,
     auth::{handle::OAuthHandle, spec::OAuthKind},
     cli_prompt::CliPrompt,
@@ -28,6 +29,7 @@ enum Command {
     Upgrade,
     Login(String),
     TokenRefresh(String),
+    AcpMode,
 }
 
 fn parse_args() -> Result<Args, Box<dyn Error>> {
@@ -55,6 +57,7 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
                 };
                 Command::TokenRefresh(provider)
             }
+            "acp" => Command::AcpMode,
             _ => return Err(format!("Unknown command: {name}").into()),
         };
         let remaining = pargs.finish();
@@ -151,6 +154,7 @@ fn print_help() {
     println!();
     println!("COMMANDS:");
     println!("  upgrade                   Upgrade to the latest release and exit");
+    println!("  acp                       Run in ACP mode (agent client protocol)");
     println!("  login <PROVIDER>          Log in to a provider and exit");
     println!("  token-refresh <PROVIDER>  Force refresh the saved token and exit");
     println!(
@@ -238,6 +242,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Command::Upgrade => Upgrader::new()?.run().await,
             Command::Login(provider) => login(&provider).await,
             Command::TokenRefresh(provider) => token_refresh(&provider).await,
+            Command::AcpMode => run_acp().await,
         };
     }
 

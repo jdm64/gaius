@@ -4,6 +4,10 @@ version = "0.5.3"
 edition = "2024"
 
 [dependencies]
+agent-client-protocol = { version = "5", features = [
+    "stdio",
+    "unstable_protocol_v2",
+] }
 base64 = "0.23"
 chrono = "0.4"
 crossterm = { version = "0.29", features = ["event-stream", "osc52"] }
