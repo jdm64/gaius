@@ -111,7 +111,7 @@ impl InputMode {
         app.editor.handle_input_cursor(key);
         match key.code {
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if app.actor_busy {
+                if app.snapshot.turn_started.is_some() {
                     app.editor.set_status("Cancelling agent...".to_string());
                     actor.cancel().await?;
                 }
@@ -139,14 +139,10 @@ impl InputMode {
             KeyCode::Tab => {
                 let agent = app.agents.next_agent(app.snapshot.agent_name.as_str());
                 let next_agent = agent.cloned();
-                if let Some(agent) = next_agent {
-                    if !app.harness_idle() {
-                        app.editor.set_status(
-                            "Agent is busy; finish current turn before changing agents",
-                        );
-                    } else if let Err(err) = actor.set_agent(agent).await {
-                        app.editor.set_status(err);
-                    }
+                if let Some(agent) = next_agent
+                    && let Err(err) = actor.set_agent(agent).await
+                {
+                    app.editor.set_status(err);
                 }
             }
             KeyCode::Enter => {

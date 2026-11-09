@@ -4,7 +4,6 @@
 
 use crate::{
     actor::HarnessActorClient,
-    commands::Command,
     input::{InputMode, PromptEditor, picklist::PickList},
     session::{Session, SessionPickerRow},
     token_usage::SessionInfo,
@@ -39,13 +38,9 @@ impl InputMode {
                     return Self::Session { picker };
                 };
                 if let Some(session_id) = &session.id {
-                    if let Some(busy) = Command::busy_status(app, "loading a session") {
-                        app.editor.set_status(busy);
-                    } else {
-                        if let Err(err) = actor.load_session(session_id.clone()).await {
-                            app.editor
-                                .set_status(format!("Error loading session: {}", err));
-                        }
+                    if let Err(err) = actor.load_session(session_id.clone()).await {
+                        app.editor
+                            .set_status(format!("Error loading session: {}", err));
                     }
                 } else {
                     app.editor

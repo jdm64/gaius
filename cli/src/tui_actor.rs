@@ -27,6 +27,7 @@ impl TuiApp {
             CommandReply::SkillsListed(result) => self.handle_skills_listed(result),
             CommandReply::SkillsReloaded(result) => self.handle_skills_reloaded(result),
             CommandReply::SessionInfo(result) => self.handle_session_info(result),
+            CommandReply::Busy(err) => self.editor.set_status(err),
         }
         None
     }

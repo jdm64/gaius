@@ -5,7 +5,6 @@
 use crate::{
     actor::HarnessActorClient,
     agents::AgentDefinition,
-    commands::Command,
     input::{InputMode, PromptEditor, picklist::PickList},
     skills::Skill,
     tui::TuiApp,
@@ -39,10 +38,6 @@ impl InputMode {
                     app.editor.set_status("No matching agents".to_string());
                     return Self::Agents { picker };
                 };
-                if let Some(busy) = Command::busy_status(app, "changing agents") {
-                    app.editor.set_status(busy);
-                    return Self::Agents { picker };
-                }
                 if let Err(err) = actor.set_agent(selected_agent).await {
                     app.editor.set_status(err);
                 }
@@ -79,10 +74,6 @@ impl InputMode {
             }
             KeyCode::Enter if !picker.is_empty() => {
                 if let Some(skill) = picker.selected_row() {
-                    if let Some(busy) = Command::busy_status(app, "running a skill") {
-                        app.editor.set_status(busy);
-                        return Self::Skills { picker };
-                    }
                     match actor.run_skill(skill.name.clone()).await {
                         Ok(()) => {
                             app.editor.set_status(format!("Ran skill: {}", skill.name));

@@ -4,7 +4,6 @@
 
 use crate::{
     actor::HarnessActorClient,
-    commands::Command,
     config::{Config, ProviderConfig},
     input::{InputMode, PromptEditor, picklist::PickList},
     models::{ModelPickerRow, Models, ReasoningEffort, RecentModelDef},
@@ -47,10 +46,6 @@ impl InputMode {
                 picker.move_down();
             }
             KeyCode::Enter => {
-                if let Some(busy) = Command::busy_status(app, "changing models") {
-                    app.editor.set_status(busy);
-                    return Self::Models { picker };
-                }
                 let Some(selected_model) = picker.selected_row().and_then(|row| match row {
                     ModelPickerRow::Model(model) | ModelPickerRow::RecentModel(model) => {
                         Some(model)
@@ -232,10 +227,6 @@ impl InputMode {
                 picker.move_down();
             }
             KeyCode::Enter => {
-                if let Some(busy) = Command::busy_status(app, "changing reasoning") {
-                    app.editor.set_status(busy);
-                    return Self::Reasoning { picker };
-                }
                 let Some(selected) = picker.selected_row() else {
                     return Self::Reasoning { picker };
                 };

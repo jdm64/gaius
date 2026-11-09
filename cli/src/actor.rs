@@ -75,6 +75,7 @@ pub enum CommandReply {
     SkillsListed(OperationResult<Vec<Skill>>),
     SkillsReloaded(OperationResult<Vec<Skill>>),
     SessionInfo(OperationResult<SessionInfo>),
+    Busy(String),
 }
 
 impl From<CommandReply> for HarnessEvent {
@@ -234,6 +235,7 @@ impl HarnessActorServer {
             }
         };
 
+        let busy_tx = self.tx.clone();
         let mut turn = Box::pin(self.harness.run_turn(request, on_event));
         let result: Result<(), String> = loop {
             tokio::select! {
@@ -252,7 +254,7 @@ impl HarnessActorServer {
                         Some(HarnessCommand::RunPrompt(prompt)) => {
                             prompt_queue.push(prompt, &self.tx);
                         }
-                        Some(_) => {},
+                        Some(_) => Self::send_busy_reply(&busy_tx),
                         None => break Err("Actor channel closed".into()),
                     }
                 }
@@ -286,6 +288,7 @@ impl HarnessActorServer {
             None
         };
 
+        let busy_tx = self.tx.clone();
         let mut compaction = Box::pin(self.harness.compact(&mut on_event));
         let result: Result<(), String> = loop {
             tokio::select! {
@@ -299,7 +302,7 @@ impl HarnessActorServer {
                     Some(HarnessCommand::RunPrompt(prompt)) => {
                         prompt_queue.push(prompt, &self.tx);
                     }
-                    Some(_) => {},
+                    Some(_) => Self::send_busy_reply(&busy_tx),
                     None => break Err("Actor channel closed".into()),
                 },
             }
@@ -420,5 +423,12 @@ impl HarnessActorServer {
                 }
             }
         }
+    }
+
+    fn send_busy_reply(tx: &UnboundedSender<HarnessEvent>) {
+        let _ = tx.send(
+            CommandReply::Busy("Agent is busy; wait for idle running this command".to_string())
+                .into(),
+        );
     }
 }

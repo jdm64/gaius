@@ -104,16 +104,12 @@ impl Command {
 
         match command {
             Self::New => {
-                if let Some(busy) = Self::busy_status(app, "creating a session") {
-                    app.editor.set_status(busy);
-                } else if let Err(err) = actor.new_session().await {
+                if let Err(err) = actor.new_session().await {
                     app.editor.set_status(err);
                 }
             }
             Self::Fork => {
-                if let Some(busy) = Self::busy_status(app, "forking a session") {
-                    app.editor.set_status(busy);
-                } else if let Err(err) = actor.fork_session().await {
+                if let Err(err) = actor.fork_session().await {
                     app.editor.set_status(err);
                 }
             }
@@ -146,53 +142,43 @@ impl Command {
                 }
             }
             Self::Rebuild => {
-                if let Some(busy) = Self::busy_status(app, "rebuilding") {
-                    app.editor.set_status(busy);
-                } else {
-                    // Reload agents from disk
-                    let agents = match Dirs::config_dir() {
-                        Ok(config_dir) => match Agents::load(&config_dir) {
-                            Ok(agents) => {
-                                app.agents = agents;
-                                app.agents.all().to_vec()
-                            }
-                            Err(e) => {
-                                app.editor
-                                    .status_clear_input(format!("Error reloading agents: {}", e));
-                                return InputMode::PromptInput;
-                            }
-                        },
+                // Reload agents from disk
+                let agents = match Dirs::config_dir() {
+                    Ok(config_dir) => match Agents::load(&config_dir) {
+                        Ok(agents) => {
+                            app.agents = agents;
+                            app.agents.all().to_vec()
+                        }
                         Err(e) => {
                             app.editor
-                                .status_clear_input(format!("Error getting config dir: {}", e));
+                                .status_clear_input(format!("Error reloading agents: {}", e));
                             return InputMode::PromptInput;
                         }
-                    };
-
-                    // Find the current agent by name
-                    let current_agent_name = &app.snapshot.agent_name;
-                    let agent = agents
-                        .iter()
-                        .find(|a| a.name == *current_agent_name)
-                        .cloned()
-                        .unwrap_or_else(|| app.agents.default_agent().clone());
-
-                    if let Err(err) = actor.rebuild_agent(agent).await {
-                        app.editor.set_status(err);
+                    },
+                    Err(e) => {
+                        app.editor
+                            .status_clear_input(format!("Error getting config dir: {}", e));
+                        return InputMode::PromptInput;
                     }
+                };
+
+                // Find the current agent by name
+                let current_agent_name = &app.snapshot.agent_name;
+                let agent = agents
+                    .iter()
+                    .find(|a| a.name == *current_agent_name)
+                    .cloned()
+                    .unwrap_or_else(|| app.agents.default_agent().clone());
+
+                if let Err(err) = actor.rebuild_agent(agent).await {
+                    app.editor.set_status(err);
                 }
             }
             Self::Compact => {
-                if let Some(busy) = Self::busy_status(app, "compacting") {
-                    app.editor.set_status(busy);
-                } else {
-                    app.actor_busy = true;
-                    app.editor.set_status("Compacting conversation...");
-                    app.history.scroll_bottom();
-                    if let Err(err) = actor.compact().await {
-                        app.editor.set_status(err);
-                    }
-                    app.actor_busy = false;
+                app.editor.set_status("Compacting conversation...");
+                app.history.scroll_bottom();
+                if let Err(err) = actor.compact().await {
+                    app.editor.set_status(err);
                 }
             }
             Self::Info => {
@@ -202,9 +188,7 @@ impl Command {
                 }
             }
             Self::Streaming => {
-                if let Some(busy) = Self::busy_status(app, "changing streaming") {
-                    app.editor.set_status(busy);
-                } else if let Err(err) = actor.toggle_streaming().await {
+                if let Err(err) = actor.toggle_streaming().await {
                     app.editor.set_status(err);
                 }
             }
@@ -247,18 +231,12 @@ impl Command {
                 app.toggle_diff_view();
             }
             Self::Plan => {
-                if let Some(busy) = Self::busy_status(app, "changing plan mode") {
-                    app.editor.set_status(busy);
-                } else if let Err(err) = actor.toggle_plan_mode().await {
+                if let Err(err) = actor.toggle_plan_mode().await {
                     app.editor.set_status(err);
                 }
             }
         }
 
         InputMode::PromptInput
-    }
-
-    pub fn busy_status(app: &TuiApp, action: &str) -> Option<String> {
-        (!app.harness_idle()).then(|| format!("Agent is busy; finish current turn before {action}"))
     }
 }

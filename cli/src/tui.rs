@@ -105,7 +105,6 @@ pub struct TuiApp {
     pub display_prefs: DisplayPrefs,
     pub history: HistoryLayout,
     pub selection: Selection,
-    pub actor_busy: bool,
 }
 
 impl Default for TuiApp {
@@ -127,7 +126,6 @@ impl TuiApp {
             display_prefs: DisplayPrefs::default(),
             history: HistoryLayout::default(),
             selection: Selection::default(),
-            actor_busy: false,
         }
     }
 
@@ -202,7 +200,7 @@ impl TuiApp {
             if should_draw {
                 guard.terminal.draw(|frame| render.draw(self, frame))?;
                 last_render = Instant::now();
-                next_render = if self.actor_busy {
+                next_render = if self.snapshot.turn_started.is_some() {
                     Some(Instant::now() + STREAM_FRAME_INTERVAL)
                 } else {
                     None
@@ -218,10 +216,6 @@ impl TuiApp {
                     _ => None,
                 };
             }
-        }
-
-        if self.actor_busy {
-            return Ok(self.snapshot.clone());
         }
 
         let _ = actor.shutdown().await;
@@ -330,13 +324,11 @@ impl TuiApp {
                 };
             }
             HarnessEvent::TurnFinished(snapshot) => {
-                self.actor_busy = false;
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
                 self.editor.set_status("");
             }
             HarnessEvent::RequestFailed(err, snapshot) => {
-                self.actor_busy = false;
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
                 self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
@@ -370,10 +362,6 @@ impl TuiApp {
 
     pub fn save_snapshot(&mut self, snapshot: &HarnessSnapshot) {
         self.snapshot = snapshot.clone();
-    }
-
-    pub fn harness_idle(&self) -> bool {
-        !self.actor_busy && self.snapshot.queued_prompts == 0
     }
 
     fn apply_harness_event(&mut self, event: HarnessMsg) {
@@ -440,7 +428,6 @@ impl TuiApp {
             }
             HarnessMsg::AskUser { .. } => {}
             HarnessMsg::TurnStarted(turn_started) => {
-                self.actor_busy = true;
                 self.snapshot.turn_started = Some(turn_started);
                 self.editor.set_status("Waiting for agent...");
             }
