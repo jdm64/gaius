@@ -1,3 +1,8 @@
+## v0.5.2
+
+### Improvements
+- Fixed issue where OpenRouter assistant messages have a custom message part with ModelIden that couldn't be deserialized.
+
 ## v0.5.1
 
 ### Improvements
