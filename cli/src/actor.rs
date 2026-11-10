@@ -12,6 +12,7 @@ use crate::{
 use futures::executor;
 use std::{
     io::{self, Error},
+    path::PathBuf,
     thread,
 };
 use tokio::{
@@ -47,9 +48,10 @@ pub enum HarnessCommand {
     RunSkill(String),
     SetModel(ModelDef),
     SetAgent(AgentDefinition),
-    NewSession,
+    NewSession(Option<PathBuf>),
     ForkSession,
     LoadSession(String),
+    CloseSession,
     ToggleStreaming,
     TogglePlanMode,
     ReplayHistory,
@@ -70,6 +72,7 @@ pub enum CommandReply {
     SessionCreated(OperationResult<HarnessSnapshot>),
     SessionForked(OperationResult<HarnessSnapshot>),
     SessionLoaded(OperationResult<HarnessSnapshot>),
+    SessionClosed(OperationResult<HarnessSnapshot>),
     StreamingToggled(OperationResult<bool>),
     PlanModeToggled(OperationResult<bool>),
     SkillsListed(OperationResult<Vec<Skill>>),
@@ -153,8 +156,8 @@ impl HarnessActorClient {
         self.send(HarnessCommand::SetAgent(agent)).await
     }
 
-    pub async fn new_session(&self) -> Result<(), String> {
-        self.send(HarnessCommand::NewSession).await
+    pub async fn new_session(&self, cwd: Option<PathBuf>) -> Result<(), String> {
+        self.send(HarnessCommand::NewSession(cwd)).await
     }
 
     pub async fn fork_session(&self) -> Result<(), String> {
@@ -163,6 +166,10 @@ impl HarnessActorClient {
 
     pub async fn load_session(&self, session_id: String) -> Result<(), String> {
         self.send(HarnessCommand::LoadSession(session_id)).await
+    }
+
+    pub async fn close_session(&self) -> Result<(), String> {
+        self.send(HarnessCommand::CloseSession).await
     }
 
     pub async fn toggle_streaming(&self) -> Result<(), String> {
@@ -361,10 +368,10 @@ impl HarnessActorServer {
                     self.harness.set_agent(agent);
                     let _ = self.tx.send(CommandReply::AgentSet(Ok(name)).into());
                 }
-                HarnessCommand::NewSession => {
+                HarnessCommand::NewSession(cwd) => {
                     let result = self
                         .harness
-                        .new_session()
+                        .new_session(cwd)
                         .map(|_| self.harness.snapshot())
                         .map_err(|err| err.to_string());
                     let _ = self.tx.send(CommandReply::SessionCreated(result).into());
@@ -384,6 +391,14 @@ impl HarnessActorServer {
                         .map(|_| self.harness.snapshot())
                         .map_err(|err| err.to_string());
                     let _ = self.tx.send(CommandReply::SessionLoaded(result).into());
+                }
+                HarnessCommand::CloseSession => {
+                    let result = self
+                        .harness
+                        .close_session()
+                        .map(|_| self.harness.snapshot())
+                        .map_err(|err| err.to_string());
+                    let _ = self.tx.send(CommandReply::SessionClosed(result).into());
                 }
                 HarnessCommand::ToggleStreaming => {
                     let streaming = !self.harness.streaming();

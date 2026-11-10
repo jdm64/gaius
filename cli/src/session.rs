@@ -50,6 +50,7 @@ pub struct SessionFileRef<'a> {
 pub struct Session {
     pub id: Option<String>,
     pub name: Option<String>,
+    pub proj: PathBuf,
     pub modified: SystemTime,
 }
 
@@ -156,15 +157,16 @@ impl Session {
 
 impl Default for Session {
     fn default() -> Self {
-        Self::new()
+        Self::new(current_dir().unwrap_or_default())
     }
 }
 
 impl Session {
-    pub fn new() -> Self {
+    pub fn new(project: PathBuf) -> Self {
         Self {
             id: Some(Uuid::now_v7().to_string()),
             name: None,
+            proj: project,
             modified: SystemTime::now(),
         }
     }
@@ -174,16 +176,20 @@ impl Session {
         Ok(Self {
             id: Some(name),
             name: None,
+            proj: current_dir().unwrap_or_default(),
             modified: SystemTime::now(),
         })
     }
 
-    pub fn new_empty() -> Self {
+    pub fn new_temp() -> Self {
         Self {
             id: None,
-            name: None,
-            modified: SystemTime::now(),
+            ..Self::default()
         }
+    }
+
+    pub fn fork(&mut self) {
+        self.id = Some(Uuid::now_v7().to_string());
     }
 
     pub fn deserialize_session(
@@ -252,18 +258,21 @@ impl Session {
         Ok(())
     }
 
-    pub fn load(&self) -> Result<SessionFile, Box<dyn Error>> {
+    pub fn load(&mut self) -> Result<SessionFile, Box<dyn Error>> {
         let Some(session_id) = self.id.clone() else {
             return Ok(SessionFile::default());
         };
 
         let path = Dirs::session_file(session_id.as_str())?;
         if path.is_file() {
-            Ok(Self::deserialize_session(path.as_path(), true)?)
+            let file = Self::deserialize_session(path.as_path(), true)?;
+            self.proj = file.proj_dir.clone();
+            self.name = Some(file.name.clone());
+            Ok(file)
         } else {
             Ok(SessionFile {
                 name: self.name.clone().unwrap_or_default(),
-                proj_dir: current_dir().unwrap_or_default(),
+                proj_dir: self.proj.clone(),
                 ..SessionFile::default()
             })
         }
@@ -278,7 +287,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn list() -> Vec<Session> {
+    pub fn list(cwd: Option<&Path>) -> Vec<Session> {
         let dir = match Dirs::sessions_dir() {
             Ok(d) => d,
             Err(_) => return Vec::new(),
@@ -292,6 +301,9 @@ impl Session {
                         let path = entry.path();
                         if path.extension()? == "mpk" {
                             let data = Self::deserialize_session(path.as_path(), false).ok()?;
+                            if cwd.is_some_and(|cwd| data.proj_dir != cwd) {
+                                return None;
+                            }
                             let id = path.file_stem()?.to_str().map(|s| s.to_string());
                             let modified = entry
                                 .metadata()
@@ -303,6 +315,7 @@ impl Session {
                                 Session {
                                     id,
                                     name: Some(data.name),
+                                    proj: data.proj_dir,
                                     modified,
                                 },
                             ))

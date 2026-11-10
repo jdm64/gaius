@@ -70,7 +70,7 @@ async fn info_command_answers_with_the_session_info() {
 async fn new_session_command_answers_with_a_snapshot() {
     let (mut actor, _) = actor();
 
-    actor.new_session().await.unwrap();
+    actor.new_session(None).await.unwrap();
 
     match actor.rx.recv().await {
         Some(HarnessEvent::Command(CommandReply::SessionCreated(Ok(snapshot)))) => {

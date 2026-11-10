@@ -117,10 +117,10 @@ impl Harness {
         session_id: Option<String>,
         create_session: bool,
     ) -> Result<Self, Box<dyn Error>> {
-        let session = match session_id {
+        let mut session = match session_id {
             Some(id) => Session::new_named(id)?,
-            None if create_session => Session::new(),
-            None => Session::new_empty(),
+            None if create_session => Session::default(),
+            None => Session::new_temp(),
         };
         let session_file = session.load()?;
 
@@ -234,13 +234,20 @@ impl Harness {
         self.build_sys_prompt();
     }
 
-    pub fn new_session(&mut self) -> Result<(), Box<dyn Error>> {
-        self.load_session(Session::new())
+    pub fn new_session(&mut self, cwd: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
+        let session = cwd.map(Session::new).unwrap_or_default();
+        self.load_session(session)
     }
 
     pub fn fork_session(&mut self) -> Result<(), Box<dyn Error>> {
-        self.session = Session::new();
+        self.session.fork();
         self.save_history()
+    }
+
+    pub fn close_session(&mut self) -> Result<(), Box<dyn Error>> {
+        self.set_cancel(true);
+        self.session.id = None;
+        self.reload_session()
     }
 
     pub fn load_session_by_id(&mut self, session_id: &str) -> Result<(), Box<dyn Error>> {
@@ -249,6 +256,10 @@ impl Harness {
 
     pub fn load_session(&mut self, session: Session) -> Result<(), Box<dyn Error>> {
         self.session = session;
+        self.reload_session()
+    }
+
+    pub fn reload_session(&mut self) -> Result<(), Box<dyn Error>> {
         let session_file = self.session.load()?;
         self.tool_engine.proj_dir = session_file.proj_dir;
         self.history = ChatRequest::new(session_file.messages);

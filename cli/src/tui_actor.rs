@@ -22,6 +22,7 @@ impl TuiApp {
             CommandReply::SessionCreated(result) => self.handle_session_created(result),
             CommandReply::SessionForked(result) => self.handle_session_forked(result),
             CommandReply::SessionLoaded(result) => return self.handle_session_loaded(result),
+            CommandReply::SessionClosed(result) => self.handle_session_closed(result),
             CommandReply::StreamingToggled(result) => self.handle_streaming_toggled(result),
             CommandReply::PlanModeToggled(result) => self.handle_plan_mode_toggled(result),
             CommandReply::SkillsListed(result) => self.handle_skills_listed(result),
@@ -131,6 +132,15 @@ impl TuiApp {
                     .set_status(format!("Error loading session: {}", err));
                 None
             }
+        }
+    }
+
+    pub fn handle_session_closed(&mut self, result: OperationResult<HarnessSnapshot>) {
+        if let Ok(snapshot) = result {
+            self.save_snapshot(&snapshot);
+            self.clear_messages();
+            self.history.scroll_bottom();
+            self.context_tokens = None;
         }
     }
 

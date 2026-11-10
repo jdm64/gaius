@@ -30,7 +30,7 @@ fn session_round_trips_messages_with_custom_model_data() {
     let proj_file = env::current_dir()
         .unwrap_or_else(|_| PathBuf::new())
         .join("test.mpk");
-    let session = Session::new();
+    let session = Session::new(proj_file.clone());
     let session_file = SessionFile {
         proj_dir: proj_file.clone(),
         messages,

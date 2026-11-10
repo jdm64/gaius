@@ -154,13 +154,13 @@ fn saving_a_session_creates_the_sessions_directory() {
         let sessions = Dirs::sessions_dir().unwrap();
         assert!(!sessions.exists(), "{} was created", sessions.display());
 
-        let session = Session::new_named("a-session".to_string()).unwrap();
+        let mut session = Session::new_named("a-session".to_string()).unwrap();
         session
             .save(SessionFile::default().as_ref())
             .expect("save a session into a home that has no sessions directory");
 
         assert!(sessions.is_dir());
-        let saved = Session::list();
+        let saved = Session::list(None);
         assert_eq!(
             vec!["a-session".to_string()],
             saved

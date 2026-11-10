@@ -104,7 +104,7 @@ impl Command {
 
         match command {
             Self::New => {
-                if let Err(err) = actor.new_session().await {
+                if let Err(err) = actor.new_session(None).await {
                     app.editor.set_status(err);
                 }
             }
@@ -115,7 +115,7 @@ impl Command {
             }
             Self::Sessions => {
                 return InputMode::Session {
-                    picker: Session::picker_rows(Session::list(), ""),
+                    picker: Session::picker_rows(Session::list(None), ""),
                 };
             }
             Self::Models => {
