@@ -132,13 +132,13 @@ impl TuiApp {
     pub async fn run(&mut self, harness: Harness) -> Result<HarnessSnapshot, Box<dyn Error>> {
         self.display_prefs = DisplayPrefs::load().unwrap_or_default();
         self.agents = self.config.agents().clone();
-        harness.replay_history(|event| self.apply_harness_event(event));
+        harness.replay_history(|event| self.apply_harness_msg(event));
 
         if let Err(e) = self.editor.load_prompt_history() {
             eprintln!("Failed to load prompt history: {}", e);
         }
         let initial_snapshot = harness.snapshot();
-        let mut actor = HarnessActorClient::new(harness)?;
+        let (actor, mut actor_rx) = HarnessActorClient::new(harness)?;
         self.save_snapshot(&initial_snapshot);
 
         if initial_snapshot.model.id.is_empty() {
@@ -163,7 +163,16 @@ impl TuiApp {
                     self.handle_terminal_event(event?, &actor).await?;
                     render_reason = RenderReason::UserUI;
                 }
-                actor_event = actor.rx.recv() => {
+                reply = actor_rx.replies.recv() => {
+                    let Some(reply) = reply else { break; };
+                    if let Some(command) = self.handle_command_reply(reply)
+                        && let Err(err) = actor.send(command).await
+                    {
+                        self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
+                    }
+                    render_reason = RenderReason::UserUI;
+                }
+                actor_event = actor_rx.events.recv() => {
                     let Some(actor_event) = actor_event else {
                         break;
                     };
@@ -176,7 +185,7 @@ impl TuiApp {
                         _ => RenderReason::UserUI,
                     };
 
-                    if let Some(command) = self.handle_actor_event(actor_event)
+                    if let Some(command) = self.handle_harness_event(actor_event)
                         && let Err(err) = actor.send(command).await
                     {
                         self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
@@ -219,7 +228,7 @@ impl TuiApp {
         }
 
         let _ = actor.shutdown().await;
-        if let Some(snapshot) = wait_for_shutdown(&mut actor.rx).await {
+        if let Some(snapshot) = wait_for_shutdown(&mut actor_rx.events).await {
             self.save_snapshot(&snapshot);
             return Ok(snapshot);
         }
@@ -304,12 +313,11 @@ impl TuiApp {
         Ok(())
     }
 
-    pub fn handle_actor_event(&mut self, event: HarnessEvent) -> Option<HarnessCommand> {
+    pub fn handle_harness_event(&mut self, event: HarnessEvent) -> Option<HarnessCommand> {
         match event {
             HarnessEvent::Message(event) => {
-                self.apply_harness_event(event);
+                self.apply_harness_msg(event);
             }
-            HarnessEvent::Command(reply) => return self.handle_command_reply(reply),
             HarnessEvent::AskUser {
                 title,
                 options,
@@ -333,12 +341,6 @@ impl TuiApp {
                 self.save_snapshot(&snapshot);
                 self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
                 self.editor.set_status("Agent request failed");
-            }
-            HarnessEvent::HistoryReplayed(events) => {
-                self.clear_messages();
-                for event in events {
-                    self.apply_harness_event(event);
-                }
             }
             HarnessEvent::ShutdownComplete(result) => {
                 if let Ok(snapshot) = result {
@@ -364,7 +366,7 @@ impl TuiApp {
         self.snapshot = snapshot.clone();
     }
 
-    fn apply_harness_event(&mut self, event: HarnessMsg) {
+    pub fn apply_harness_msg(&mut self, event: HarnessMsg) {
         match event {
             HarnessMsg::SystemMessage(text) => {
                 self.push_message(TuiMessage::SystemMessage(text));

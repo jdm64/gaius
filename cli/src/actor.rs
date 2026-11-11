@@ -31,7 +31,6 @@ const ACTOR_STOPPED: &str = "Harness actor stopped";
 #[derive(Debug)]
 pub enum HarnessEvent {
     Message(HarnessMsg),
-    Command(CommandReply),
     AskUser {
         title: String,
         options: Vec<String>,
@@ -39,7 +38,6 @@ pub enum HarnessEvent {
     },
     TurnFinished(HarnessSnapshot),
     RequestFailed(String, HarnessSnapshot),
-    HistoryReplayed(Vec<HarnessMsg>),
     ShutdownComplete(OperationResult<HarnessSnapshot>),
 }
 
@@ -73,6 +71,7 @@ pub enum CommandReply {
     SessionForked(OperationResult<HarnessSnapshot>),
     SessionLoaded(OperationResult<HarnessSnapshot>),
     SessionClosed(OperationResult<HarnessSnapshot>),
+    HistoryReplayed(Vec<HarnessMsg>),
     StreamingToggled(OperationResult<bool>),
     PlanModeToggled(OperationResult<bool>),
     SkillsListed(OperationResult<Vec<Skill>>),
@@ -81,21 +80,20 @@ pub enum CommandReply {
     Busy(String),
 }
 
-impl From<CommandReply> for HarnessEvent {
-    fn from(reply: CommandReply) -> Self {
-        HarnessEvent::Command(reply)
-    }
+pub struct HarnessRxHandle {
+    pub events: UnboundedReceiver<HarnessEvent>,
+    pub replies: UnboundedReceiver<CommandReply>,
 }
 
 pub struct HarnessActorClient {
     tx: Sender<HarnessCommand>,
-    pub rx: UnboundedReceiver<HarnessEvent>,
 }
 
 impl HarnessActorClient {
-    pub fn new(harness: Harness) -> io::Result<HarnessActorClient> {
-        let (tx, command_rx) = mpsc::channel(64);
-        let (event_tx, rx) = mpsc::unbounded_channel();
+    pub fn new(harness: Harness) -> io::Result<(HarnessActorClient, HarnessRxHandle)> {
+        let (tx, rx) = mpsc::channel(64);
+        let (event_tx, events) = mpsc::unbounded_channel();
+        let (reply_tx, replies) = mpsc::unbounded_channel();
 
         // run actor in new thread so it doesn't block UI when tools are called.
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
@@ -110,7 +108,7 @@ impl HarnessActorClient {
                     }
                 };
                 let _ = ready_tx.send(Ok(()));
-                let mut server = HarnessActorServer::new(harness, command_rx, event_tx);
+                let mut server = HarnessActorServer::new(harness, rx, event_tx, reply_tx);
                 rt.block_on(server.run_actor());
             })?;
 
@@ -118,7 +116,10 @@ impl HarnessActorClient {
             .recv()
             .map_err(|_| Error::other("harness actor thread panicked during startup"))??;
 
-        Ok(HarnessActorClient { tx, rx })
+        Ok((
+            HarnessActorClient { tx },
+            HarnessRxHandle { events, replies },
+        ))
     }
 
     pub async fn send(&self, command: HarnessCommand) -> Result<(), String> {
@@ -204,16 +205,33 @@ impl HarnessActorClient {
 pub struct HarnessActorServer {
     harness: Harness,
     rx: Receiver<HarnessCommand>,
-    tx: UnboundedSender<HarnessEvent>,
+    event_tx: UnboundedSender<HarnessEvent>,
+    reply_tx: UnboundedSender<CommandReply>,
 }
 
 impl HarnessActorServer {
     pub fn new(
         harness: Harness,
         rx: Receiver<HarnessCommand>,
-        tx: UnboundedSender<HarnessEvent>,
+        event_tx: UnboundedSender<HarnessEvent>,
+        reply_tx: UnboundedSender<CommandReply>,
     ) -> Self {
-        Self { harness, rx, tx }
+        Self {
+            harness,
+            rx,
+            event_tx,
+            reply_tx,
+        }
+    }
+
+    fn tx<T>(sender: &UnboundedSender<T>, msg: T) {
+        let _ = sender.send(msg);
+    }
+
+    fn tx_busy(tx: &UnboundedSender<CommandReply>) {
+        let _ = tx.send(CommandReply::Busy(
+            "Agent is busy; wait for idle before running this command".to_string(),
+        ));
     }
 
     async fn run_turn(&mut self, request: UserRequest) -> Result<(), String> {
@@ -222,27 +240,29 @@ impl HarnessActorServer {
         let prompt_queue = self.harness.prompt_queue();
 
         let on_event = {
-            let event_tx = self.tx.clone();
+            let event_tx = self.event_tx.clone();
             move |event: HarnessMsg| -> Option<String> {
                 match event {
                     HarnessMsg::AskUser { title, options } => {
                         let (answer_tx, answer_rx) = oneshot::channel();
-                        let _ = event_tx.send(HarnessEvent::AskUser {
-                            title,
-                            options,
-                            answer_tx,
-                        });
+                        Self::tx(
+                            &event_tx,
+                            HarnessEvent::AskUser {
+                                title,
+                                options,
+                                answer_tx,
+                            },
+                        );
                         Some(executor::block_on(answer_rx).unwrap_or_default())
                     }
                     event => {
-                        let _ = event_tx.send(HarnessEvent::Message(event));
+                        Self::tx(&event_tx, HarnessEvent::Message(event));
                         None
                     }
                 }
             }
         };
 
-        let busy_tx = self.tx.clone();
         let mut turn = Box::pin(self.harness.run_turn(request, on_event));
         let result: Result<(), String> = loop {
             tokio::select! {
@@ -256,12 +276,12 @@ impl HarnessActorServer {
                         }
                         Some(HarnessCommand::Info) => {
                             let info = info_ref.lock().unwrap().clone();
-                            let _ = self.tx.send(CommandReply::SessionInfo(Ok(info)).into());
+                            Self::tx(&self.reply_tx, CommandReply::SessionInfo(Ok(info)));
                         }
                         Some(HarnessCommand::RunPrompt(prompt)) => {
-                            prompt_queue.push(prompt, &self.tx);
+                            prompt_queue.push(prompt, &self.event_tx);
                         }
-                        Some(_) => Self::send_busy_reply(&busy_tx),
+                        Some(_) => Self::tx_busy(&self.reply_tx),
                         None => break Err("Actor channel closed".into()),
                     }
                 }
@@ -273,12 +293,13 @@ impl HarnessActorServer {
         let current = self.harness.snapshot();
         match &result {
             Ok(()) => {
-                let _ = self.tx.send(HarnessEvent::TurnFinished(current));
+                Self::tx(&self.event_tx, HarnessEvent::TurnFinished(current));
             }
             Err(err) => {
-                let _ = self
-                    .tx
-                    .send(HarnessEvent::RequestFailed(err.clone(), current));
+                Self::tx(
+                    &self.event_tx,
+                    HarnessEvent::RequestFailed(err.clone(), current),
+                );
             }
         }
 
@@ -289,13 +310,12 @@ impl HarnessActorServer {
         let info_ref = self.harness.session_info();
         let cancel_flag = self.harness.cancel_handle();
         let prompt_queue = self.harness.prompt_queue();
-        let event_tx_for_callback = self.tx.clone();
+        let event_tx_for_callback = self.event_tx.clone();
         let mut on_event = move |event: HarnessMsg| -> Option<String> {
-            let _ = event_tx_for_callback.send(HarnessEvent::Message(event));
+            Self::tx(&event_tx_for_callback, HarnessEvent::Message(event));
             None
         };
 
-        let busy_tx = self.tx.clone();
         let mut compaction = Box::pin(self.harness.compact(&mut on_event));
         let result: Result<(), String> = loop {
             tokio::select! {
@@ -304,12 +324,12 @@ impl HarnessActorServer {
                     Some(HarnessCommand::Cancel) => cancel_flag.cancel(),
                     Some(HarnessCommand::Info) => {
                         let info = info_ref.lock().unwrap().clone();
-                        let _ = self.tx.send(CommandReply::SessionInfo(Ok(info)).into());
+                        Self::tx(&self.reply_tx, CommandReply::SessionInfo(Ok(info)));
                     }
                     Some(HarnessCommand::RunPrompt(prompt)) => {
-                        prompt_queue.push(prompt, &self.tx);
+                        prompt_queue.push(prompt, &self.event_tx);
                     }
-                    Some(_) => Self::send_busy_reply(&busy_tx),
+                    Some(_) => Self::tx_busy(&self.reply_tx),
                     None => break Err("Actor channel closed".into()),
                 },
             }
@@ -319,12 +339,13 @@ impl HarnessActorServer {
         let snapshot = self.harness.snapshot();
         match &result {
             Ok(()) => {
-                let _ = self.tx.send(HarnessEvent::TurnFinished(snapshot));
+                Self::tx(&self.event_tx, HarnessEvent::TurnFinished(snapshot));
             }
             Err(err) => {
-                let _ = self
-                    .tx
-                    .send(HarnessEvent::RequestFailed(err.clone(), snapshot));
+                Self::tx(
+                    &self.event_tx,
+                    HarnessEvent::RequestFailed(err.clone(), snapshot),
+                );
             }
         }
         result
@@ -341,18 +362,16 @@ impl HarnessActorServer {
                 }
                 HarnessCommand::GetSkills => {
                     let skills = self.harness.list_skills();
-                    let _ = self.tx.send(CommandReply::SkillsListed(Ok(skills)).into());
+                    Self::tx(&self.reply_tx, CommandReply::SkillsListed(Ok(skills)));
                 }
                 HarnessCommand::ReloadSkills => {
                     let skills = self.harness.reload_skills();
-                    let _ = self
-                        .tx
-                        .send(CommandReply::SkillsReloaded(Ok(skills)).into());
+                    Self::tx(&self.reply_tx, CommandReply::SkillsReloaded(Ok(skills)));
                 }
                 HarnessCommand::RebuildAgent(agent) => {
                     let name = agent.name.clone();
                     self.harness.reload_agent(agent);
-                    let _ = self.tx.send(CommandReply::AgentRebuilt(Ok(name)).into());
+                    Self::tx(&self.reply_tx, CommandReply::AgentRebuilt(Ok(name)));
                 }
                 HarnessCommand::SetModel(model) => {
                     let result = self
@@ -361,12 +380,12 @@ impl HarnessActorServer {
                         .await
                         .map(|_| model.clone())
                         .map_err(|err| err.to_string());
-                    let _ = self.tx.send(CommandReply::ModelSet(result).into());
+                    Self::tx(&self.reply_tx, CommandReply::ModelSet(result));
                 }
                 HarnessCommand::SetAgent(agent) => {
                     let name = agent.name.clone();
                     self.harness.set_agent(agent);
-                    let _ = self.tx.send(CommandReply::AgentSet(Ok(name)).into());
+                    Self::tx(&self.reply_tx, CommandReply::AgentSet(Ok(name)));
                 }
                 HarnessCommand::NewSession(cwd) => {
                     let result = self
@@ -374,7 +393,7 @@ impl HarnessActorServer {
                         .new_session(cwd)
                         .map(|_| self.harness.snapshot())
                         .map_err(|err| err.to_string());
-                    let _ = self.tx.send(CommandReply::SessionCreated(result).into());
+                    Self::tx(&self.reply_tx, CommandReply::SessionCreated(result));
                 }
                 HarnessCommand::ForkSession => {
                     let result = self
@@ -382,7 +401,7 @@ impl HarnessActorServer {
                         .fork_session()
                         .map(|_| self.harness.snapshot())
                         .map_err(|err| err.to_string());
-                    let _ = self.tx.send(CommandReply::SessionForked(result).into());
+                    Self::tx(&self.reply_tx, CommandReply::SessionForked(result));
                 }
                 HarnessCommand::LoadSession(session_id) => {
                     let result = self
@@ -390,7 +409,7 @@ impl HarnessActorServer {
                         .load_session_by_id(&session_id)
                         .map(|_| self.harness.snapshot())
                         .map_err(|err| err.to_string());
-                    let _ = self.tx.send(CommandReply::SessionLoaded(result).into());
+                    Self::tx(&self.reply_tx, CommandReply::SessionLoaded(result));
                 }
                 HarnessCommand::CloseSession => {
                     let result = self
@@ -398,26 +417,25 @@ impl HarnessActorServer {
                         .close_session()
                         .map(|_| self.harness.snapshot())
                         .map_err(|err| err.to_string());
-                    let _ = self.tx.send(CommandReply::SessionClosed(result).into());
+                    Self::tx(&self.reply_tx, CommandReply::SessionClosed(result));
                 }
                 HarnessCommand::ToggleStreaming => {
                     let streaming = !self.harness.streaming();
                     self.harness.set_streaming(streaming);
-                    let _ = self
-                        .tx
-                        .send(CommandReply::StreamingToggled(Ok(streaming)).into());
+                    Self::tx(
+                        &self.reply_tx,
+                        CommandReply::StreamingToggled(Ok(streaming)),
+                    );
                 }
                 HarnessCommand::TogglePlanMode => {
                     let plan_mode = !self.harness.plan_mode();
                     self.harness.set_plan_mode(plan_mode);
-                    let _ = self
-                        .tx
-                        .send(CommandReply::PlanModeToggled(Ok(plan_mode)).into());
+                    Self::tx(&self.reply_tx, CommandReply::PlanModeToggled(Ok(plan_mode)));
                 }
                 HarnessCommand::ReplayHistory => {
                     let mut events = Vec::new();
                     self.harness.replay_history(|event| events.push(event));
-                    let _ = self.tx.send(HarnessEvent::HistoryReplayed(events));
+                    Self::tx(&self.reply_tx, CommandReply::HistoryReplayed(events));
                 }
                 HarnessCommand::Compact => {
                     let _ = self.run_compaction().await;
@@ -428,22 +446,16 @@ impl HarnessActorServer {
                 HarnessCommand::Info => {
                     let info = self.harness.session_info();
                     let info = info.lock().unwrap().clone();
-                    let _ = self.tx.send(CommandReply::SessionInfo(Ok(info)).into());
+                    Self::tx(&self.reply_tx, CommandReply::SessionInfo(Ok(info)));
                 }
                 HarnessCommand::Shutdown => {
-                    let _ = self
-                        .tx
-                        .send(HarnessEvent::ShutdownComplete(Ok(self.harness.snapshot())));
+                    Self::tx(
+                        &self.event_tx,
+                        HarnessEvent::ShutdownComplete(Ok(self.harness.snapshot())),
+                    );
                     break;
                 }
             }
         }
-    }
-
-    fn send_busy_reply(tx: &UnboundedSender<HarnessEvent>) {
-        let _ = tx.send(
-            CommandReply::Busy("Agent is busy; wait for idle running this command".to_string())
-                .into(),
-        );
     }
 }

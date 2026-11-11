@@ -5,7 +5,7 @@
 use crate::{
     actor::{CommandReply, HarnessCommand, OperationResult},
     agents::Agents,
-    harness::HarnessSnapshot,
+    harness::{HarnessMsg, HarnessSnapshot},
     input::{InputMode, picklist::PickList},
     models::{ModelDef, RecentModelDef},
     skills::Skill,
@@ -23,6 +23,7 @@ impl TuiApp {
             CommandReply::SessionForked(result) => self.handle_session_forked(result),
             CommandReply::SessionLoaded(result) => return self.handle_session_loaded(result),
             CommandReply::SessionClosed(result) => self.handle_session_closed(result),
+            CommandReply::HistoryReplayed(msgs) => self.handle_history_replayed(msgs),
             CommandReply::StreamingToggled(result) => self.handle_streaming_toggled(result),
             CommandReply::PlanModeToggled(result) => self.handle_plan_mode_toggled(result),
             CommandReply::SkillsListed(result) => self.handle_skills_listed(result),
@@ -141,6 +142,13 @@ impl TuiApp {
             self.clear_messages();
             self.history.scroll_bottom();
             self.context_tokens = None;
+        }
+    }
+
+    pub fn handle_history_replayed(&mut self, msgs: Vec<HarnessMsg>) {
+        self.clear_messages();
+        for msg in msgs {
+            self.apply_harness_msg(msg);
         }
     }
 

@@ -1,5 +1,5 @@
 use gaius::{
-    actor::{CommandReply, HarnessActorClient, HarnessCommand, HarnessEvent},
+    actor::{CommandReply, HarnessActorClient, HarnessCommand, HarnessEvent, HarnessRxHandle},
     commands::Command,
     config::Config,
     harness::{Harness, HarnessSnapshot},
@@ -10,10 +10,11 @@ use gaius::{
 };
 
 /// An actor with the snapshot it started from.
-fn actor() -> (HarnessActorClient, HarnessSnapshot) {
+fn actor() -> (HarnessActorClient, HarnessRxHandle, HarnessSnapshot) {
     let harness = Harness::new(&Config::default(), None).unwrap();
     let snapshot = harness.snapshot();
-    (HarnessActorClient::new(harness).unwrap(), snapshot)
+    let (actor, rx) = HarnessActorClient::new(harness).unwrap();
+    (actor, rx, snapshot)
 }
 
 fn skill(name: &str) -> Skill {
@@ -26,12 +27,12 @@ fn skill(name: &str) -> Skill {
 
 #[tokio::test]
 async fn skills_command_answers_with_the_skill_list() {
-    let (mut actor, _) = actor();
+    let (actor, mut actor_rx, _) = actor();
 
     actor.get_skills().await.unwrap();
 
-    match actor.rx.recv().await {
-        Some(HarnessEvent::Command(CommandReply::SkillsListed(Ok(skills)))) => {
+    match actor_rx.replies.recv().await {
+        Some(CommandReply::SkillsListed(Ok(skills))) => {
             assert!(skills.is_empty());
         }
         other => panic!("expected a SkillsListed event, got {other:?}"),
@@ -40,12 +41,12 @@ async fn skills_command_answers_with_the_skill_list() {
 
 #[tokio::test]
 async fn toggle_streaming_answers_with_the_new_value() {
-    let (mut actor, initial) = actor();
+    let (actor, mut actor_rx, initial) = actor();
 
     actor.toggle_streaming().await.unwrap();
 
-    match actor.rx.recv().await {
-        Some(HarnessEvent::Command(CommandReply::StreamingToggled(Ok(streaming)))) => {
+    match actor_rx.replies.recv().await {
+        Some(CommandReply::StreamingToggled(Ok(streaming))) => {
             assert_eq!(streaming, !initial.streaming);
         }
         other => panic!("expected a StreamingToggled event, got {other:?}"),
@@ -54,12 +55,12 @@ async fn toggle_streaming_answers_with_the_new_value() {
 
 #[tokio::test]
 async fn info_command_answers_with_the_session_info() {
-    let (mut actor, initial) = actor();
+    let (actor, mut actor_rx, initial) = actor();
 
     actor.info().await.unwrap();
 
-    match actor.rx.recv().await {
-        Some(HarnessEvent::Command(CommandReply::SessionInfo(Ok(info)))) => {
+    match actor_rx.replies.recv().await {
+        Some(CommandReply::SessionInfo(Ok(info))) => {
             assert_eq!(info.id, initial.session_id);
         }
         other => panic!("expected a SessionInfo event, got {other:?}"),
@@ -68,12 +69,12 @@ async fn info_command_answers_with_the_session_info() {
 
 #[tokio::test]
 async fn new_session_command_answers_with_a_snapshot() {
-    let (mut actor, _) = actor();
+    let (actor, mut actor_rx, _) = actor();
 
     actor.new_session(None).await.unwrap();
 
-    match actor.rx.recv().await {
-        Some(HarnessEvent::Command(CommandReply::SessionCreated(Ok(snapshot)))) => {
+    match actor_rx.replies.recv().await {
+        Some(CommandReply::SessionCreated(Ok(snapshot))) => {
             assert!(snapshot.session_id.is_some());
         }
         other => panic!("expected a SessionCreated event, got {other:?}"),
@@ -82,13 +83,13 @@ async fn new_session_command_answers_with_a_snapshot() {
 
 #[tokio::test]
 async fn a_failing_operation_answers_with_an_error_payload() {
-    let (mut actor, _) = actor();
+    let (actor, mut actor_rx, _) = actor();
 
     // an empty session id is rejected by the session store
     actor.load_session(String::new()).await.unwrap();
 
-    match actor.rx.recv().await {
-        Some(HarnessEvent::Command(CommandReply::SessionLoaded(Err(err)))) => {
+    match actor_rx.replies.recv().await {
+        Some(CommandReply::SessionLoaded(Err(err))) => {
             assert!(
                 !err.is_empty(),
                 "the error payload should say what went wrong"
@@ -100,12 +101,12 @@ async fn a_failing_operation_answers_with_an_error_payload() {
 
 #[tokio::test]
 async fn replay_history_answers_with_the_history_events() {
-    let (mut actor, _) = actor();
+    let (actor, mut actor_rx, _) = actor();
 
     actor.replay_history().await.unwrap();
 
-    match actor.rx.recv().await {
-        Some(HarnessEvent::HistoryReplayed(events)) => {
+    match actor_rx.replies.recv().await {
+        Some(CommandReply::HistoryReplayed(events)) => {
             assert!(events.is_empty());
         }
         other => panic!("expected a HistoryReplayed event, got {other:?}"),
@@ -114,11 +115,11 @@ async fn replay_history_answers_with_the_history_events() {
 
 #[tokio::test]
 async fn shutdown_answers_with_the_final_snapshot() {
-    let (mut actor, initial) = actor();
+    let (actor, mut actor_rx, initial) = actor();
 
     actor.shutdown().await.unwrap();
 
-    match actor.rx.recv().await {
+    match actor_rx.events.recv().await {
         Some(HarnessEvent::ShutdownComplete(Ok(snapshot))) => {
             assert_eq!(snapshot.session_id, initial.session_id);
         }
@@ -128,11 +129,11 @@ async fn shutdown_answers_with_the_final_snapshot() {
 
 #[tokio::test]
 async fn a_stopped_actor_reports_an_error_for_new_commands() {
-    let (mut actor, _) = actor();
+    let (actor, mut actor_rx, _) = actor();
 
     actor.shutdown().await.unwrap();
     // the actor drops its event channel when it stops
-    while actor.rx.recv().await.is_some() {}
+    while actor_rx.events.recv().await.is_some() {}
 
     let err = actor.get_skills().await.unwrap_err();
 
@@ -143,9 +144,7 @@ async fn a_stopped_actor_reports_an_error_for_new_commands() {
 async fn the_tui_opens_the_skill_picker_for_a_skill_list() {
     let mut app = TuiApp::new(Config::new());
 
-    app.handle_actor_event(HarnessEvent::Command(CommandReply::SkillsListed(Ok(vec![
-        skill("review"),
-    ]))));
+    app.handle_command_reply(CommandReply::SkillsListed(Ok(vec![skill("review")])));
 
     match &app.editor.mode {
         InputMode::Skills { picker } => {
@@ -160,9 +159,7 @@ async fn the_tui_opens_the_skill_picker_for_a_skill_list() {
 async fn the_tui_reports_a_failed_operation() {
     let mut app = TuiApp::new(Config::new());
 
-    app.handle_actor_event(HarnessEvent::Command(CommandReply::SessionCreated(Err(
-        "no session".to_string(),
-    ))));
+    app.handle_command_reply(CommandReply::SessionCreated(Err("no session".to_string())));
 
     assert_eq!(app.editor.status_visible(), Some(&"no session".to_string()));
 }
@@ -174,9 +171,7 @@ async fn the_tui_replays_the_history_of_a_loaded_session() {
         session_id: Some("session-1".to_string()),
         ..Default::default()
     };
-    let followup = app.handle_actor_event(HarnessEvent::Command(CommandReply::SessionLoaded(Ok(
-        snapshot,
-    ))));
+    let followup = app.handle_command_reply(CommandReply::SessionLoaded(Ok(snapshot)));
 
     assert_eq!(app.snapshot.session_id, Some("session-1".to_string()));
     assert_eq!(
@@ -195,7 +190,7 @@ async fn the_tui_shows_the_session_info() {
         usage: Default::default(),
     };
 
-    app.handle_actor_event(HarnessEvent::Command(CommandReply::SessionInfo(Ok(info))));
+    app.handle_command_reply(CommandReply::SessionInfo(Ok(info)));
 
     match &app.editor.mode {
         InputMode::SessionInfo { info } => {
@@ -207,7 +202,7 @@ async fn the_tui_shows_the_session_info() {
 
 #[tokio::test]
 async fn the_skills_command_opens_the_picker_when_the_actor_answers() {
-    let (mut actor, _) = actor();
+    let (actor, mut actor_rx, _) = actor();
     let mut app = TuiApp::new(Config::new());
 
     // the command only queues the request ...
@@ -215,22 +210,22 @@ async fn the_skills_command_opens_the_picker_when_the_actor_answers() {
     app.editor.mode = mode;
 
     // ... and the answer opens the picker.
-    let event = actor.rx.recv().await.unwrap();
-    app.handle_actor_event(event);
+    let event = actor_rx.replies.recv().await.unwrap();
+    app.handle_command_reply(event);
 
     assert!(matches!(app.editor.mode, InputMode::Skills { .. }));
 }
 
 #[tokio::test]
 async fn the_info_command_shows_the_info_when_the_actor_answers() {
-    let (mut actor, _) = actor();
+    let (actor, mut actor_rx, _) = actor();
     let mut app = TuiApp::new(Config::new());
 
     let mode = Command::execute(&mut app, &actor, Command::Info).await;
     app.editor.mode = mode;
 
-    let event = actor.rx.recv().await.unwrap();
-    app.handle_actor_event(event);
+    let event = actor_rx.replies.recv().await.unwrap();
+    app.handle_command_reply(event);
 
     match &app.editor.mode {
         InputMode::SessionInfo { info } => {
