@@ -29,14 +29,10 @@ use std::{
     io::{self, Stdout},
     time::Duration,
 };
-use tokio::{
-    sync::mpsc,
-    time::{self, Instant},
-};
+use tokio::time::{self, Instant};
 
 const STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 15);
 const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(1000 / 60);
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub enum RenderReason {
     UserUI,
@@ -227,13 +223,10 @@ impl TuiApp {
             }
         }
 
-        let _ = actor.shutdown().await;
-        if let Some(snapshot) = wait_for_shutdown(&mut actor_rx.events).await {
-            self.save_snapshot(&snapshot);
-            return Ok(snapshot);
+        match HarnessActorClient::shutdown(actor.clone_tx(), &mut actor_rx.events).await {
+            Some(snapshot) => Ok(snapshot),
+            None => Ok(self.snapshot.clone()),
         }
-
-        Ok(self.snapshot.clone())
     }
 
     async fn handle_terminal_event(
@@ -546,22 +539,4 @@ impl TuiApp {
             break;
         }
     }
-}
-
-async fn wait_for_shutdown(
-    rx: &mut mpsc::UnboundedReceiver<HarnessEvent>,
-) -> Option<HarnessSnapshot> {
-    let shutdown = async {
-        while let Some(event) = rx.recv().await {
-            if let HarnessEvent::ShutdownComplete(result) = event {
-                return result.ok();
-            }
-        }
-        None
-    };
-
-    time::timeout(SHUTDOWN_TIMEOUT, shutdown)
-        .await
-        .ok()
-        .flatten()
 }

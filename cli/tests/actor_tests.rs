@@ -1,5 +1,5 @@
 use gaius::{
-    actor::{CommandReply, HarnessActorClient, HarnessCommand, HarnessEvent, HarnessRxHandle},
+    actor::{CommandReply, HarnessActorClient, HarnessCommand, HarnessRxHandle},
     commands::Command,
     config::Config,
     harness::{Harness, HarnessSnapshot},
@@ -117,10 +117,8 @@ async fn replay_history_answers_with_the_history_events() {
 async fn shutdown_answers_with_the_final_snapshot() {
     let (actor, mut actor_rx, initial) = actor();
 
-    actor.shutdown().await.unwrap();
-
-    match actor_rx.events.recv().await {
-        Some(HarnessEvent::ShutdownComplete(Ok(snapshot))) => {
+    match HarnessActorClient::shutdown(actor.clone_tx(), &mut actor_rx.events).await {
+        Some(snapshot) => {
             assert_eq!(snapshot.session_id, initial.session_id);
         }
         other => panic!("expected a ShutdownComplete event, got {other:?}"),
@@ -131,9 +129,7 @@ async fn shutdown_answers_with_the_final_snapshot() {
 async fn a_stopped_actor_reports_an_error_for_new_commands() {
     let (actor, mut actor_rx, _) = actor();
 
-    actor.shutdown().await.unwrap();
-    // the actor drops its event channel when it stops
-    while actor_rx.events.recv().await.is_some() {}
+    let _ = HarnessActorClient::shutdown(actor.clone_tx(), &mut actor_rx.events).await;
 
     let err = actor.get_skills().await.unwrap_err();
 

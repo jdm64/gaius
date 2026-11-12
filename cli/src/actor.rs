@@ -14,6 +14,7 @@ use std::{
     io::{self, Error},
     path::PathBuf,
     thread,
+    time::Duration,
 };
 use tokio::{
     runtime::Builder,
@@ -21,11 +22,13 @@ use tokio::{
         mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
         oneshot,
     },
+    time,
 };
 
 pub type OperationResult<T> = Result<T, String>;
 pub type AnswerSender = oneshot::Sender<String>;
 
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTOR_STOPPED: &str = "Harness actor stopped";
 
 #[derive(Debug)]
@@ -122,6 +125,10 @@ impl HarnessActorClient {
         ))
     }
 
+    pub fn clone_tx(&self) -> Sender<HarnessCommand> {
+        self.tx.clone()
+    }
+
     pub async fn send(&self, command: HarnessCommand) -> Result<(), String> {
         self.tx
             .send(command)
@@ -197,8 +204,28 @@ impl HarnessActorClient {
         self.send(HarnessCommand::Info).await
     }
 
-    pub async fn shutdown(&self) -> Result<(), String> {
-        self.send(HarnessCommand::Shutdown).await
+    pub async fn shutdown(
+        tx: Sender<HarnessCommand>,
+        rx: &mut UnboundedReceiver<HarnessEvent>,
+    ) -> Option<HarnessSnapshot> {
+        match tx.send(HarnessCommand::Shutdown).await {
+            Ok(_) => {}
+            Err(_) => return None,
+        };
+
+        let shutdown = async {
+            while let Some(event) = rx.recv().await {
+                if let HarnessEvent::ShutdownComplete(result) = event {
+                    return result.ok();
+                }
+            }
+            None
+        };
+
+        time::timeout(SHUTDOWN_TIMEOUT, shutdown)
+            .await
+            .ok()
+            .flatten()
     }
 }
 
@@ -449,6 +476,7 @@ impl HarnessActorServer {
                     Self::tx(&self.reply_tx, CommandReply::SessionInfo(Ok(info)));
                 }
                 HarnessCommand::Shutdown => {
+                    self.rx.close();
                     Self::tx(
                         &self.event_tx,
                         HarnessEvent::ShutdownComplete(Ok(self.harness.snapshot())),
