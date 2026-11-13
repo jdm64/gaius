@@ -53,7 +53,10 @@ impl ACPEventHandler {
                                 let _ = cx.send_notification(notification);
                             }
                         }
-                        HarnessEvent::AskUser { .. } => {}
+                        HarnessEvent::AskUser { options, answer_tx, .. } => {
+                            // TODO implement real user input
+                            let _ = answer_tx.send(options.into_iter().next().unwrap_or_default());
+                        }
                         HarnessEvent::TurnFinished(_) => {
                             self.handle_state_update(&cx, true);
                         }
