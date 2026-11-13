@@ -97,15 +97,19 @@ impl ACPEventHandler {
                 AgentThought::new("dummy-message-id").content(vec![text(value)]),
             ),
             HarnessMsg::ToolCall {
-                name, arguments, ..
+                call_id,
+                name,
+                arguments,
+                ..
             } => SessionUpdate::ToolCallUpdate(
-                ToolCallUpdate::new("dummy-tool-call-id")
+                ToolCallUpdate::new(call_id)
                     .name(name.clone())
                     .title(name)
                     .raw_input(serde_json::from_str(&arguments).unwrap_or(Value::String(arguments)))
                     .status(ToolCallStatus::InProgress),
             ),
             HarnessMsg::ToolResult {
+                call_id,
                 name,
                 result,
                 status,
@@ -115,7 +119,7 @@ impl ACPEventHandler {
                     ToolStatus::Error | ToolStatus::Failure => ToolCallStatus::Failed,
                 };
                 SessionUpdate::ToolCallUpdate(
-                    ToolCallUpdate::new("dummy-tool-call-id")
+                    ToolCallUpdate::new(call_id)
                         .name(name)
                         .status(status)
                         .raw_output(Value::String(result)),

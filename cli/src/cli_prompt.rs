@@ -101,6 +101,7 @@ impl CliPrompt {
                 HarnessMsg::ToolCall {
                     name,
                     arguments,
+                    call_id: _,
                     start_time: _,
                 } => {
                     if agent_started {
@@ -114,6 +115,7 @@ impl CliPrompt {
                     name,
                     result,
                     status,
+                    ..
                 } => {
                     if status != ToolStatus::Valid {
                         println!("tool-error> {}: {}", name, result);

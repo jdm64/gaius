@@ -58,6 +58,7 @@ impl Harness {
         F: FnMut(HarnessMsg) -> Option<String>,
     {
         on_event(HarnessMsg::ToolCall {
+            call_id: tc.call_id.to_string(),
             name: tc.fn_name.to_string(),
             arguments: tc.fn_arguments.to_string(),
             start_time: time_now(),
@@ -81,6 +82,7 @@ impl Harness {
         }));
         self.history.messages.push(message);
         on_event(HarnessMsg::ToolResult {
+            call_id: tc.call_id.to_string(),
             name: tc.fn_name.to_string(),
             result,
             status,
@@ -101,6 +103,7 @@ impl Harness {
         message.content.push(marker);
         self.history.messages.push(message);
         on_event(HarnessMsg::ToolResult {
+            call_id: tc.call_id.to_string(),
             name: tc.fn_name.to_string(),
             result,
             status: ToolStatus::Valid,

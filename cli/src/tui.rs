@@ -387,6 +387,7 @@ impl TuiApp {
                 name,
                 arguments,
                 start_time,
+                ..
             } => {
                 self.push_message(TuiMessage::ToolCall {
                     name,
@@ -398,6 +399,7 @@ impl TuiApp {
                 name,
                 result,
                 status,
+                ..
             } => {
                 self.finish_last_timer();
                 self.push_message(TuiMessage::ToolResult {

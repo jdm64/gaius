@@ -96,7 +96,7 @@ pub fn replay_messages<F>(history: &[ChatMessage], token_usage: &TokenUsageLedge
 where
     F: FnMut(HarnessMsg),
 {
-    let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
+    let mut pending_tool_calls: Vec<(String, String, String)> = Vec::new();
     let mut messages = history.iter().enumerate().peekable();
 
     while let Some((index, message)) = messages.next() {
@@ -134,7 +134,11 @@ where
 
                 // Collect pending tool calls from this assistant turn
                 for tc in message.content.tool_calls() {
-                    pending_tool_calls.push((tc.fn_name.clone(), tc.fn_arguments.to_string()));
+                    pending_tool_calls.push((
+                        tc.call_id.clone(),
+                        tc.fn_name.clone(),
+                        tc.fn_arguments.to_string(),
+                    ));
                 }
 
                 if !text.is_empty() {
@@ -157,14 +161,16 @@ where
                         next_msg.content.tool_responses();
                     let status = next_msg.tool_status();
                     for resp in responses {
-                        if let Some((name, args)) = pending_tool_calls.first() {
+                        if let Some((call_id, name, args)) = pending_tool_calls.first() {
                             on_event(HarnessMsg::ToolCall {
-                                name: (*name).clone(),
+                                call_id: call_id.clone(),
+                                name: name.clone(),
                                 arguments: (*args).clone(),
                                 start_time: 0,
                             });
                             on_event(HarnessMsg::ToolResult {
-                                name: (*name).clone(),
+                                call_id: resp.call_id.clone(),
+                                name: name.clone(),
                                 result: resp.content.clone(),
                                 status,
                             });
@@ -177,13 +183,15 @@ where
 
                 // Any remaining unmatched calls — emit with empty result so
                 // the UI always renders something.
-                for (name, args) in pending_tool_calls.drain(..) {
+                for (call_id, name, args) in pending_tool_calls.drain(..) {
                     on_event(HarnessMsg::ToolCall {
+                        call_id: call_id.clone(),
                         name: name.clone(),
                         arguments: args,
                         start_time: 0,
                     });
                     on_event(HarnessMsg::ToolResult {
+                        call_id,
                         name,
                         result: String::new(),
                         status: ToolStatus::Valid,

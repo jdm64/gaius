@@ -47,11 +47,13 @@ pub enum HarnessMsg {
     },
     CompactSummary(String),
     ToolCall {
+        call_id: String,
         name: String,
         arguments: String,
         start_time: u64,
     },
     ToolResult {
+        call_id: String,
         name: String,
         result: String,
         status: ToolStatus,

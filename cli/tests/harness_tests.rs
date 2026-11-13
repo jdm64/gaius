@@ -119,11 +119,13 @@ fn replay_diff_marker_after_tool_call() {
         events,
         vec![
             HarnessMsg::ToolCall {
+                call_id: "call-1".to_string(),
                 name: ToolName::Edit.name(),
                 arguments: json!({"file_path":"src/lib.rs"}).to_string(),
                 start_time: 0,
             },
             HarnessMsg::ToolResult {
+                call_id: "call-1".to_string(),
                 name: ToolName::Edit.name(),
                 result: "File edited successfully".to_string(),
                 status: ToolStatus::Valid,
@@ -157,11 +159,13 @@ fn replay_tool_error_marker_sets_error_flag() {
         events,
         vec![
             HarnessMsg::ToolCall {
+                call_id: "call-1".to_string(),
                 name: "search".to_string(),
                 arguments: json!({"query":"rust"}).to_string(),
                 start_time: 0,
             },
             HarnessMsg::ToolResult {
+                call_id: "call-1".to_string(),
                 name: "search".to_string(),
                 result: "something failed".to_string(),
                 status: ToolStatus::Error,
@@ -190,11 +194,13 @@ fn replay_tool_error_marker_absent_defaults_false() {
         events,
         vec![
             HarnessMsg::ToolCall {
+                call_id: "call-1".to_string(),
                 name: "search".to_string(),
                 arguments: json!({"query":"rust"}).to_string(),
                 start_time: 0,
             },
             HarnessMsg::ToolResult {
+                call_id: "call-1".to_string(),
                 name: "search".to_string(),
                 result: "ok".to_string(),
                 status: ToolStatus::Valid,
