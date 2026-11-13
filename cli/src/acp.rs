@@ -83,22 +83,29 @@ impl ACPEventHandler {
     }
 
     fn handle_message(&self, msg: HarnessMsg) -> Option<UpdateSessionNotification> {
+        let session_id = self.session_id.lock().unwrap().clone()?;
+        msg.to_update(&session_id)
+    }
+}
+
+impl HarnessMsg {
+    fn to_update(&self, session_id: &str) -> Option<UpdateSessionNotification> {
         let text = |value: String| ContentBlock::Text(TextContent::new(value));
-        let update = match msg {
+        let update = match self {
             HarnessMsg::TurnStarted(_) => {
                 SessionUpdate::StateUpdate(StateUpdate::Running(RunningStateUpdate::new()))
             }
             HarnessMsg::TurnDuration(_) => return None,
             HarnessMsg::UserPrompt(value) => SessionUpdate::UserMessage(
-                UserMessage::new("dummy-message-id").content(vec![text(value)]),
+                UserMessage::new("dummy-message-id").content(vec![text(value.clone())]),
             ),
             HarnessMsg::AgentMessage(value) | HarnessMsg::PlanMessage(value) => {
                 SessionUpdate::AgentMessage(
-                    AgentMessage::new("dummy-message-id").content(vec![text(value)]),
+                    AgentMessage::new("dummy-message-id").content(vec![text(value.clone())]),
                 )
             }
             HarnessMsg::Thinking(value) => SessionUpdate::AgentThought(
-                AgentThought::new("dummy-message-id").content(vec![text(value)]),
+                AgentThought::new("dummy-message-id").content(vec![text(value.clone())]),
             ),
             HarnessMsg::ToolCall {
                 call_id,
@@ -106,10 +113,12 @@ impl ACPEventHandler {
                 arguments,
                 ..
             } => SessionUpdate::ToolCallUpdate(
-                ToolCallUpdate::new(call_id)
+                ToolCallUpdate::new(call_id.clone())
                     .name(name.clone())
-                    .title(name)
-                    .raw_input(serde_json::from_str(&arguments).unwrap_or(Value::String(arguments)))
+                    .title(name.clone())
+                    .raw_input(
+                        serde_json::from_str(arguments).unwrap_or(Value::String(arguments.clone())),
+                    )
                     .status(ToolCallStatus::InProgress),
             ),
             HarnessMsg::ToolResult {
@@ -123,15 +132,16 @@ impl ACPEventHandler {
                     ToolStatus::Error | ToolStatus::Failure => ToolCallStatus::Failed,
                 };
                 SessionUpdate::ToolCallUpdate(
-                    ToolCallUpdate::new(call_id)
-                        .name(name)
+                    ToolCallUpdate::new(call_id.clone())
+                        .name(name.clone())
                         .status(status)
-                        .raw_output(Value::String(result)),
+                        .raw_output(Value::String(result.clone())),
                 )
             }
-            HarnessMsg::DiffView(_) => return None,
-            HarnessMsg::TokenUsage { .. } => return None,
-            HarnessMsg::AskUser { .. } => return None,
+            HarnessMsg::DiffView(_)
+            | HarnessMsg::TokenUsage { .. }
+            | HarnessMsg::AskUser { .. }
+            | HarnessMsg::SystemMessage(_) => return None,
             HarnessMsg::CompactStart { .. } => SessionUpdate::CompactionUpdate(
                 CompactionUpdate::new("compaction_id", CompactionStatus::InProgress),
             ),
@@ -142,9 +152,7 @@ impl ACPEventHandler {
                 NoticeSeverity::Info,
                 format!("Queued prompts: {size}"),
             )),
-            HarnessMsg::SystemMessage(_) => return None,
         };
-        let session_id = self.session_id.lock().unwrap().clone()?;
         Some(UpdateSessionNotification::new(session_id, update))
     }
 }
@@ -178,7 +186,7 @@ impl ACPEngine {
         &mut self,
         req: ClientRequest,
         resp: Responder,
-        _cx: ConnectionTo<Client>,
+        cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
         match req {
             ClientRequest::InitializeRequest(_) => {
@@ -189,7 +197,7 @@ impl ACPEngine {
             }
             ClientRequest::NewSessionRequest(data) => self.handle_session_new(data, resp).await?,
             ClientRequest::ResumeSessionRequest(data) => {
-                self.handle_session_resume(data, resp).await?
+                self.handle_session_resume(data, resp, cx).await?
             }
             ClientRequest::CloseSessionRequest(_) => self.handle_session_close(resp).await?,
             ClientRequest::DeleteSessionRequest(data) => {
@@ -256,6 +264,7 @@ impl ACPEngine {
         &mut self,
         data: Box<ResumeSessionRequest>,
         resp: Responder,
+        cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
         if self
             .actor
@@ -284,7 +293,14 @@ impl ACPEngine {
             }
 
             match self.replies.recv().await {
-                Some(CommandReply::HistoryReplayed(_)) => {}
+                Some(CommandReply::HistoryReplayed(messages)) => {
+                    let session_id = data.session_id.to_string();
+                    messages.iter().for_each(|m| {
+                        if let Some(update) = m.to_update(&session_id) {
+                            let _ = cx.send_notification(update);
+                        }
+                    });
+                }
                 Some(CommandReply::Busy(_)) | Some(_) | None => {
                     resp.respond_with_error(Error::internal_error())?;
                     return Ok(());
