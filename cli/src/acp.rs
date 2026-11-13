@@ -5,7 +5,7 @@
 use crate::{
     actor::{CommandReply, HarnessActorClient, HarnessCommand, HarnessEvent},
     config::Config,
-    harness::{Harness, HarnessMsg, HarnessSnapshot},
+    harness::{Harness, HarnessMsg},
     session::Session,
     tool_engine::ToolStatus,
 };
@@ -14,12 +14,17 @@ use agent_client_protocol::{
     Responder, Stdio, schema::ProtocolVersion, v2::schema::*,
 };
 use serde_json::Value;
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
 fn reply<T: JsonRpcResponse>(r: Responder<Value>, resp: T) -> Result<(), Error> {
     r.cast::<T>().respond(resp)
 }
+
+type SharedSessionId = Arc<Mutex<Option<String>>>;
 
 struct ACPSetup {
     engine: ACPEngine,
@@ -29,6 +34,7 @@ struct ACPSetup {
 struct ACPEventHandler {
     events: UnboundedReceiver<HarnessEvent>,
     tx: Sender<HarnessCommand>,
+    session_id: SharedSessionId,
 }
 
 impl ACPEventHandler {
@@ -43,16 +49,16 @@ impl ACPEventHandler {
                     let Some(event) = event else { break; };
                     match event {
                         HarnessEvent::Message(msg) => {
-                            if let Some(notification) = Self::handle_message(msg) {
+                            if let Some(notification) = self.handle_message(msg) {
                                 let _ = cx.send_notification(notification);
                             }
                         }
                         HarnessEvent::AskUser { .. } => {}
-                        HarnessEvent::TurnFinished(snapshot) => {
-                            Self::handle_turn_finished(snapshot, &cx);
+                        HarnessEvent::TurnFinished(_) => {
+                            self.handle_state_update(&cx, true);
                         }
-                        HarnessEvent::RequestFailed(_, snapshot) => {
-                            Self::handle_request_failed(snapshot, &cx);
+                        HarnessEvent::RequestFailed(_, _) => {
+                            self.handle_state_update(&cx, false);
                         }
                         HarnessEvent::ShutdownComplete(_) => break
                     }
@@ -61,24 +67,19 @@ impl ACPEventHandler {
         }
     }
 
-    fn handle_turn_finished(snapshot: HarnessSnapshot, cx: &ConnectionTo<Client>) {
-        if let Some(session_id) = snapshot.session_id {
-            let update =
-                SessionUpdate::StateUpdate(StateUpdate::Running(RunningStateUpdate::new()));
+    fn handle_state_update(&self, cx: &ConnectionTo<Client>, running: bool) {
+        if let Some(session_id) = self.session_id.lock().unwrap().clone() {
+            let update = if running {
+                SessionUpdate::StateUpdate(StateUpdate::Running(RunningStateUpdate::new()))
+            } else {
+                SessionUpdate::StateUpdate(StateUpdate::Idle(IdleStateUpdate::new()))
+            };
             let msg = UpdateSessionNotification::new(session_id, update);
             let _ = cx.send_notification(msg);
         }
     }
 
-    fn handle_request_failed(snapshot: HarnessSnapshot, cx: &ConnectionTo<Client>) {
-        if let Some(session_id) = snapshot.session_id {
-            let update = SessionUpdate::StateUpdate(StateUpdate::Idle(IdleStateUpdate::new()));
-            let msg = UpdateSessionNotification::new(session_id, update);
-            let _ = cx.send_notification(msg);
-        }
-    }
-
-    fn handle_message(msg: HarnessMsg) -> Option<UpdateSessionNotification> {
+    fn handle_message(&self, msg: HarnessMsg) -> Option<UpdateSessionNotification> {
         let text = |value: String| ContentBlock::Text(TextContent::new(value));
         let update = match msg {
             HarnessMsg::TurnStarted(_) => {
@@ -140,13 +141,15 @@ impl ACPEventHandler {
             )),
             HarnessMsg::SystemMessage(_) => return None,
         };
-        Some(UpdateSessionNotification::new("dummy-session-id", update))
+        let session_id = self.session_id.lock().unwrap().clone()?;
+        Some(UpdateSessionNotification::new(session_id, update))
     }
 }
 
 struct ACPEngine {
     actor: HarnessActorClient,
     replies: UnboundedReceiver<CommandReply>,
+    session_id: SharedSessionId,
 }
 
 impl ACPEngine {
@@ -156,11 +159,13 @@ impl ACPEngine {
 
         let harness = Harness::new(&config, None)?;
         let (actor, actor_rx) = HarnessActorClient::new(harness)?;
+        let session_id = Arc::new(Mutex::new(None));
 
         Ok(ACPSetup {
             engine: Self {
                 actor,
                 replies: actor_rx.replies,
+                session_id,
             },
             events: actor_rx.events,
         })
@@ -231,6 +236,7 @@ impl ACPEngine {
         match self.replies.recv().await {
             Some(CommandReply::SessionCreated(Ok(snapshot))) => {
                 if let Some(session_id) = snapshot.session_id {
+                    *self.session_id.lock().unwrap() = Some(session_id.clone());
                     reply(resp, NewSessionResponse::new(session_id))
                 } else {
                     resp.respond_with_error(Error::internal_error())
@@ -259,12 +265,14 @@ impl ACPEngine {
         }
 
         match self.replies.recv().await {
-            Some(CommandReply::SessionLoaded(result)) => result.is_ok(),
-            Some(_) | None => {
+            Some(CommandReply::SessionLoaded(Ok(_))) => {
+                *self.session_id.lock().unwrap() = Some(data.session_id.to_string());
+            }
+            Some(CommandReply::SessionLoaded(Err(_))) | Some(_) | None => {
                 resp.respond_with_error(Error::internal_error())?;
                 return Ok(());
             }
-        };
+        }
 
         if matches!(data.replay_from, Some(ReplayFrom::Start(_))) {
             if self.actor.replay_history().await.is_err() {
@@ -295,6 +303,7 @@ impl ACPEngine {
             Some(_) | None => false,
         };
         if closed {
+            *self.session_id.lock().unwrap() = None;
             reply(resp, CloseSessionResponse::new())
         } else {
             resp.respond_with_error(Error::internal_error())
@@ -399,6 +408,7 @@ pub async fn run_acp() -> Result<(), Box<dyn core::error::Error>> {
         }
     };
     let actor_tx = engine.actor.clone_tx();
+    let session_id = engine.session_id.clone();
 
     Agent
         .v2()
@@ -408,6 +418,7 @@ pub async fn run_acp() -> Result<(), Box<dyn core::error::Error>> {
             ACPEventHandler {
                 events,
                 tx: actor_tx,
+                session_id,
             }
             .run(cx.into())
             .await;
