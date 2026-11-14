@@ -49,8 +49,16 @@ pub enum HarnessMsg {
         msg_id: u32,
         content: String,
     },
+    AgentChunk {
+        msg_id: u32,
+        content: String,
+    },
     SystemMessage(String),
     Thinking {
+        msg_id: u32,
+        content: String,
+    },
+    ThinkingChunk {
         msg_id: u32,
         content: String,
     },

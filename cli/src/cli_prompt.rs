@@ -57,7 +57,8 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessMsg::Thinking { content: text, .. } => {
+                HarnessMsg::Thinking { content: text, .. }
+                | HarnessMsg::ThinkingChunk { content: text, .. } => {
                     if !agent_started {
                         print!("agent> ");
                         agent_started = true;
@@ -66,7 +67,8 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessMsg::AgentMessage { content: text, .. } => {
+                HarnessMsg::AgentMessage { content: text, .. }
+                | HarnessMsg::AgentChunk { content: text, .. } => {
                     if !agent_started {
                         print!("agent> ");
                         agent_started = true;

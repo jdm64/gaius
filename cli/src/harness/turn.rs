@@ -246,7 +246,7 @@ impl Harness {
         match event {
             ChatStreamEvent::Chunk(chunk) => {
                 if !chunk.content.is_empty() {
-                    on_event(HarnessMsg::AgentMessage {
+                    on_event(HarnessMsg::AgentChunk {
                         msg_id: agent_msg_id,
                         content: chunk.content,
                     });
@@ -257,7 +257,7 @@ impl Harness {
             }
             ChatStreamEvent::ReasoningChunk(chunk) => {
                 if !chunk.content.is_empty() {
-                    on_event(HarnessMsg::Thinking {
+                    on_event(HarnessMsg::ThinkingChunk {
                         msg_id: thinking_msg_id,
                         content: chunk.content,
                     });
@@ -266,7 +266,7 @@ impl Harness {
             }
             ChatStreamEvent::ThoughtSignatureChunk(chunk) => {
                 if !chunk.content.is_empty() {
-                    on_event(HarnessMsg::Thinking {
+                    on_event(HarnessMsg::ThinkingChunk {
                         msg_id: thinking_msg_id,
                         content: chunk.content,
                     });

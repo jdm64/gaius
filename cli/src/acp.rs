@@ -103,8 +103,14 @@ impl HarnessMsg {
             | HarnessMsg::PlanMessage { msg_id, content } => SessionUpdate::AgentMessage(
                 AgentMessage::new(msg_id.to_string()).content(vec![text(content.clone())]),
             ),
+            HarnessMsg::AgentChunk { msg_id, content } => SessionUpdate::AgentMessageChunk(
+                ContentChunk::new(text(content.clone()), msg_id.to_string()),
+            ),
             HarnessMsg::Thinking { msg_id, content } => SessionUpdate::AgentThought(
                 AgentThought::new(msg_id.to_string()).content(vec![text(content.clone())]),
+            ),
+            HarnessMsg::ThinkingChunk { msg_id, content } => SessionUpdate::AgentThoughtChunk(
+                ContentChunk::new(text(content.clone()), msg_id.to_string()),
             ),
             HarnessMsg::ToolCall {
                 call_id,

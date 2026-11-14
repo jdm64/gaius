@@ -370,10 +370,10 @@ impl TuiApp {
             HarnessMsg::PlanMessage { content, .. } => {
                 self.push_message(TuiMessage::PlanMessage(content));
             }
-            HarnessMsg::AgentMessage { content, .. } => {
+            HarnessMsg::AgentMessage { content, .. } | HarnessMsg::AgentChunk { content, .. } => {
                 self.append_agent_message(content, false);
             }
-            HarnessMsg::Thinking { content, .. } => {
+            HarnessMsg::Thinking { content, .. } | HarnessMsg::ThinkingChunk { content, .. } => {
                 self.append_agent_message(content, true);
             }
             HarnessMsg::CompactStart { start_time, .. } => {
