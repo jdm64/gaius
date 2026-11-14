@@ -96,16 +96,15 @@ impl HarnessMsg {
                 SessionUpdate::StateUpdate(StateUpdate::Running(RunningStateUpdate::new()))
             }
             HarnessMsg::TurnDuration(_) => return None,
-            HarnessMsg::UserPrompt(value) => SessionUpdate::UserMessage(
-                UserMessage::new("dummy-message-id").content(vec![text(value.clone())]),
+            HarnessMsg::UserPrompt { msg_id, content } => SessionUpdate::UserMessage(
+                UserMessage::new(msg_id.to_string()).content(vec![text(content.clone())]),
             ),
-            HarnessMsg::AgentMessage(value) | HarnessMsg::PlanMessage(value) => {
-                SessionUpdate::AgentMessage(
-                    AgentMessage::new("dummy-message-id").content(vec![text(value.clone())]),
-                )
-            }
-            HarnessMsg::Thinking(value) => SessionUpdate::AgentThought(
-                AgentThought::new("dummy-message-id").content(vec![text(value.clone())]),
+            HarnessMsg::AgentMessage { msg_id, content }
+            | HarnessMsg::PlanMessage { msg_id, content } => SessionUpdate::AgentMessage(
+                AgentMessage::new(msg_id.to_string()).content(vec![text(content.clone())]),
+            ),
+            HarnessMsg::Thinking { msg_id, content } => SessionUpdate::AgentThought(
+                AgentThought::new(msg_id.to_string()).content(vec![text(content.clone())]),
             ),
             HarnessMsg::ToolCall {
                 call_id,
@@ -142,11 +141,11 @@ impl HarnessMsg {
             | HarnessMsg::TokenUsage { .. }
             | HarnessMsg::AskUser { .. }
             | HarnessMsg::SystemMessage(_) => return None,
-            HarnessMsg::CompactStart { .. } => SessionUpdate::CompactionUpdate(
-                CompactionUpdate::new("compaction_id", CompactionStatus::InProgress),
+            HarnessMsg::CompactStart { msg_id, .. } => SessionUpdate::CompactionUpdate(
+                CompactionUpdate::new(msg_id.to_string(), CompactionStatus::InProgress),
             ),
-            HarnessMsg::CompactSummary(_) => SessionUpdate::CompactionUpdate(
-                CompactionUpdate::new("compaction_id", CompactionStatus::Completed),
+            HarnessMsg::CompactSummary { msg_id, .. } => SessionUpdate::CompactionUpdate(
+                CompactionUpdate::new(msg_id.to_string(), CompactionStatus::Completed),
             ),
             HarnessMsg::QueueChanged(size) => SessionUpdate::Notice(Notice::new(
                 NoticeSeverity::Info,

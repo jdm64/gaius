@@ -124,24 +124,26 @@ impl Compact {
             return Ok(CompactOutcome::NothingToCompact);
         };
 
+        let msg_id = harness.next_msg_id();
         on_event(HarnessMsg::CompactStart {
+            msg_id,
             start_time: time_now(),
         });
 
         let older = harness.history().messages[..split].to_vec();
-        let (summary, summary_tokens) = match Self::request_summary(harness, older, on_event).await
-        {
-            Ok(result) => result,
-            Err(err) => {
-                if harness.is_cancel() {
-                    return Ok(CompactOutcome::Cancelled);
+        let (summary, summary_tokens) =
+            match Self::request_summary(harness, older, msg_id, on_event).await {
+                Ok(result) => result,
+                Err(err) => {
+                    if harness.is_cancel() {
+                        return Ok(CompactOutcome::Cancelled);
+                    }
+                    on_event(HarnessMsg::SystemMessage(format!(
+                        "Context compaction failed: {err}"
+                    )));
+                    return Ok(CompactOutcome::Failed);
                 }
-                on_event(HarnessMsg::SystemMessage(format!(
-                    "Context compaction failed: {err}"
-                )));
-                return Ok(CompactOutcome::Failed);
-            }
-        };
+            };
 
         let compacted = Self::compact_history(&harness.history().messages, split, summary);
         harness.apply_compaction(split, compacted, summary_tokens, on_event)?;
@@ -187,6 +189,7 @@ impl Compact {
     async fn request_summary<F>(
         harness: &mut Harness,
         messages: Vec<ChatMessage>,
+        msg_id: u32,
         on_event: &mut F,
     ) -> Result<(String, Option<i32>), Box<dyn Error>>
     where
@@ -205,9 +208,10 @@ impl Compact {
 
         // The summary is shown as agent output, with the usage of the summary
         // request rendered under it.
-        on_event(HarnessMsg::CompactSummary(Self::summary_message_text(
-            &summary,
-        )));
+        on_event(HarnessMsg::CompactSummary {
+            msg_id,
+            content: Self::summary_message_text(&summary),
+        });
         harness.record_side_usage(&content.usage, on_event);
 
         Ok((summary, content.usage.completion_tokens))

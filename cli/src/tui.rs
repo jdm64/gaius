@@ -364,24 +364,24 @@ impl TuiApp {
             HarnessMsg::SystemMessage(text) => {
                 self.push_message(TuiMessage::SystemMessage(text));
             }
-            HarnessMsg::UserPrompt(prompt_msg) => {
-                self.push_message(TuiMessage::UserPrompt(prompt_msg));
+            HarnessMsg::UserPrompt { content, .. } => {
+                self.push_message(TuiMessage::UserPrompt(content));
             }
-            HarnessMsg::PlanMessage(text) => {
-                self.push_message(TuiMessage::PlanMessage(text));
+            HarnessMsg::PlanMessage { content, .. } => {
+                self.push_message(TuiMessage::PlanMessage(content));
             }
-            HarnessMsg::AgentMessage(chunk) => {
-                self.append_agent_message(chunk, false);
+            HarnessMsg::AgentMessage { content, .. } => {
+                self.append_agent_message(content, false);
             }
-            HarnessMsg::Thinking(chunk) => {
-                self.append_agent_message(chunk, true);
+            HarnessMsg::Thinking { content, .. } => {
+                self.append_agent_message(content, true);
             }
-            HarnessMsg::CompactStart { start_time } => {
+            HarnessMsg::CompactStart { start_time, .. } => {
                 self.push_message(TuiMessage::CompactionStart { start_time });
             }
-            HarnessMsg::CompactSummary(text) => {
+            HarnessMsg::CompactSummary { content, .. } => {
                 self.finish_last_timer();
-                self.push_message(TuiMessage::AgentMessage(text));
+                self.push_message(TuiMessage::AgentMessage(content));
             }
             HarnessMsg::ToolCall {
                 name,

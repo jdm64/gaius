@@ -152,7 +152,10 @@ impl Harness {
 
         let full_text = response.content.texts().join("");
         if !full_text.is_empty() {
-            on_event(HarnessMsg::AgentMessage(full_text.clone()));
+            on_event(HarnessMsg::AgentMessage {
+                msg_id: self.next_msg_id(),
+                content: full_text.clone(),
+            });
         }
 
         self.history
@@ -176,6 +179,8 @@ impl Harness {
         let mut response = self.client.chat_streaming(self.history.clone()).await?;
 
         let mut stream_end = None;
+        let agent_msg_id = self.next_msg_id();
+        let thinking_msg_id = self.next_msg_id();
         let mut emitted_text = false;
         loop {
             tokio::select! {
@@ -184,6 +189,7 @@ impl Harness {
                         Some(Ok(event)) => {
                             emitted_text |= Self::handle_stream_event(
                                 event, on_event, &mut stream_end,
+                                agent_msg_id, thinking_msg_id,
                             );
                         }
                         Some(Err(err)) => return Err(err.into()),
@@ -204,7 +210,10 @@ impl Harness {
         if !emitted_text {
             let text = content.texts().join("");
             if !text.is_empty() {
-                on_event(HarnessMsg::AgentMessage(text));
+                on_event(HarnessMsg::AgentMessage {
+                    msg_id: agent_msg_id,
+                    content: text,
+                });
             }
         }
 
@@ -228,6 +237,8 @@ impl Harness {
         event: ChatStreamEvent,
         on_event: &mut F,
         stream_end: &mut Option<StreamEnd>,
+        agent_msg_id: u32,
+        thinking_msg_id: u32,
     ) -> bool
     where
         F: FnMut(HarnessMsg) -> Option<String>,
@@ -235,7 +246,10 @@ impl Harness {
         match event {
             ChatStreamEvent::Chunk(chunk) => {
                 if !chunk.content.is_empty() {
-                    on_event(HarnessMsg::AgentMessage(chunk.content));
+                    on_event(HarnessMsg::AgentMessage {
+                        msg_id: agent_msg_id,
+                        content: chunk.content,
+                    });
                     true
                 } else {
                     false
@@ -243,13 +257,19 @@ impl Harness {
             }
             ChatStreamEvent::ReasoningChunk(chunk) => {
                 if !chunk.content.is_empty() {
-                    on_event(HarnessMsg::Thinking(chunk.content));
+                    on_event(HarnessMsg::Thinking {
+                        msg_id: thinking_msg_id,
+                        content: chunk.content,
+                    });
                 }
                 false
             }
             ChatStreamEvent::ThoughtSignatureChunk(chunk) => {
                 if !chunk.content.is_empty() {
-                    on_event(HarnessMsg::Thinking(chunk.content));
+                    on_event(HarnessMsg::Thinking {
+                        msg_id: thinking_msg_id,
+                        content: chunk.content,
+                    });
                 }
                 false
             }

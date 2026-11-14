@@ -24,7 +24,10 @@ impl Harness {
         self.history
             .messages
             .push(ChatMessage::user(message.clone()));
-        on_event(HarnessMsg::UserPrompt(message));
+        on_event(HarnessMsg::UserPrompt {
+            msg_id: self.next_msg_id(),
+            content: message,
+        });
     }
 
     pub fn send_plan_message<F>(&mut self, message: String, on_event: &mut F)
@@ -38,7 +41,10 @@ impl Harness {
         let content = MessageContent::from_parts(vec![marker, ContentPart::Text(message.clone())]);
 
         self.history.messages.push(ChatMessage::user(content));
-        on_event(HarnessMsg::PlanMessage(message));
+        on_event(HarnessMsg::PlanMessage {
+            msg_id: self.next_msg_id(),
+            content: message,
+        });
     }
 
     pub fn send_skill_message<F>(
@@ -64,7 +70,10 @@ impl Harness {
             .push(ChatMessage::assistant(assistant_content.clone()));
 
         if let Some(text) = assistant_content.joined_texts() {
-            on_event(HarnessMsg::AgentMessage(text));
+            on_event(HarnessMsg::AgentMessage {
+                msg_id: self.next_msg_id(),
+                content: text,
+            });
         }
 
         self.send_tool_call_event(&tc, &mut on_event);

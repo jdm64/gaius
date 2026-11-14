@@ -37,15 +37,31 @@ pub enum UserRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HarnessMsg {
-    UserPrompt(String),
-    PlanMessage(String),
-    AgentMessage(String),
+    UserPrompt {
+        msg_id: u32,
+        content: String,
+    },
+    PlanMessage {
+        msg_id: u32,
+        content: String,
+    },
+    AgentMessage {
+        msg_id: u32,
+        content: String,
+    },
     SystemMessage(String),
-    Thinking(String),
+    Thinking {
+        msg_id: u32,
+        content: String,
+    },
     CompactStart {
+        msg_id: u32,
         start_time: u64,
     },
-    CompactSummary(String),
+    CompactSummary {
+        msg_id: u32,
+        content: String,
+    },
     ToolCall {
         call_id: String,
         name: String,
@@ -101,6 +117,7 @@ pub struct Harness {
     plan_mode: bool,
     turn_start: Option<u64>,
     prompt_queue: PromptQueue,
+    msg_id_counter: u32,
 }
 
 impl Harness {
@@ -156,11 +173,18 @@ impl Harness {
             live_info,
             turn_start: None,
             prompt_queue: PromptQueue::new(),
+            msg_id_counter: 0,
         };
 
         harness.build_sys_prompt();
 
         Ok(harness)
+    }
+
+    pub fn next_msg_id(&mut self) -> u32 {
+        let id = self.msg_id_counter;
+        self.msg_id_counter += 1;
+        id
     }
 
     pub fn session_id(&self) -> Option<String> {
@@ -262,6 +286,7 @@ impl Harness {
     }
 
     pub fn reload_session(&mut self) -> Result<(), Box<dyn Error>> {
+        self.msg_id_counter = 0;
         let session_file = self.session.load()?;
         self.tool_engine.proj_dir = session_file.proj_dir;
         self.history = ChatRequest::new(session_file.messages);

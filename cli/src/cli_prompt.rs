@@ -47,17 +47,17 @@ impl CliPrompt {
         let mut agent_started = false;
         self.harness
             .run_turn(UserRequest::Prompt(prompt), |event| match event {
-                HarnessMsg::UserPrompt(text) => {
+                HarnessMsg::UserPrompt { content: text, .. } => {
                     println!("user> {}", text);
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessMsg::PlanMessage(text) => {
+                HarnessMsg::PlanMessage { content: text, .. } => {
                     println!("plan> {}", text);
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessMsg::Thinking(text) => {
+                HarnessMsg::Thinking { content: text, .. } => {
                     if !agent_started {
                         print!("agent> ");
                         agent_started = true;
@@ -66,7 +66,7 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessMsg::AgentMessage(text) => {
+                HarnessMsg::AgentMessage { content: text, .. } => {
                     if !agent_started {
                         print!("agent> ");
                         agent_started = true;
@@ -84,12 +84,12 @@ impl CliPrompt {
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessMsg::CompactStart { start_time: _ } => {
+                HarnessMsg::CompactStart { .. } => {
                     println!("{} Compaction {}", "─".repeat(14), "─".repeat(14));
                     let _ = io::stdout().flush();
                     None
                 }
-                HarnessMsg::CompactSummary(text) => {
+                HarnessMsg::CompactSummary { content: text, .. } => {
                     if !agent_started {
                         print!("agent> ");
                         agent_started = true;

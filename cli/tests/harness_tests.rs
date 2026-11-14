@@ -57,8 +57,14 @@ fn replay_reasoning_content_before_assistant_text() {
     assert_eq!(
         events,
         vec![
-            HarnessMsg::Thinking("thinking".to_string()),
-            HarnessMsg::AgentMessage("visible".to_string()),
+            HarnessMsg::Thinking {
+                msg_id: 0,
+                content: "thinking".to_string()
+            },
+            HarnessMsg::AgentMessage {
+                msg_id: 1,
+                content: "visible".to_string()
+            },
         ]
     );
 }
@@ -73,8 +79,14 @@ fn replay_thought_signature_before_assistant_text() {
     assert_eq!(
         events,
         vec![
-            HarnessMsg::Thinking("signed thought".to_string()),
-            HarnessMsg::AgentMessage("visible".to_string()),
+            HarnessMsg::Thinking {
+                msg_id: 0,
+                content: "signed thought".to_string()
+            },
+            HarnessMsg::AgentMessage {
+                msg_id: 1,
+                content: "visible".to_string()
+            },
         ]
     );
 }
@@ -85,7 +97,10 @@ fn replay_assistant_text_unchanged() {
 
     assert_eq!(
         events,
-        vec![HarnessMsg::AgentMessage("visible".to_string())]
+        vec![HarnessMsg::AgentMessage {
+            msg_id: 0,
+            content: "visible".to_string()
+        }]
     );
 }
 
@@ -685,13 +700,20 @@ fn compacted_summary_replays_as_compaction_events() {
     assert_eq!(
         events,
         vec![
-            HarnessMsg::CompactStart { start_time: 0 },
-            HarnessMsg::CompactSummary(
-                "The earlier part of this conversation was compacted into the following \
+            HarnessMsg::CompactStart {
+                msg_id: 0,
+                start_time: 0
+            },
+            HarnessMsg::CompactSummary {
+                msg_id: 0,
+                content: "The earlier part of this conversation was compacted into the following \
                  summary to free up context. Continue from where it leaves off.\n\nthe summary"
-                    .to_string()
-            ),
-            HarnessMsg::UserPrompt("three".to_string()),
+                    .to_string(),
+            },
+            HarnessMsg::UserPrompt {
+                msg_id: 1,
+                content: "three".to_string()
+            },
         ]
     );
 }

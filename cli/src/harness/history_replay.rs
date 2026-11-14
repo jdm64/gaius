@@ -96,6 +96,12 @@ pub fn replay_messages<F>(history: &[ChatMessage], token_usage: &TokenUsageLedge
 where
     F: FnMut(HarnessMsg),
 {
+    let mut msg_id_counter = 0u32;
+    let mut next_msg_id = || {
+        let id = msg_id_counter;
+        msg_id_counter += 1;
+        id
+    };
     let mut pending_tool_calls: Vec<(String, String, String)> = Vec::new();
     let mut messages = history.iter().enumerate().peekable();
 
@@ -106,12 +112,25 @@ where
                 let text = message.content.texts().join("");
                 if !text.is_empty() {
                     if message.has_plan_marker() {
-                        on_event(HarnessMsg::PlanMessage(text));
+                        on_event(HarnessMsg::PlanMessage {
+                            msg_id: next_msg_id(),
+                            content: text,
+                        });
                     } else if message.has_compact_summary_marker() {
-                        on_event(HarnessMsg::CompactStart { start_time: 0 });
-                        on_event(HarnessMsg::CompactSummary(text));
+                        let msg_id = next_msg_id();
+                        on_event(HarnessMsg::CompactStart {
+                            msg_id,
+                            start_time: 0,
+                        });
+                        on_event(HarnessMsg::CompactSummary {
+                            msg_id,
+                            content: text,
+                        });
                     } else {
-                        on_event(HarnessMsg::UserPrompt(text));
+                        on_event(HarnessMsg::UserPrompt {
+                            msg_id: next_msg_id(),
+                            content: text,
+                        });
                     }
                 }
                 token_usage.emit_usage(index, &mut on_event);
@@ -126,7 +145,10 @@ where
                         | ContentPart::ReasoningContent(text)
                             if !text.is_empty() =>
                         {
-                            on_event(HarnessMsg::Thinking(text.clone()));
+                            on_event(HarnessMsg::Thinking {
+                                msg_id: next_msg_id(),
+                                content: text.clone(),
+                            });
                         }
                         _ => {}
                     }
@@ -142,7 +164,10 @@ where
                 }
 
                 if !text.is_empty() {
-                    on_event(HarnessMsg::AgentMessage(text));
+                    on_event(HarnessMsg::AgentMessage {
+                        msg_id: next_msg_id(),
+                        content: text,
+                    });
                 }
                 token_usage.emit_usage(index, &mut on_event);
 
@@ -202,13 +227,16 @@ where
                 // Unmatched tool response — display inline as agent text.
                 let text = message.content.texts().join("");
                 if !text.is_empty() {
-                    on_event(HarnessMsg::AgentMessage(text));
+                    on_event(HarnessMsg::AgentMessage {
+                        msg_id: next_msg_id(),
+                        content: text,
+                    });
                 }
                 for tr in message.content.tool_responses() {
-                    on_event(HarnessMsg::AgentMessage(format!(
-                        "[tool {}]: {}",
-                        tr.call_id, tr.content
-                    )));
+                    on_event(HarnessMsg::AgentMessage {
+                        msg_id: next_msg_id(),
+                        content: format!("[tool {}]: {}", tr.call_id, tr.content),
+                    });
                 }
                 message.emit_diff_markers(&mut on_event);
                 token_usage.emit_usage(index, &mut on_event);
