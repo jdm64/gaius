@@ -1,3 +1,9 @@
+## v0.5.3
+
+### Improvements
+- genai v0.7.4 fixes ModelName serialization; revert serialization workaround
+- fix clippy warnings from new rust version
+
 ## v0.5.2
 
 ### Improvements
