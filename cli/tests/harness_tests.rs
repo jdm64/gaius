@@ -401,7 +401,7 @@ fn genai_rate_limit_true_for_web_stream_429() {
 
 #[test]
 fn genai_rate_limit_false_for_non_genai_error() {
-    let err = std::io::Error::new(std::io::ErrorKind::Other, "not a genai error");
+    let err = std::io::Error::other("not a genai error");
     assert!(!is_rate_limit_error(&err));
 }
 

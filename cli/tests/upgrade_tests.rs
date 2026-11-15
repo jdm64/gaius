@@ -24,7 +24,8 @@ async fn server(responses: Vec<String>) -> &'static str {
         for template in responses {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut request = [0; 4096];
-            socket.read(&mut request).await.unwrap();
+            let bytes_read = socket.read(&mut request).await.unwrap();
+            assert!(bytes_read > 0, "client closed before sending a request");
             let (headers, body) = template.split_once("\r\n\r\n").unwrap();
             let status = headers
                 .lines()
@@ -184,7 +185,8 @@ async fn cancelled_download_cleans_staging() {
     let server = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut request = [0; 4096];
-        socket.read(&mut request).await.unwrap();
+        let bytes_read = socket.read(&mut request).await.unwrap();
+        assert!(bytes_read > 0, "client closed before sending a request");
         socket
             .write_all(response("200 OK", &release).as_bytes())
             .await

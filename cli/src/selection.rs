@@ -240,8 +240,13 @@ impl Selection {
         let mut result = String::new();
         let mut prev_index: Option<usize> = None;
 
-        for row in start.row as usize..=last_row {
-            let info = &self.row_info[row];
+        for (row, info) in self
+            .row_info
+            .iter()
+            .enumerate()
+            .take(last_row + 1)
+            .skip(start.row as usize)
+        {
             let line_len = info.content.chars().count();
             let prefix = info.prefix;
 

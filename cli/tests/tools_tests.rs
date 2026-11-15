@@ -5,7 +5,8 @@ use gaius::{
     tools::ToolName::{self},
 };
 use serde_json::json;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
 
 #[test]
 fn tool_names_are_single_source_of_truth() {
@@ -92,7 +93,7 @@ async fn plan_tool_requires_content() {
 
 #[tokio::test]
 async fn edit_file_returns_compact_diff_view() {
-    let _guard = cwd_lock().lock().unwrap();
+    let _guard = cwd_lock().lock().await;
     let original_dir = std::env::current_dir().unwrap();
     let dir = std::env::temp_dir().join(format!("gaius-edit-file-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -139,7 +140,7 @@ async fn edit_file_returns_compact_diff_view() {
 
 #[tokio::test]
 async fn glob_returns_relative_paths() {
-    let _guard = cwd_lock().lock().unwrap();
+    let _guard = cwd_lock().lock().await;
     let original_dir = std::env::current_dir().unwrap();
     let dir = std::env::temp_dir().join(format!("gaius-glob-path-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -166,7 +167,7 @@ async fn glob_returns_relative_paths() {
 
 #[tokio::test]
 async fn grep_returns_relative_paths() {
-    let _guard = cwd_lock().lock().unwrap();
+    let _guard = cwd_lock().lock().await;
     let original_dir = std::env::current_dir().unwrap();
     let dir = std::env::temp_dir().join(format!("gaius-grep-path-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
