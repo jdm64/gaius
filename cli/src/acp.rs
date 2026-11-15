@@ -11,7 +11,9 @@ use crate::{
 };
 use agent_client_protocol::{
     Agent, Client, ConnectionTo, Dispatch, Error, HandleDispatchFrom, Handled, JsonRpcResponse,
-    Responder, Stdio, schema::ProtocolVersion, v2::schema::*,
+    Responder, Stdio,
+    schema::ProtocolVersion,
+    v2::schema::{Error as SchemaError, *},
 };
 use serde_json::Value;
 use std::{
@@ -57,11 +59,8 @@ impl ACPEventHandler {
                             // TODO implement real user input
                             let _ = answer_tx.send(options.into_iter().next().unwrap_or_default());
                         }
-                        HarnessEvent::TurnFinished(_) => {
-                            self.handle_state_update(&cx, true);
-                        }
-                        HarnessEvent::RequestFailed(_, _) => {
-                            self.handle_state_update(&cx, false);
+                        HarnessEvent::TurnFinished{status, ..} => {
+                            self.handle_state_update(status, &cx);
                         }
                         HarnessEvent::ShutdownComplete(_) => break
                     }
@@ -70,13 +69,17 @@ impl ACPEventHandler {
         }
     }
 
-    fn handle_state_update(&self, cx: &ConnectionTo<Client>, running: bool) {
+    fn handle_state_update(&self, status: Result<(), String>, cx: &ConnectionTo<Client>) {
         if let Some(session_id) = self.session_id.lock().unwrap().clone() {
-            let update = if running {
-                SessionUpdate::StateUpdate(StateUpdate::Running(RunningStateUpdate::new()))
-            } else {
-                SessionUpdate::StateUpdate(StateUpdate::Idle(IdleStateUpdate::new()))
+            let idle_state = match status {
+                Ok(_) => IdleStateUpdate::new().stop_reason(StopReason::EndTurn),
+                Err(msg) => {
+                    let error = SchemaError::internal_error().data(msg);
+                    let reason = StopReason::Error(ErrorStopReason::new().error(error));
+                    IdleStateUpdate::new().stop_reason(reason)
+                }
             };
+            let update = SessionUpdate::StateUpdate(StateUpdate::Idle(idle_state));
             let msg = UpdateSessionNotification::new(session_id, update);
             let _ = cx.send_notification(msg);
         }

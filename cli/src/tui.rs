@@ -324,16 +324,15 @@ impl TuiApp {
                     selected: 0,
                 };
             }
-            HarnessEvent::TurnFinished(snapshot) => {
+            HarnessEvent::TurnFinished { snapshot, status } => {
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
-                self.editor.set_status("");
-            }
-            HarnessEvent::RequestFailed(err, snapshot) => {
-                self.finish_last_timer();
-                self.save_snapshot(&snapshot);
-                self.push_message(TuiMessage::SystemMessage(format!("Error: {}", err)));
-                self.editor.set_status("Agent request failed");
+                if let Err(msg) = status {
+                    self.push_message(TuiMessage::SystemMessage(format!("Error: {}", msg)));
+                    self.editor.set_status("Agent request failed");
+                } else {
+                    self.editor.set_status("");
+                }
             }
             HarnessEvent::ShutdownComplete(result) => {
                 if let Ok(snapshot) = result {

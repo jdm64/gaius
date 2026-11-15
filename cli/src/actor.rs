@@ -39,8 +39,10 @@ pub enum HarnessEvent {
         options: Vec<String>,
         answer_tx: AnswerSender,
     },
-    TurnFinished(HarnessSnapshot),
-    RequestFailed(String, HarnessSnapshot),
+    TurnFinished {
+        snapshot: HarnessSnapshot,
+        status: Result<(), String>,
+    },
     ShutdownComplete(OperationResult<HarnessSnapshot>),
 }
 
@@ -317,18 +319,13 @@ impl HarnessActorServer {
 
         drop(turn);
 
-        let current = self.harness.snapshot();
-        match &result {
-            Ok(()) => {
-                Self::tx(&self.event_tx, HarnessEvent::TurnFinished(current));
-            }
-            Err(err) => {
-                Self::tx(
-                    &self.event_tx,
-                    HarnessEvent::RequestFailed(err.clone(), current),
-                );
-            }
-        }
+        Self::tx(
+            &self.event_tx,
+            HarnessEvent::TurnFinished {
+                snapshot: self.harness.snapshot(),
+                status: result.clone(),
+            },
+        );
 
         result
     }
@@ -363,18 +360,15 @@ impl HarnessActorServer {
         };
 
         drop(compaction);
-        let snapshot = self.harness.snapshot();
-        match &result {
-            Ok(()) => {
-                Self::tx(&self.event_tx, HarnessEvent::TurnFinished(snapshot));
-            }
-            Err(err) => {
-                Self::tx(
-                    &self.event_tx,
-                    HarnessEvent::RequestFailed(err.clone(), snapshot),
-                );
-            }
-        }
+
+        Self::tx(
+            &self.event_tx,
+            HarnessEvent::TurnFinished {
+                snapshot: self.harness.snapshot(),
+                status: result.clone(),
+            },
+        );
+
         result
     }
 
