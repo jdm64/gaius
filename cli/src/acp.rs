@@ -316,7 +316,10 @@ impl ACPEngine {
             }
         }
 
-        // must send UpdateSessionNotification with running note.
+        let complete = SessionUpdate::ReplayComplete(ReplayComplete::new());
+        let update = UpdateSessionNotification::new(data.session_id.to_string(), complete);
+        let _ = cx.send_notification(update);
+
         reply(resp, ResumeSessionResponse::new())
     }
 
