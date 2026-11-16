@@ -17,16 +17,21 @@ use agent_client_protocol::{
 };
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     fmt::Debug,
     sync::{Arc, Mutex},
 };
-use tokio::sync::mpsc::{Sender, UnboundedReceiver};
+use tokio::sync::{
+    Notify,
+    mpsc::{Sender, UnboundedReceiver},
+};
 
 fn reply<T: JsonRpcResponse>(r: Responder<Value>, resp: T) -> Result<(), Error> {
     r.cast::<T>().respond(resp)
 }
 
 type SharedSessionId = Arc<Mutex<Option<String>>>;
+type PendingPrompts = Arc<(Mutex<HashMap<u32, Responder>>, Notify)>;
 
 struct ACPSetup {
     engine: ACPEngine,
@@ -37,6 +42,7 @@ struct ACPEventHandler {
     events: UnboundedReceiver<HarnessEvent>,
     tx: Sender<HarnessCommand>,
     session_id: SharedSessionId,
+    pending_prompts: PendingPrompts,
 }
 
 impl ACPEventHandler {
@@ -51,6 +57,9 @@ impl ACPEventHandler {
                     let Some(event) = event else { break; };
                     match event {
                         HarnessEvent::Message(msg) => {
+                            if let HarnessMsg::UserPrompt { msg_id, .. } = &msg {
+                                self.respond_to_prompt(*msg_id).await;
+                            }
                             if let Some(notification) = self.handle_message(msg) {
                                 let _ = cx.send_notification(notification);
                             }
@@ -66,6 +75,17 @@ impl ACPEventHandler {
                     }
                 }
             }
+        }
+    }
+
+    async fn respond_to_prompt(&self, msg_id: u32) {
+        loop {
+            let notified = self.pending_prompts.1.notified();
+            if let Some(responder) = self.pending_prompts.0.lock().unwrap().remove(&msg_id) {
+                let _ = reply(responder, PromptResponse::new(msg_id.to_string()));
+                return;
+            }
+            notified.await;
         }
     }
 
@@ -169,6 +189,7 @@ struct ACPEngine {
     actor: HarnessActorClient,
     replies: UnboundedReceiver<CommandReply>,
     session_id: SharedSessionId,
+    pending_prompts: PendingPrompts,
 }
 
 impl ACPEngine {
@@ -179,12 +200,14 @@ impl ACPEngine {
         let harness = Harness::new(&config, None)?;
         let (actor, actor_rx) = HarnessActorClient::new(harness)?;
         let session_id = Arc::new(Mutex::new(None));
+        let pending_prompts = Arc::new((Mutex::new(HashMap::new()), Notify::new()));
 
         Ok(ACPSetup {
             engine: Self {
                 actor,
                 replies: actor_rx.replies,
                 session_id,
+                pending_prompts,
             },
             events: actor_rx.events,
         })
@@ -341,7 +364,7 @@ impl ACPEngine {
     }
 
     pub async fn handle_prompt(
-        &self,
+        &mut self,
         data: Box<PromptRequest>,
         resp: Responder,
     ) -> Result<(), Error> {
@@ -373,9 +396,16 @@ impl ACPEngine {
         }
 
         if self.actor.run_prompt(prompt).await.is_err() {
-            resp.respond_with_error(Error::internal_error())
-        } else {
-            reply(resp, PromptResponse::new("message_id"))
+            return resp.respond_with_error(Error::internal_error());
+        }
+
+        match self.replies.recv().await {
+            Some(CommandReply::PromptQueued { msg_id, .. }) => {
+                self.pending_prompts.0.lock().unwrap().insert(msg_id, resp);
+                self.pending_prompts.1.notify_one();
+                Ok(())
+            }
+            _ => resp.respond_with_error(Error::internal_error()),
         }
     }
 
@@ -439,6 +469,7 @@ pub async fn run_acp() -> Result<(), Box<dyn core::error::Error>> {
     };
     let actor_tx = engine.actor.clone_tx();
     let session_id = engine.session_id.clone();
+    let pending_prompts = engine.pending_prompts.clone();
 
     Agent
         .v2()
@@ -449,6 +480,7 @@ pub async fn run_acp() -> Result<(), Box<dyn core::error::Error>> {
                 events,
                 tx: actor_tx,
                 session_id,
+                pending_prompts,
             }
             .run(cx.into())
             .await;

@@ -45,8 +45,10 @@ impl CliPrompt {
 
     pub async fn run_turn(&mut self, prompt: String) -> Result<(), Box<dyn Error>> {
         let mut agent_started = false;
+        let msg_id = self.harness.next_msg_id();
+        let request = UserRequest::Prompt { msg_id, prompt };
         self.harness
-            .run_turn(UserRequest::Prompt(prompt), |event| match event {
+            .run_turn(request, |event| match event {
                 HarnessMsg::UserPrompt { content: text, .. } => {
                     println!("user> {}", text);
                     let _ = io::stdout().flush();

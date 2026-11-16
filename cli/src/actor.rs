@@ -76,6 +76,7 @@ pub enum CommandReply {
     SessionForked(OperationResult<HarnessSnapshot>),
     SessionLoaded(OperationResult<HarnessSnapshot>),
     SessionClosed(OperationResult<HarnessSnapshot>),
+    PromptQueued { size: usize, msg_id: u32 },
     HistoryReplayed(Vec<HarnessMsg>),
     StreamingToggled(OperationResult<bool>),
     PlanModeToggled(OperationResult<bool>),
@@ -308,7 +309,7 @@ impl HarnessActorServer {
                             Self::tx(&self.reply_tx, CommandReply::SessionInfo(Ok(info)));
                         }
                         Some(HarnessCommand::RunPrompt(prompt)) => {
-                            prompt_queue.push(prompt, &self.event_tx);
+                            prompt_queue.push(prompt, &self.reply_tx);
                         }
                         Some(_) => Self::tx_busy(&self.reply_tx),
                         None => break Err("Actor channel closed".into()),
@@ -351,7 +352,7 @@ impl HarnessActorServer {
                         Self::tx(&self.reply_tx, CommandReply::SessionInfo(Ok(info)));
                     }
                     Some(HarnessCommand::RunPrompt(prompt)) => {
-                        prompt_queue.push(prompt, &self.event_tx);
+                        prompt_queue.push(prompt, &self.reply_tx);
                     }
                     Some(_) => Self::tx_busy(&self.reply_tx),
                     None => break Err("Actor channel closed".into()),
@@ -376,7 +377,12 @@ impl HarnessActorServer {
         while let Some(command) = self.rx.recv().await {
             match command {
                 HarnessCommand::RunPrompt(prompt) => {
-                    let _ = self.run_turn(UserRequest::Prompt(prompt)).await;
+                    let msg_id = self.harness.next_msg_id();
+                    Self::tx(
+                        &self.reply_tx,
+                        CommandReply::PromptQueued { size: 0, msg_id },
+                    );
+                    let _ = self.run_turn(UserRequest::Prompt { msg_id, prompt }).await;
                 }
                 HarnessCommand::RunSkill(name) => {
                     let _ = self.run_turn(UserRequest::Skill(name)).await;

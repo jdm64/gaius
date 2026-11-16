@@ -26,12 +26,15 @@ use genai::chat::{ChatRequest, ChatResponse};
 use std::{
     error::Error,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
 };
 
 #[derive(Clone, Debug)]
 pub enum UserRequest {
-    Prompt(String),
+    Prompt { msg_id: u32, prompt: String },
     Skill(String),
 }
 
@@ -125,7 +128,7 @@ pub struct Harness {
     plan_mode: bool,
     turn_start: Option<u64>,
     prompt_queue: PromptQueue,
-    msg_id_counter: u32,
+    msg_id_counter: Arc<AtomicU32>,
 }
 
 impl Harness {
@@ -168,6 +171,7 @@ impl Harness {
             usage: session_file.token_usage.usage(),
         }));
 
+        let msg_id_counter = Arc::new(AtomicU32::new(0));
         let mut harness = Self {
             history: ChatRequest::new(session_file.messages),
             client: LLMClient::new()?,
@@ -180,8 +184,8 @@ impl Harness {
             plan_mode: false,
             live_info,
             turn_start: None,
-            prompt_queue: PromptQueue::new(),
-            msg_id_counter: 0,
+            prompt_queue: PromptQueue::new(msg_id_counter.clone()),
+            msg_id_counter,
         };
 
         harness.build_sys_prompt();
@@ -189,10 +193,8 @@ impl Harness {
         Ok(harness)
     }
 
-    pub fn next_msg_id(&mut self) -> u32 {
-        let id = self.msg_id_counter;
-        self.msg_id_counter += 1;
-        id
+    pub fn next_msg_id(&self) -> u32 {
+        self.msg_id_counter.fetch_add(1, Ordering::Relaxed)
     }
 
     pub fn session_id(&self) -> Option<String> {
@@ -294,7 +296,7 @@ impl Harness {
     }
 
     pub fn reload_session(&mut self) -> Result<(), Box<dyn Error>> {
-        self.msg_id_counter = 0;
+        self.msg_id_counter.store(0, Ordering::Relaxed);
         let session_file = self.session.load()?;
         self.tool_engine.proj_dir = session_file.proj_dir;
         self.history = ChatRequest::new(session_file.messages);

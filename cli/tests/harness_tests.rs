@@ -1,5 +1,5 @@
 use gaius::{
-    actor::HarnessEvent,
+    actor::CommandReply,
     config::Config,
     diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
     harness::{Harness, HarnessMsg, compact::Compact, history_replay, prompt_queue::PromptQueue},
@@ -17,15 +17,7 @@ use genai::{
 };
 use reqwest::{StatusCode, header::HeaderMap};
 use serde_json::json;
-use tokio::sync::mpsc::{self, UnboundedSender};
-
-/// `PromptQueue::push` reports `QueueChanged` to the actor over this channel.
-fn queue_channel() -> (
-    UnboundedSender<HarnessEvent>,
-    mpsc::UnboundedReceiver<HarnessEvent>,
-) {
-    mpsc::unbounded_channel()
-}
+use std::sync::{Arc, atomic::AtomicU32};
 
 fn replay_events(messages: Vec<ChatMessage>) -> Vec<HarnessMsg> {
     let mut events = Vec::new();
@@ -920,37 +912,36 @@ fn harness_record_usage_emits_event_and_updates_session_info() {
 
 #[test]
 fn prompt_queue_runs_prompts_in_the_order_they_arrived() {
-    let queue = PromptQueue::new();
-    let (event_tx, mut events) = queue_channel();
+    let queue = PromptQueue::new(Arc::new(AtomicU32::new(0)));
+    let (reply_tx, mut replies) = tokio::sync::mpsc::unbounded_channel();
 
-    queue.push("first".to_string(), &event_tx);
-    queue.push("second".to_string(), &event_tx);
+    queue.push("first".to_string(), &reply_tx);
+    queue.push("second".to_string(), &reply_tx);
 
     assert_eq!(queue.len(), 2);
-    // every push reports the growing queue length to the actor
-    for expected in [1, 2] {
-        match events.try_recv().unwrap() {
-            HarnessEvent::Message(HarnessMsg::QueueChanged(len)) => {
-                assert_eq!(len, expected);
-            }
-            other => panic!("expected QueueChanged({expected}), got {other:?}"),
-        }
-    }
+    assert!(matches!(
+        replies.try_recv(),
+        Ok(CommandReply::PromptQueued { size: 1, .. })
+    ));
+    assert!(matches!(
+        replies.try_recv(),
+        Ok(CommandReply::PromptQueued { size: 2, .. })
+    ));
 
-    // drain hands back every waiting prompt in arrival order
-    assert_eq!(queue.pop(), Some("first".to_string()));
-    assert_eq!(queue.pop(), Some("second".to_string()));
+    // drain hands back every waiting prompt in arrival order, with assigned IDs
+    assert_eq!(queue.pop().unwrap().1, "first");
+    assert_eq!(queue.pop().unwrap().1, "second");
     assert!(queue.is_empty());
     assert_eq!(queue.pop(), None);
 }
 
 #[test]
 fn prompt_queue_clear_drops_every_waiting_prompt() {
-    let queue = PromptQueue::new();
-    let (event_tx, _events) = queue_channel();
+    let queue = PromptQueue::new(Arc::new(AtomicU32::new(0)));
+    let (reply_tx, _replies) = tokio::sync::mpsc::unbounded_channel();
 
-    queue.push("first".to_string(), &event_tx);
-    queue.push("second".to_string(), &event_tx);
+    queue.push("first".to_string(), &reply_tx);
+    queue.push("second".to_string(), &reply_tx);
 
     assert_eq!(queue.clear(), 2);
     assert!(queue.is_empty());
@@ -962,10 +953,10 @@ fn prompt_queue_clear_drops_every_waiting_prompt() {
 fn harness_counts_prompts_waiting_to_be_sent() {
     let harness = Harness::new_without_session(&Config::default()).unwrap();
     let queue = harness.prompt_queue();
-    let (event_tx, _events) = queue_channel();
+    let (reply_tx, _replies) = tokio::sync::mpsc::unbounded_channel();
 
-    queue.push("first".to_string(), &event_tx);
-    queue.push("second".to_string(), &event_tx);
+    queue.push("first".to_string(), &reply_tx);
+    queue.push("second".to_string(), &reply_tx);
 
     assert_eq!(queue.len(), 2);
     assert_eq!(harness.snapshot().queued_prompts, 2);
@@ -982,11 +973,11 @@ fn harness_counts_prompts_waiting_to_be_sent() {
 fn harness_prompt_queue_handle_shares_the_same_queue() {
     let harness = Harness::new_without_session(&Config::default()).unwrap();
     let queue = harness.prompt_queue();
-    let (event_tx, _events) = queue_channel();
+    let (reply_tx, _replies) = tokio::sync::mpsc::unbounded_channel();
 
-    queue.push("while busy".to_string(), &event_tx);
+    queue.push("while busy".to_string(), &reply_tx);
 
     assert_eq!(queue.len(), 1);
-    assert_eq!(queue.pop(), Some("while busy".to_string()));
+    assert_eq!(queue.pop().unwrap().1, "while busy");
     assert_eq!(queue.len(), 0);
 }

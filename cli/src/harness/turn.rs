@@ -52,7 +52,9 @@ impl Harness {
         self.update_session_info();
 
         match request {
-            UserRequest::Prompt(text) => self.send_user_message(text, &mut on_event),
+            UserRequest::Prompt { prompt, msg_id } => {
+                self.send_user_message_with_id(prompt, msg_id, &mut on_event)
+            }
             UserRequest::Skill(name) => self.send_skill_message(name, &mut on_event)?,
         }
 
@@ -62,9 +64,9 @@ impl Harness {
                 return Ok(());
             }
 
-            if let Some(prompt) = self.prompt_queue.pop() {
+            if let Some((msg_id, prompt)) = self.prompt_queue.pop() {
                 on_event(HarnessMsg::QueueChanged(self.prompt_queue.len()));
-                self.send_user_message(prompt, &mut on_event);
+                self.send_user_message_with_id(prompt, msg_id, &mut on_event);
                 continue;
             }
 

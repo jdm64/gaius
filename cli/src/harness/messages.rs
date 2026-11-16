@@ -21,11 +21,19 @@ impl Harness {
     where
         F: FnMut(HarnessMsg) -> Option<String>,
     {
+        let msg_id = self.next_msg_id();
+        self.send_user_message_with_id(message, msg_id, on_event);
+    }
+
+    pub fn send_user_message_with_id<F>(&mut self, message: String, msg_id: u32, on_event: &mut F)
+    where
+        F: FnMut(HarnessMsg) -> Option<String>,
+    {
         self.history
             .messages
             .push(ChatMessage::user(message.clone()));
         on_event(HarnessMsg::UserPrompt {
-            msg_id: self.next_msg_id(),
+            msg_id,
             content: message,
         });
     }

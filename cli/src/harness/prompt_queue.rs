@@ -2,30 +2,42 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{actor::HarnessEvent, harness::HarnessMsg};
+use crate::actor::CommandReply;
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PromptQueue {
-    prompts: Arc<Mutex<VecDeque<String>>>,
+    prompts: Arc<Mutex<VecDeque<(u32, String)>>>,
+    msg_id_counter: Arc<AtomicU32>,
 }
 
 impl PromptQueue {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(msg_id_counter: Arc<AtomicU32>) -> Self {
+        Self {
+            prompts: Arc::new(Mutex::new(VecDeque::new())),
+            msg_id_counter,
+        }
     }
 
-    pub fn push(&self, prompt: String, event_tx: &UnboundedSender<HarnessEvent>) {
+    pub fn push(&self, prompt: String, reply_tx: &UnboundedSender<CommandReply>) -> u32 {
+        let msg_id = self.msg_id_counter.fetch_add(1, Ordering::Relaxed);
         let mut queue = self.prompts.lock().unwrap();
-        queue.push_back(prompt);
-        let _ = event_tx.send(HarnessEvent::Message(HarnessMsg::QueueChanged(queue.len())));
+        queue.push_back((msg_id, prompt));
+        let _ = reply_tx.send(CommandReply::PromptQueued {
+            size: queue.len(),
+            msg_id,
+        });
+        msg_id
     }
 
-    pub fn pop(&self) -> Option<String> {
+    pub fn pop(&self) -> Option<(u32, String)> {
         self.prompts.lock().unwrap().pop_front()
     }
 
