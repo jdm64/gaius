@@ -260,8 +260,16 @@ impl ACPEngine {
         cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
         match req {
-            ClientRequest::InitializeRequest(_) => {
-                reply(resp, Self::build_init())?;
+            ClientRequest::InitializeRequest(data) => {
+                if data.protocol_version != ProtocolVersion::V2 {
+                    let err = SchemaError::unsupported_protocol_version(
+                        data.protocol_version,
+                        &vec![ProtocolVersion::V2],
+                    );
+                    resp.respond_with_error(err.into())?;
+                } else {
+                    reply(resp, Self::build_init())?;
+                }
             }
             ClientRequest::ListSessionsRequest(data) => {
                 self.handle_session_list(data, resp).await?
