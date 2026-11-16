@@ -315,6 +315,7 @@ impl TuiApp {
                 title,
                 options,
                 answer_tx,
+                ..
             } => {
                 self.editor.clear_input();
                 self.editor.answer_tx = Some(answer_tx);

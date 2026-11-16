@@ -168,7 +168,7 @@ impl CliPrompt {
                     println!("tokens> {net} {total_str}");
                     None
                 }
-                HarnessMsg::AskUser { title, options } => {
+                HarnessMsg::AskUser { title, options, .. } => {
                     if agent_started {
                         println!();
                         agent_started = false;

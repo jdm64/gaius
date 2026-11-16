@@ -93,6 +93,7 @@ pub enum HarnessMsg {
         cost: Option<f64>,
     },
     AskUser {
+        call_id: String,
         title: String,
         options: Vec<String>,
     },

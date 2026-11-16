@@ -3,6 +3,7 @@
  */
 
 use crate::harness::{Harness, HarnessMsg};
+use uuid::Uuid;
 
 const CLEAR_OPTION: &str = "Clear Context";
 const KEEP_OPTION: &str = "Keep Context";
@@ -40,6 +41,7 @@ impl PlanHook {
 
     fn ask_user() -> HarnessMsg {
         HarnessMsg::AskUser {
+            call_id: Uuid::now_v7().to_string(),
             title: QUESTION_TITLE.to_string(),
             options: HOOK_OPTIONS.iter().map(|s| s.to_string()).collect(),
         }

@@ -24,6 +24,7 @@ use std::{
 use tokio::sync::{
     Notify,
     mpsc::{Sender, UnboundedReceiver},
+    oneshot,
 };
 
 fn reply<T: JsonRpcResponse>(r: Responder<Value>, resp: T) -> Result<(), Error> {
@@ -64,9 +65,8 @@ impl ACPEventHandler {
                                 let _ = cx.send_notification(notification);
                             }
                         }
-                        HarnessEvent::AskUser { options, answer_tx, .. } => {
-                            // TODO implement real user input
-                            let _ = answer_tx.send(options.into_iter().next().unwrap_or_default());
+                        HarnessEvent::AskUser { call_id, title, options, answer_tx } => {
+                            self.handle_ask_user(call_id, title, options, answer_tx, &cx);
                         }
                         HarnessEvent::TurnFinished{status, ..} => {
                             self.handle_state_update(status, &cx);
@@ -76,6 +76,46 @@ impl ACPEventHandler {
                 }
             }
         }
+    }
+
+    fn handle_ask_user(
+        &self,
+        call_id: String,
+        title: String,
+        options: Vec<String>,
+        answer_tx: oneshot::Sender<String>,
+        cx: &ConnectionTo<Client>,
+    ) {
+        let Some(session_id) = self.session_id.lock().unwrap().clone() else {
+            let _ = answer_tx.send(String::new());
+            return;
+        };
+        let scope = ElicitationSessionScope::new(session_id).tool_call_id(call_id.as_str());
+        let values = StringPropertySchema::new().enum_values(options);
+        let schema = ElicitationSchema::new()
+            .title(title.clone())
+            .property("choice", values, true);
+        let mode = ElicitationFormMode::new(ElicitationScope::Session(scope), schema);
+        let request = CreateElicitationRequest::new(ElicitationMode::Form(mode), title);
+        let sent = cx.send_request(request);
+        tokio::spawn(async move {
+            let answer = match sent.block_task().await {
+                Ok(response) => match response.action {
+                    ElicitationAction::Accept(accepted) => accepted
+                        .content
+                        .and_then(|content| content.get("choice").cloned())
+                        .and_then(|choice| serde_json::to_value(choice).ok())
+                        .and_then(|choice| choice.as_str().map(str::to_owned))
+                        .unwrap_or_default(),
+                    ElicitationAction::Decline
+                    | ElicitationAction::Cancel
+                    | ElicitationAction::Other(_) => String::new(),
+                    _ => String::new(),
+                },
+                Err(_) => String::new(),
+            };
+            let _ = answer_tx.send(answer);
+        });
     }
 
     async fn respond_to_prompt(&self, msg_id: u32) {

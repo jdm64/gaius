@@ -35,6 +35,7 @@ const ACTOR_STOPPED: &str = "Harness actor stopped";
 pub enum HarnessEvent {
     Message(HarnessMsg),
     AskUser {
+        call_id: String,
         title: String,
         options: Vec<String>,
         answer_tx: AnswerSender,
@@ -273,11 +274,12 @@ impl HarnessActorServer {
             let event_tx = self.event_tx.clone();
             move |event: HarnessMsg| -> Option<String> {
                 match event {
-                    HarnessMsg::AskUser { title, options } => {
+                    HarnessMsg::AskUser { call_id, title, options } => {
                         let (answer_tx, answer_rx) = oneshot::channel();
                         Self::tx(
                             &event_tx,
                             HarnessEvent::AskUser {
+                                call_id,
                                 title,
                                 options,
                                 answer_tx,
