@@ -19,6 +19,7 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     fmt::Debug,
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 use tokio::sync::{
@@ -29,6 +30,14 @@ use tokio::sync::{
 
 fn reply<T: JsonRpcResponse>(r: Responder<Value>, resp: T) -> Result<(), Error> {
     r.cast::<T>().respond(resp)
+}
+
+fn abs_path(path: Option<AbsolutePath>) -> Result<Option<PathBuf>, ()> {
+    match path {
+        Some(p) if p.0.is_absolute() => Ok(Some(p.0)),
+        None => Ok(None),
+        _ => Err(()),
+    }
 }
 
 type SharedSessionId = Arc<Mutex<Option<String>>>;
@@ -290,7 +299,7 @@ impl ACPEngine {
                 reply(resp, SetSessionConfigOptionResponse::new(vec![]))?;
             }
             ClientRequest::PromptRequest(data) => self.handle_prompt(data, resp).await?,
-            _ => resp.respond_with_error(Error::internal_error())?,
+            _ => resp.respond_with_error(Error::method_not_found())?,
         }
         Ok(())
     }
@@ -300,7 +309,14 @@ impl ACPEngine {
         data: Box<ListSessionsRequest>,
         resp: Responder,
     ) -> Result<(), Error> {
-        let cwd = data.cwd.map(|cwd| cwd.0);
+        if data.cursor.is_some() {
+            resp.respond_with_error(Error::invalid_params())?;
+            return Ok(());
+        }
+        let Ok(cwd) = abs_path(data.cwd) else {
+            resp.respond_with_error(Error::invalid_params())?;
+            return Ok(());
+        };
         let sessions = Session::list(cwd.as_deref());
         let info = sessions
             .into_iter()
@@ -317,7 +333,15 @@ impl ACPEngine {
         data: Box<NewSessionRequest>,
         resp: Responder,
     ) -> Result<(), Error> {
-        let cwd = Some(data.cwd.0);
+        if !data.mcp_servers.is_empty() {
+            resp.respond_with_error(Error::invalid_params())?;
+            return Ok(());
+        }
+        let Ok(cwd) = abs_path(Some(data.cwd)) else {
+            resp.respond_with_error(Error::invalid_params())?;
+            return Ok(());
+        };
+
         if self.actor.new_session(cwd).await.is_err() {
             resp.respond_with_error(Error::internal_error())?;
             return Ok(());
@@ -345,6 +369,15 @@ impl ACPEngine {
         resp: Responder,
         cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
+        let do_replay = match data.replay_from {
+            Some(from) if matches!(from, ReplayFrom::Start(_)) => true,
+            Some(_) => {
+                resp.respond_with_error(Error::invalid_params())?;
+                return Ok(());
+            }
+            None => false,
+        };
+
         if self
             .actor
             .load_session(data.session_id.to_string())
@@ -365,7 +398,7 @@ impl ACPEngine {
             }
         }
 
-        if matches!(data.replay_from, Some(ReplayFrom::Start(_))) {
+        if do_replay {
             if self.actor.replay_history().await.is_err() {
                 resp.respond_with_error(Error::internal_error())?;
                 return Ok(());
@@ -430,7 +463,10 @@ impl ACPEngine {
                         return Ok(());
                     }
                 },
-                _ => {}
+                _ => {
+                    resp.respond_with_error(Error::invalid_params())?;
+                    return Ok(());
+                }
             }
         }
 
@@ -470,7 +506,8 @@ impl ACPEngine {
         let ver = Implementation::new("gaius", env!("GIT_VERSION"));
         let msg = InitializeResponse::new(ProtocolVersion::V2, ver);
         let sess = SessionCapabilities::new().delete(SessionDeleteCapabilities::new());
-        let cap = AgentCapabilities::new().session(sess);
+        let auth = AgentAuthCapabilities::new();
+        let cap = AgentCapabilities::new().session(sess).auth(auth);
         msg.capabilities(cap)
     }
 }
