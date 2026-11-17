@@ -15,6 +15,7 @@ use agent_client_protocol::{
     schema::ProtocolVersion,
     v2::schema::{Error as SchemaError, *},
 };
+use chrono::Utc;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -510,7 +511,20 @@ impl ACPEngine {
         }
 
         let complete = SessionUpdate::ReplayComplete(ReplayComplete::new());
-        let update = UpdateSessionNotification::new(data.session_id.to_string(), complete);
+        let update = UpdateSessionNotification::new(session_id.clone(), complete);
+        let _ = cx.send_notification(update);
+
+        let idle = IdleStateUpdate::new().stop_reason(StopReason::EndTurn);
+        let state = SessionUpdate::StateUpdate(StateUpdate::Idle(idle));
+        let update = UpdateSessionNotification::new(session_id.clone(), state);
+        let _ = cx.send_notification(update);
+
+        let mut info = SessionInfoUpdate::new().updated_at(Utc::now().to_rfc3339());
+        if let Ok(title) = Session::name(&session_id) {
+            info = info.title(title);
+        }
+        let update = SessionUpdate::SessionInfoUpdate(info);
+        let update = UpdateSessionNotification::new(session_id, update);
         let _ = cx.send_notification(update);
 
         reply(resp, ResumeSessionResponse::new())
