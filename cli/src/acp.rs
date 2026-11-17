@@ -41,7 +41,63 @@ fn abs_path(path: Option<AbsolutePath>) -> Result<Option<PathBuf>, ()> {
 }
 
 type SharedSessionId = Arc<Mutex<Option<String>>>;
-type PendingPrompts = Arc<(Mutex<HashMap<u32, Responder>>, Notify)>;
+
+enum PendingPrompt {
+    Waiting(Responder),
+    Cancelled,
+}
+
+#[derive(Default, Clone)]
+struct PendingPrompts {
+    arc: Arc<(Mutex<HashMap<u32, PendingPrompt>>, Notify)>,
+}
+
+impl PendingPrompts {
+    fn insert(&self, msg_id: u32, responder: Responder) {
+        self.arc
+            .0
+            .lock()
+            .unwrap()
+            .insert(msg_id, PendingPrompt::Waiting(responder));
+        self.arc.1.notify_waiters();
+    }
+
+    async fn respond(&self, msg_id: u32) {
+        loop {
+            let notified = self.arc.1.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let slot = self.arc.0.lock().unwrap().remove(&msg_id);
+            match slot {
+                Some(PendingPrompt::Waiting(responder)) => {
+                    let _ = reply(responder, PromptResponse::new(msg_id.to_string()));
+                    return;
+                }
+                Some(PendingPrompt::Cancelled) => return,
+                None => notified.await,
+            }
+        }
+    }
+
+    fn cancel(&self) {
+        let responders: Vec<Responder> = {
+            let mut prompts = self.arc.0.lock().unwrap();
+            prompts
+                .values_mut()
+                .filter_map(
+                    |slot| match std::mem::replace(slot, PendingPrompt::Cancelled) {
+                        PendingPrompt::Waiting(responder) => Some(responder),
+                        PendingPrompt::Cancelled => None,
+                    },
+                )
+                .collect()
+        };
+        for responder in responders {
+            let _ = responder.respond_with_error(Error::request_cancelled());
+        }
+        self.arc.1.notify_waiters();
+    }
+}
 
 struct ACPSetup {
     engine: ACPEngine,
@@ -68,7 +124,7 @@ impl ACPEventHandler {
                     match event {
                         HarnessEvent::Message(msg) => {
                             if let HarnessMsg::UserPrompt { msg_id, .. } = &msg {
-                                self.respond_to_prompt(*msg_id).await;
+                                self.pending_prompts.respond(*msg_id).await;
                             }
                             if let Some(notification) = self.handle_message(msg) {
                                 let _ = cx.send_notification(notification);
@@ -125,17 +181,6 @@ impl ACPEventHandler {
             };
             let _ = answer_tx.send(answer);
         });
-    }
-
-    async fn respond_to_prompt(&self, msg_id: u32) {
-        loop {
-            let notified = self.pending_prompts.1.notified();
-            if let Some(responder) = self.pending_prompts.0.lock().unwrap().remove(&msg_id) {
-                let _ = reply(responder, PromptResponse::new(msg_id.to_string()));
-                return;
-            }
-            notified.await;
-        }
     }
 
     fn handle_state_update(&self, status: Result<(), String>, cx: &ConnectionTo<Client>) {
@@ -249,7 +294,7 @@ impl ACPEngine {
         let harness = Harness::new(&config, None)?;
         let (actor, actor_rx) = HarnessActorClient::new(harness)?;
         let session_id = Arc::new(Mutex::new(None));
-        let pending_prompts = Arc::new((Mutex::new(HashMap::new()), Notify::new()));
+        let pending_prompts = PendingPrompts::default();
 
         Ok(ACPSetup {
             engine: Self {
@@ -438,6 +483,7 @@ impl ACPEngine {
         };
         if closed {
             *self.session_id.lock().unwrap() = None;
+            self.pending_prompts.cancel();
             reply(resp, CloseSessionResponse::new())
         } else {
             resp.respond_with_error(Error::internal_error())
@@ -485,8 +531,7 @@ impl ACPEngine {
 
         match self.replies.recv().await {
             Some(CommandReply::PromptQueued { msg_id, .. }) => {
-                self.pending_prompts.0.lock().unwrap().insert(msg_id, resp);
-                self.pending_prompts.1.notify_one();
+                self.pending_prompts.insert(msg_id, resp);
                 Ok(())
             }
             _ => resp.respond_with_error(Error::internal_error()),
@@ -496,6 +541,7 @@ impl ACPEngine {
     pub async fn handle_notification(&self, note: ClientNotification, _cx: ConnectionTo<Client>) {
         match note {
             ClientNotification::CancelSessionNotification(_) => {
+                self.pending_prompts.cancel();
                 let _ = self.actor.cancel().await;
             }
             _ => { /* Ignore */ }
