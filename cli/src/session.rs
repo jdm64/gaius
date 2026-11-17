@@ -340,6 +340,10 @@ impl Session {
         Ok(())
     }
 
+    pub fn exists(session_id: &str) -> bool {
+        Dirs::session_file(session_id).is_ok_and(|path| path.is_file())
+    }
+
     pub fn name(session_id: &str) -> Result<String, Box<dyn Error>> {
         let path = Dirs::session_file(session_id)?;
         if path.is_file() {

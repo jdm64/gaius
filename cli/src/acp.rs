@@ -17,7 +17,7 @@ use agent_client_protocol::{
 };
 use serde_json::Value;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Debug,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -32,6 +32,10 @@ fn reply<T: JsonRpcResponse>(r: Responder<Value>, resp: T) -> Result<(), Error> 
     r.cast::<T>().respond(resp)
 }
 
+fn reply_no_session(resp: Responder, id: SessionId) -> Result<(), Error> {
+    resp.respond_with_error(SchemaError::session_not_found(id).into())
+}
+
 fn abs_path(path: Option<AbsolutePath>) -> Result<Option<PathBuf>, ()> {
     match path {
         Some(p) if p.0.is_absolute() => Ok(Some(p.0)),
@@ -41,6 +45,43 @@ fn abs_path(path: Option<AbsolutePath>) -> Result<Option<PathBuf>, ()> {
 }
 
 type SharedSessionId = Arc<Mutex<Option<String>>>;
+
+#[derive(Default, Clone)]
+struct SessState {
+    active: SharedSessionId,
+    known: HashSet<String>,
+}
+
+impl SessState {
+    fn get(shared: &SharedSessionId) -> Option<String> {
+        shared.lock().unwrap().clone()
+    }
+
+    fn set(&mut self, sess_id: &str) {
+        *self.active.lock().unwrap() = Some(sess_id.to_string());
+        self.known.insert(sess_id.to_string());
+    }
+
+    fn is_active(&self, sess_id: &str) -> bool {
+        self.active.lock().unwrap().as_deref() == Some(sess_id)
+    }
+
+    fn is_unknown(&self, sess_id: &str) -> bool {
+        !self.is_active(sess_id) && !self.known.contains(sess_id) && !Session::exists(sess_id)
+    }
+
+    fn is_active_id(&self, id: &SessionId) -> bool {
+        self.is_active(&id.to_string())
+    }
+
+    fn clear(&mut self) {
+        *self.active.lock().unwrap() = None;
+    }
+
+    fn remove(&mut self, sess_id: &str) {
+        self.known.remove(sess_id);
+    }
+}
 
 enum PendingPrompt {
     Waiting(Responder),
@@ -151,7 +192,7 @@ impl ACPEventHandler {
         answer_tx: oneshot::Sender<String>,
         cx: &ConnectionTo<Client>,
     ) {
-        let Some(session_id) = self.session_id.lock().unwrap().clone() else {
+        let Some(session_id) = SessState::get(&self.session_id) else {
             let _ = answer_tx.send(String::new());
             return;
         };
@@ -184,7 +225,7 @@ impl ACPEventHandler {
     }
 
     fn handle_state_update(&self, status: Result<(), String>, cx: &ConnectionTo<Client>) {
-        if let Some(session_id) = self.session_id.lock().unwrap().clone() {
+        if let Some(session_id) = SessState::get(&self.session_id) {
             let idle_state = match status {
                 Ok(_) => IdleStateUpdate::new().stop_reason(StopReason::EndTurn),
                 Err(msg) => {
@@ -200,7 +241,7 @@ impl ACPEventHandler {
     }
 
     fn handle_message(&self, msg: HarnessMsg) -> Option<UpdateSessionNotification> {
-        let session_id = self.session_id.lock().unwrap().clone()?;
+        let session_id = SessState::get(&self.session_id)?;
         msg.to_update(&session_id)
     }
 }
@@ -282,7 +323,7 @@ impl HarnessMsg {
 struct ACPEngine {
     actor: HarnessActorClient,
     replies: UnboundedReceiver<CommandReply>,
-    session_id: SharedSessionId,
+    sess_state: SessState,
     pending_prompts: PendingPrompts,
 }
 
@@ -293,14 +334,14 @@ impl ACPEngine {
 
         let harness = Harness::new(&config, None)?;
         let (actor, actor_rx) = HarnessActorClient::new(harness)?;
-        let session_id = Arc::new(Mutex::new(None));
+        let sess_state = SessState::default();
         let pending_prompts = PendingPrompts::default();
 
         Ok(ACPSetup {
             engine: Self {
                 actor,
                 replies: actor_rx.replies,
-                session_id,
+                sess_state,
                 pending_prompts,
             },
             events: actor_rx.events,
@@ -332,7 +373,9 @@ impl ACPEngine {
             ClientRequest::ResumeSessionRequest(data) => {
                 self.handle_session_resume(data, resp, cx).await?
             }
-            ClientRequest::CloseSessionRequest(_) => self.handle_session_close(resp).await?,
+            ClientRequest::CloseSessionRequest(data) => {
+                self.handle_session_close(data, resp).await?;
+            }
             ClientRequest::DeleteSessionRequest(data) => {
                 if Session::delete(&data.session_id.to_string()).is_err() {
                     resp.respond_with_error(Error::internal_error())?;
@@ -340,8 +383,13 @@ impl ACPEngine {
                     reply(resp, DeleteSessionResponse::new())?;
                 }
             }
-            ClientRequest::SetSessionConfigOptionRequest(_) => {
-                reply(resp, SetSessionConfigOptionResponse::new(vec![]))?;
+            ClientRequest::SetSessionConfigOptionRequest(data) => {
+                if !self.sess_state.is_active_id(&data.session_id) {
+                    reply_no_session(resp, data.session_id)?;
+                } else {
+                    // TODO implement real config options
+                    reply(resp, SetSessionConfigOptionResponse::new(vec![]))?;
+                }
             }
             ClientRequest::PromptRequest(data) => self.handle_prompt(data, resp).await?,
             _ => resp.respond_with_error(Error::method_not_found())?,
@@ -395,7 +443,7 @@ impl ACPEngine {
         match self.replies.recv().await {
             Some(CommandReply::SessionCreated(Ok(snapshot))) => {
                 if let Some(session_id) = snapshot.session_id {
-                    *self.session_id.lock().unwrap() = Some(session_id.clone());
+                    self.sess_state.set(&session_id);
                     reply(resp, NewSessionResponse::new(session_id))
                 } else {
                     resp.respond_with_error(Error::internal_error())
@@ -423,19 +471,20 @@ impl ACPEngine {
             None => false,
         };
 
-        if self
-            .actor
-            .load_session(data.session_id.to_string())
-            .await
-            .is_err()
-        {
+        let session_id = data.session_id.to_string();
+        if self.sess_state.is_unknown(&session_id) {
+            reply_no_session(resp, data.session_id)?;
+            return Ok(());
+        }
+
+        if self.actor.load_session(session_id.clone()).await.is_err() {
             resp.respond_with_error(Error::internal_error())?;
             return Ok(());
         }
 
         match self.replies.recv().await {
             Some(CommandReply::SessionLoaded(Ok(_))) => {
-                *self.session_id.lock().unwrap() = Some(data.session_id.to_string());
+                self.sess_state.set(&session_id);
             }
             Some(CommandReply::SessionLoaded(Err(_))) | Some(_) | None => {
                 resp.respond_with_error(Error::internal_error())?;
@@ -451,7 +500,6 @@ impl ACPEngine {
 
             match self.replies.recv().await {
                 Some(CommandReply::HistoryReplayed(messages)) => {
-                    let session_id = data.session_id.to_string();
                     messages.iter().for_each(|m| {
                         if let Some(update) = m.to_update(&session_id) {
                             let _ = cx.send_notification(update);
@@ -472,7 +520,15 @@ impl ACPEngine {
         reply(resp, ResumeSessionResponse::new())
     }
 
-    pub async fn handle_session_close(&mut self, resp: Responder) -> Result<(), Error> {
+    pub async fn handle_session_close(
+        &mut self,
+        data: Box<CloseSessionRequest>,
+        resp: Responder,
+    ) -> Result<(), Error> {
+        if !self.sess_state.is_active_id(&data.session_id) {
+            reply(resp, CloseSessionResponse::new())?;
+            return Ok(());
+        }
         if self.actor.close_session().await.is_err() {
             resp.respond_with_error(Error::internal_error())?;
             return Ok(());
@@ -482,7 +538,7 @@ impl ACPEngine {
             Some(_) | None => false,
         };
         if closed {
-            *self.session_id.lock().unwrap() = None;
+            self.sess_state.clear();
             self.pending_prompts.cancel();
             reply(resp, CloseSessionResponse::new())
         } else {
@@ -495,6 +551,11 @@ impl ACPEngine {
         data: Box<PromptRequest>,
         resp: Responder,
     ) -> Result<(), Error> {
+        if !self.sess_state.is_active_id(&data.session_id) {
+            reply_no_session(resp, data.session_id)?;
+            return Ok(());
+        }
+
         let mut text_blocks = Vec::new();
         let mut attachments = Vec::new();
         for block in data.prompt {
@@ -599,7 +660,7 @@ pub async fn run_acp() -> Result<(), Box<dyn core::error::Error>> {
         }
     };
     let actor_tx = engine.actor.clone_tx();
-    let session_id = engine.session_id.clone();
+    let session_id = engine.sess_state.active.clone();
     let pending_prompts = engine.pending_prompts.clone();
 
     Agent
