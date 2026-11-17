@@ -31,6 +31,13 @@ pub type AnswerSender = oneshot::Sender<String>;
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTOR_STOPPED: &str = "Harness actor stopped";
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum FinishedReason {
+    Done,
+    Error(String),
+    Cancel,
+}
+
 #[derive(Debug)]
 pub enum HarnessEvent {
     Message(HarnessMsg),
@@ -42,7 +49,11 @@ pub enum HarnessEvent {
     },
     TurnFinished {
         snapshot: HarnessSnapshot,
-        status: Result<(), String>,
+        status: FinishedReason,
+        /// Signalled once the turn-finished event has been forwarded to the
+        /// client. A pending close waits for this so its response cannot
+        /// overtake the cancelled idle state_update.
+        ack: Option<oneshot::Sender<()>>,
     },
     ShutdownComplete(OperationResult<HarnessSnapshot>),
 }
@@ -238,6 +249,7 @@ pub struct HarnessActorServer {
     rx: Receiver<HarnessCommand>,
     event_tx: UnboundedSender<HarnessEvent>,
     reply_tx: UnboundedSender<CommandReply>,
+    close_after_turn: bool,
 }
 
 impl HarnessActorServer {
@@ -252,6 +264,7 @@ impl HarnessActorServer {
             rx,
             event_tx,
             reply_tx,
+            close_after_turn: false,
         }
     }
 
@@ -265,6 +278,46 @@ impl HarnessActorServer {
         ));
     }
 
+    async fn finish_turn(&mut self, result: Result<(), String>) {
+        let status = if self.harness.is_cancel() {
+            FinishedReason::Cancel
+        } else {
+            match result {
+                Ok(()) => FinishedReason::Done,
+                Err(err) => FinishedReason::Error(err),
+            }
+        };
+        let (ack_tx, ack_rx) = if self.close_after_turn {
+            let (ack_tx, ack_rx) = oneshot::channel();
+            (Some(ack_tx), Some(ack_rx))
+        } else {
+            (None, None)
+        };
+
+        Self::tx(
+            &self.event_tx,
+            HarnessEvent::TurnFinished {
+                snapshot: self.harness.snapshot(),
+                status,
+                ack: ack_tx,
+            },
+        );
+
+        if let Some(ack_rx) = ack_rx {
+            let _ = time::timeout(SHUTDOWN_TIMEOUT, ack_rx).await;
+        }
+
+        if self.close_after_turn {
+            self.close_after_turn = false;
+            let result = self
+                .harness
+                .close_session()
+                .map(|_| self.harness.snapshot())
+                .map_err(|err| err.to_string());
+            Self::tx(&self.reply_tx, CommandReply::SessionClosed(result));
+        }
+    }
+
     async fn run_turn(&mut self, request: UserRequest) -> Result<(), String> {
         let info_ref = self.harness.session_info();
         let cancel_flag = self.harness.cancel_handle();
@@ -274,7 +327,11 @@ impl HarnessActorServer {
             let event_tx = self.event_tx.clone();
             move |event: HarnessMsg| -> Option<String> {
                 match event {
-                    HarnessMsg::AskUser { call_id, title, options } => {
+                    HarnessMsg::AskUser {
+                        call_id,
+                        title,
+                        options,
+                    } => {
                         let (answer_tx, answer_rx) = oneshot::channel();
                         Self::tx(
                             &event_tx,
@@ -298,9 +355,7 @@ impl HarnessActorServer {
         let mut turn = Box::pin(self.harness.run_turn(request, on_event));
         let result: Result<(), String> = loop {
             tokio::select! {
-                result = &mut turn => {
-                    break result.map_err(|err| err.to_string());
-                }
+                biased;
                 cmd = self.rx.recv() => {
                     match cmd {
                         Some(HarnessCommand::Cancel) => {
@@ -313,22 +368,23 @@ impl HarnessActorServer {
                         Some(HarnessCommand::RunPrompt(prompt)) => {
                             prompt_queue.push(prompt, &self.reply_tx);
                         }
+                        Some(HarnessCommand::CloseSession) => {
+                            cancel_flag.cancel();
+                            self.close_after_turn = true;
+                        }
                         Some(_) => Self::tx_busy(&self.reply_tx),
                         None => break Err("Actor channel closed".into()),
                     }
+                }
+                result = &mut turn => {
+                    break result.map_err(|err| err.to_string());
                 }
             }
         };
 
         drop(turn);
 
-        Self::tx(
-            &self.event_tx,
-            HarnessEvent::TurnFinished {
-                snapshot: self.harness.snapshot(),
-                status: result.clone(),
-            },
-        );
+        self.finish_turn(result.clone()).await;
 
         result
     }
@@ -346,7 +402,7 @@ impl HarnessActorServer {
         let mut compaction = Box::pin(self.harness.compact(&mut on_event));
         let result: Result<(), String> = loop {
             tokio::select! {
-                result = &mut compaction => break result.map_err(|err| err.to_string()),
+                biased;
                 cmd = self.rx.recv() => match cmd {
                     Some(HarnessCommand::Cancel) => cancel_flag.cancel(),
                     Some(HarnessCommand::Info) => {
@@ -356,21 +412,20 @@ impl HarnessActorServer {
                     Some(HarnessCommand::RunPrompt(prompt)) => {
                         prompt_queue.push(prompt, &self.reply_tx);
                     }
+                    Some(HarnessCommand::CloseSession) => {
+                        cancel_flag.cancel();
+                        self.close_after_turn = true;
+                    }
                     Some(_) => Self::tx_busy(&self.reply_tx),
                     None => break Err("Actor channel closed".into()),
                 },
+                result = &mut compaction => break result.map_err(|err| err.to_string()),
             }
         };
 
         drop(compaction);
 
-        Self::tx(
-            &self.event_tx,
-            HarnessEvent::TurnFinished {
-                snapshot: self.harness.snapshot(),
-                status: result.clone(),
-            },
-        );
+        self.finish_turn(result.clone()).await;
 
         result
     }

@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    actor::{HarnessActorClient, HarnessCommand, HarnessEvent},
+    actor::{FinishedReason, HarnessActorClient, HarnessCommand, HarnessEvent},
     agents::Agents,
     config::Config,
     diff_view::DiffView,
@@ -325,14 +325,17 @@ impl TuiApp {
                     selected: 0,
                 };
             }
-            HarnessEvent::TurnFinished { snapshot, status } => {
+            HarnessEvent::TurnFinished { snapshot, status, .. } => {
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
-                if let Err(msg) = status {
-                    self.push_message(TuiMessage::SystemMessage(format!("Error: {}", msg)));
-                    self.editor.set_status("Agent request failed");
-                } else {
-                    self.editor.set_status("");
+                match status {
+                    FinishedReason::Error(msg) => {
+                        self.push_message(TuiMessage::SystemMessage(format!("Error: {}", msg)));
+                        self.editor.set_status("Agent request failed");
+                    }
+                    FinishedReason::Done | FinishedReason::Cancel => {
+                        self.editor.set_status("");
+                    }
                 }
             }
             HarnessEvent::ShutdownComplete(result) => {

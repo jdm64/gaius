@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    actor::{CommandReply, HarnessActorClient, HarnessCommand, HarnessEvent},
+    actor::{CommandReply, FinishedReason, HarnessActorClient, HarnessCommand, HarnessEvent},
     config::Config,
     harness::{Harness, HarnessMsg},
     session::Session,
@@ -175,8 +175,11 @@ impl ACPEventHandler {
                         HarnessEvent::AskUser { call_id, title, options, answer_tx } => {
                             self.handle_ask_user(call_id, title, options, answer_tx, &cx);
                         }
-                        HarnessEvent::TurnFinished{status, ..} => {
+                        HarnessEvent::TurnFinished { status, ack, .. } => {
                             self.handle_state_update(status, &cx);
+                            if let Some(ack) = ack {
+                                let _ = ack.send(());
+                            }
                         }
                         HarnessEvent::ShutdownComplete(_) => break
                     }
@@ -225,20 +228,22 @@ impl ACPEventHandler {
         });
     }
 
-    fn handle_state_update(&self, status: Result<(), String>, cx: &ConnectionTo<Client>) {
-        if let Some(session_id) = SessState::get(&self.session_id) {
-            let idle_state = match status {
-                Ok(_) => IdleStateUpdate::new().stop_reason(StopReason::EndTurn),
-                Err(msg) => {
-                    let error = SchemaError::internal_error().data(msg);
-                    let reason = StopReason::Error(ErrorStopReason::new().error(error));
-                    IdleStateUpdate::new().stop_reason(reason)
-                }
-            };
-            let update = SessionUpdate::StateUpdate(StateUpdate::Idle(idle_state));
-            let msg = UpdateSessionNotification::new(session_id, update);
-            let _ = cx.send_notification(msg);
-        }
+    fn handle_state_update(&self, status: FinishedReason, cx: &ConnectionTo<Client>) {
+        let Some(session_id) = SessState::get(&self.session_id) else {
+            return;
+        };
+        let idle_state = match status {
+            FinishedReason::Done => IdleStateUpdate::new().stop_reason(StopReason::EndTurn),
+            FinishedReason::Error(msg) => {
+                let error = SchemaError::internal_error().data(msg);
+                let reason = StopReason::Error(ErrorStopReason::new().error(error));
+                IdleStateUpdate::new().stop_reason(reason)
+            }
+            FinishedReason::Cancel => IdleStateUpdate::new().stop_reason(StopReason::Cancelled),
+        };
+        let update = SessionUpdate::StateUpdate(StateUpdate::Idle(idle_state));
+        let msg = UpdateSessionNotification::new(session_id, update);
+        let _ = cx.send_notification(msg);
     }
 
     fn handle_message(&self, msg: HarnessMsg) -> Option<UpdateSessionNotification> {
