@@ -377,11 +377,7 @@ impl ACPEngine {
                 self.handle_session_close(data, resp).await?;
             }
             ClientRequest::DeleteSessionRequest(data) => {
-                if Session::delete(&data.session_id.to_string()).is_err() {
-                    resp.respond_with_error(Error::internal_error())?;
-                } else {
-                    reply(resp, DeleteSessionResponse::new())?;
-                }
+                self.handle_session_delete(data, resp).await?;
             }
             ClientRequest::SetSessionConfigOptionRequest(data) => {
                 if !self.sess_state.is_active_id(&data.session_id) {
@@ -518,6 +514,38 @@ impl ACPEngine {
         let _ = cx.send_notification(update);
 
         reply(resp, ResumeSessionResponse::new())
+    }
+
+    pub async fn handle_session_delete(
+        &mut self,
+        data: Box<DeleteSessionRequest>,
+        resp: Responder,
+    ) -> Result<(), Error> {
+        let session_id = data.session_id.to_string();
+        if self.sess_state.is_active(&session_id) {
+            if self.actor.close_session().await.is_err() {
+                resp.respond_with_error(Error::internal_error())?;
+                return Ok(());
+            }
+            let closed = match self.replies.recv().await {
+                Some(CommandReply::SessionClosed(result)) => result.is_ok(),
+                Some(_) | None => false,
+            };
+            if !closed {
+                resp.respond_with_error(Error::internal_error())?;
+                return Ok(());
+            }
+            self.sess_state.clear();
+            self.pending_prompts.cancel();
+        }
+
+        if Session::delete(&session_id).is_err() {
+            resp.respond_with_error(Error::internal_error())?;
+            return Ok(());
+        }
+
+        self.sess_state.remove(&session_id);
+        reply(resp, DeleteSessionResponse::new())
     }
 
     pub async fn handle_session_close(
