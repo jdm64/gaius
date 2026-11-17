@@ -85,7 +85,7 @@ impl SessState {
 }
 
 enum PendingPrompt {
-    Waiting(Responder),
+    Waiting(Box<Responder>),
     Cancelled,
 }
 
@@ -100,7 +100,7 @@ impl PendingPrompts {
             .0
             .lock()
             .unwrap()
-            .insert(msg_id, PendingPrompt::Waiting(responder));
+            .insert(msg_id, PendingPrompt::Waiting(Box::new(responder)));
         self.arc.1.notify_waiters();
     }
 
@@ -112,7 +112,7 @@ impl PendingPrompts {
             let slot = self.arc.0.lock().unwrap().remove(&msg_id);
             match slot {
                 Some(PendingPrompt::Waiting(responder)) => {
-                    let _ = reply(responder, PromptResponse::new(msg_id.to_string()));
+                    let _ = reply(*responder, PromptResponse::new(msg_id.to_string()));
                     return;
                 }
                 Some(PendingPrompt::Cancelled) => return,
@@ -122,7 +122,7 @@ impl PendingPrompts {
     }
 
     fn cancel(&self) {
-        let responders: Vec<Responder> = {
+        let responders: Vec<Box<Responder>> = {
             let mut prompts = self.arc.0.lock().unwrap();
             prompts
                 .values_mut()
@@ -365,7 +365,7 @@ impl ACPEngine {
                 if data.protocol_version != ProtocolVersion::V2 {
                     let err = SchemaError::unsupported_protocol_version(
                         data.protocol_version,
-                        &vec![ProtocolVersion::V2],
+                        &[ProtocolVersion::V2],
                     );
                     resp.respond_with_error(err.into())?;
                 } else {
@@ -465,7 +465,7 @@ impl ACPEngine {
         cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
         let do_replay = match data.replay_from {
-            Some(from) if matches!(from, ReplayFrom::Start(_)) => true,
+            Some(ReplayFrom::Start(_)) => true,
             Some(_) => {
                 resp.respond_with_error(Error::invalid_params())?;
                 return Ok(());
