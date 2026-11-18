@@ -5,50 +5,66 @@
 use crate::{
     acp::{
         message::*,
-        state::{PendingPrompts, SessState},
+        state::{PendingPrompts, SessState, SharedSessionId},
     },
-    actor::{CommandReply, HarnessActorClient, HarnessEvent},
+    actor::{CommandReply, HarnessActorClient, HarnessCommand, HarnessEvent, HarnessRxHandle},
     config::Config,
     harness::Harness,
     session::Session,
 };
 use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
 use core::error::Error as CoreError;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
-pub struct ACPSetup {
+pub struct ConnectionState {
     pub engine: ACPEngine,
     pub events: UnboundedReceiver<HarnessEvent>,
+    pub actor_tx: Sender<HarnessCommand>,
+    pub session_id: SharedSessionId,
+    pub pending_prompts: PendingPrompts,
+}
+
+impl ConnectionState {
+    fn create_client(
+        config: &Config,
+    ) -> Result<(HarnessActorClient, HarnessRxHandle), Box<dyn CoreError>> {
+        let harness = Harness::new(config, None)?;
+        Ok(HarnessActorClient::new(harness)?)
+    }
+
+    pub fn build(config: &Config) -> Result<ConnectionState, Error> {
+        let (actor, actor_rx) = Self::create_client(config)
+            .map_err(|err| Error::internal_error().data(err.to_string()))?;
+        let sess_state = SessState::default();
+        let pending_prompts = PendingPrompts::default();
+        let engine = ACPEngine {
+            actor,
+            replies: actor_rx.replies,
+            sess_state,
+            pending_prompts,
+        };
+        let actor_tx = engine.actor.clone_tx();
+        let session_id = engine.sess_state.clone_active();
+        let pending_prompts = engine.pending_prompts.clone();
+
+        Ok(ConnectionState {
+            engine,
+            events: actor_rx.events,
+            actor_tx,
+            session_id,
+            pending_prompts,
+        })
+    }
 }
 
 pub struct ACPEngine {
     pub actor: HarnessActorClient,
-    replies: UnboundedReceiver<CommandReply>,
+    pub replies: UnboundedReceiver<CommandReply>,
     pub sess_state: SessState,
     pub pending_prompts: PendingPrompts,
 }
 
 impl ACPEngine {
-    pub async fn setup() -> Result<ACPSetup, Box<dyn CoreError>> {
-        let mut config = Config::new();
-        config.load().await?;
-
-        let harness = Harness::new(&config, None)?;
-        let (actor, actor_rx) = HarnessActorClient::new(harness)?;
-        let sess_state = SessState::default();
-        let pending_prompts = PendingPrompts::default();
-
-        Ok(ACPSetup {
-            engine: Self {
-                actor,
-                replies: actor_rx.replies,
-                sess_state,
-                pending_prompts,
-            },
-            events: actor_rx.events,
-        })
-    }
-
     pub async fn handle_request(
         &mut self,
         req: ACPRequest,

@@ -13,7 +13,7 @@ use tokio::sync::{
     oneshot,
 };
 
-pub trait ACPEventProtocol {
+pub trait ACPEventProtocol: Send + Sync {
     fn on_prompt(&self, msg_id: u32, resp: Box<Responder>);
     fn on_message(&self, sess_id: String, msg: &HarnessMsg, cx: &ConnectionTo<Client>);
     fn on_ask_user(

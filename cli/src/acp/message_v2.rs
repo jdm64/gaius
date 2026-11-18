@@ -71,6 +71,15 @@ pub struct InitializeV2 {
 }
 
 impl InitializeV2 {
+    pub fn check_version(version: ProtocolVersion) -> Result<(), Error> {
+        if version != ProtocolVersion::V2 {
+            let err = SchemaError::unsupported_protocol_version(version, &[ProtocolVersion::V2]);
+            Err(err.into())
+        } else {
+            Ok(())
+        }
+    }
+
     fn build_init() -> InitializeResponse {
         let ver = Implementation::new("gaius", env!("GIT_VERSION"));
         let msg = InitializeResponse::new(ProtocolVersion::V2, ver);
@@ -83,12 +92,8 @@ impl InitializeV2 {
 
 impl Initialize for InitializeV2 {
     fn respond(self: Box<Self>, resp: Responder) -> Result<(), Error> {
-        if self.data.protocol_version != ProtocolVersion::V2 {
-            let err = SchemaError::unsupported_protocol_version(
-                self.data.protocol_version,
-                &[ProtocolVersion::V2],
-            );
-            resp.respond_with_error(err.into())
+        if let Err(err) = Self::check_version(self.data.protocol_version) {
+            resp.respond_with_error(err)
         } else {
             reply(resp, Self::build_init())
         }
