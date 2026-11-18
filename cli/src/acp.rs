@@ -8,7 +8,6 @@ pub mod event_protocol_v2;
 pub mod message;
 pub mod message_v2;
 pub mod state;
-pub mod util;
 
 use crate::acp::{
     engine::{ACPEngine, ACPSetup},
@@ -16,11 +15,17 @@ use crate::acp::{
     event_protocol_v2::EventProtocolV2,
 };
 use agent_client_protocol::{
-    Agent, Client, ConnectionTo, Dispatch, Error, HandleDispatchFrom, Handled, Stdio,
+    Agent, Client, ConnectionTo, Dispatch, Error, HandleDispatchFrom, Handled, JsonRpcResponse,
+    Responder, Stdio,
     v2::schema::{ClientNotification, ClientRequest},
 };
 use core::error::Error as CoreError;
+use serde_json::Value;
 use std::fmt::Debug;
+
+pub fn reply<T: JsonRpcResponse>(r: Responder<Value>, resp: T) -> Result<(), Error> {
+    r.cast::<T>().respond(resp)
+}
 
 impl HandleDispatchFrom<Client> for ACPEngine {
     async fn handle_dispatch_from(

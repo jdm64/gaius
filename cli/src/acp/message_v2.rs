@@ -3,11 +3,7 @@
  */
 
 use crate::{
-    acp::{
-        event_protocol_v2::EventProtocolV2,
-        message::*,
-        util::{abs_path, reply, reply_no_session},
-    },
+    acp::{event_protocol_v2::EventProtocolV2, message::*, reply},
     harness::HarnessMsg,
     session::Session,
 };
@@ -18,6 +14,18 @@ use agent_client_protocol::{
 };
 use chrono::Utc;
 use std::path::PathBuf;
+
+pub fn reply_no_session(resp: Responder, id: SessionId) -> Result<(), Error> {
+    resp.respond_with_error(SchemaError::session_not_found(id).into())
+}
+
+pub fn abs_path(path: Option<AbsolutePath>) -> Result<Option<PathBuf>, String> {
+    match path {
+        Some(p) if p.0.is_absolute() => Ok(Some(p.0)),
+        None => Ok(None),
+        _ => Err("Absolute path required".into()),
+    }
+}
 
 impl From<ClientRequest> for ACPRequest {
     fn from(req: ClientRequest) -> Self {
