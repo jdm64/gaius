@@ -4,6 +4,7 @@
 
 use crate::{
     acp::{
+        event_protocol_v2::EventProtocolV2,
         message::*,
         util::{abs_path, reply, reply_no_session},
     },
@@ -156,7 +157,7 @@ impl ResumeSession for ResumeSessionV2 {
 
     fn send_replay(&self, cx: &ConnectionTo<Client>, session_id: &str, messages: &[HarnessMsg]) {
         messages.iter().for_each(|m| {
-            if let Some(update) = m.to_update(session_id) {
+            if let Some(update) = EventProtocolV2::to_update(m, session_id) {
                 let _ = cx.send_notification(update);
             }
         });

@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{acp::util::reply, session::Session};
-use agent_client_protocol::{Error, Responder, v2::schema::PromptResponse};
+use crate::{acp::event_handler::ACPEventProtocol, session::Session};
+use agent_client_protocol::{Error, Responder};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
@@ -69,7 +69,7 @@ impl PendingPrompts {
         self.arc.1.notify_waiters();
     }
 
-    pub async fn respond(&self, msg_id: u32) {
+    pub async fn respond(&self, msg_id: u32, protocol: &dyn ACPEventProtocol) {
         loop {
             let notified = self.arc.1.notified();
             tokio::pin!(notified);
@@ -77,7 +77,7 @@ impl PendingPrompts {
             let slot = self.arc.0.lock().unwrap().remove(&msg_id);
             match slot {
                 Some(PendingPrompt::Waiting(responder)) => {
-                    let _ = reply(*responder, PromptResponse::new(msg_id.to_string()));
+                    protocol.on_prompt(msg_id, responder);
                     return;
                 }
                 Some(PendingPrompt::Cancelled) => return,

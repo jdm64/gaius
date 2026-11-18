@@ -4,6 +4,7 @@
 
 pub mod engine;
 pub mod event_handler;
+pub mod event_protocol_v2;
 pub mod message;
 pub mod message_v2;
 pub mod state;
@@ -12,6 +13,7 @@ pub mod util;
 use crate::acp::{
     engine::{ACPEngine, ACPSetup},
     event_handler::ACPEventHandler,
+    event_protocol_v2::EventProtocolV2,
 };
 use agent_client_protocol::{
     Agent, Client, ConnectionTo, Dispatch, Error, HandleDispatchFrom, Handled, Stdio,
@@ -69,7 +71,8 @@ pub async fn run_acp() -> Result<(), Box<dyn CoreError>> {
         .name("gaius")
         .with_handler(engine)
         .connect_with(Stdio::default(), async move |cx| {
-            ACPEventHandler::new(events, actor_tx, session_id, pending_prompts)
+            let protocol = Box::new(EventProtocolV2 {});
+            ACPEventHandler::new(events, actor_tx, session_id, pending_prompts, protocol)
                 .run(cx.into())
                 .await;
             Ok(())
