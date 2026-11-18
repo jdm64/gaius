@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{acp::event_handler::ACPEventProtocol, session::Session};
+use crate::{acp::event::ACPEventProtocol, session::Session};
 use agent_client_protocol::{Error, Responder};
 use std::{
     collections::{HashMap, HashSet},

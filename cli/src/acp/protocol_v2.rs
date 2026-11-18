@@ -5,8 +5,8 @@
 use crate::{
     acp::{
         engine::{ACPEngine, ConnectionState},
-        event_handler::ACPEventHandler,
-        event_protocol_v2::EventProtocolV2,
+        event::ACPEventHandler,
+        event_v2::EventProtocolV2,
     },
     config::Config,
 };

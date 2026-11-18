@@ -3,8 +3,8 @@
  */
 
 pub mod engine;
-pub mod event_handler;
-pub mod event_protocol_v2;
+pub mod event;
+pub mod event_v2;
 pub mod message;
 pub mod message_v2;
 pub mod protocol_v2;

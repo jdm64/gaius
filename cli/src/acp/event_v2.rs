@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    acp::{event_handler::ACPEventProtocol, reply},
+    acp::{event::ACPEventProtocol, reply},
     actor::FinishedReason,
     harness::HarnessMsg,
     tool_engine::ToolStatus,

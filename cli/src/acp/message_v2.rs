@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    acp::{event_protocol_v2::EventProtocolV2, message::*, reply},
+    acp::{event_v2::EventProtocolV2, message::*, reply},
     harness::HarnessMsg,
     session::Session,
 };
