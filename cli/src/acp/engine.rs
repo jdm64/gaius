@@ -4,20 +4,16 @@
 
 use crate::{
     acp::{
+        message::*,
         state::{PendingPrompts, SessState},
-        util::{abs_path, reply, reply_no_session},
     },
     actor::{CommandReply, HarnessActorClient, HarnessEvent},
     config::Config,
     harness::Harness,
     session::Session,
 };
-use agent_client_protocol::{
-    Client, ConnectionTo, Error, Responder,
-    schema::ProtocolVersion,
-    v2::schema::{Error as SchemaError, *},
-};
-use chrono::Utc;
+use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
+use core::error::Error as CoreError;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct ACPSetup {
@@ -33,7 +29,7 @@ pub struct ACPEngine {
 }
 
 impl ACPEngine {
-    pub async fn setup() -> Result<ACPSetup, Box<dyn core::error::Error>> {
+    pub async fn setup() -> Result<ACPSetup, Box<dyn CoreError>> {
         let mut config = Config::new();
         config.load().await?;
 
@@ -55,44 +51,25 @@ impl ACPEngine {
 
     pub async fn handle_request(
         &mut self,
-        req: ClientRequest,
+        req: ACPRequest,
         resp: Responder,
         cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
         match req {
-            ClientRequest::InitializeRequest(data) => {
-                if data.protocol_version != ProtocolVersion::V2 {
-                    let err = SchemaError::unsupported_protocol_version(
-                        data.protocol_version,
-                        &[ProtocolVersion::V2],
-                    );
-                    resp.respond_with_error(err.into())?;
+            ACPRequest::Initialize(data) => data.respond(resp)?,
+            ACPRequest::ListSessions(data) => self.handle_session_list(data, resp).await?,
+            ACPRequest::NewSession(data) => self.handle_session_new(data, resp).await?,
+            ACPRequest::ResumeSession(data) => self.handle_session_resume(data, resp, cx).await?,
+            ACPRequest::CloseSession(data) => self.handle_session_close(data, resp).await?,
+            ACPRequest::DeleteSession(data) => self.handle_session_delete(data, resp).await?,
+            ACPRequest::SetConfig(data) => {
+                if !self.sess_state.is_active(&data.session_id()) {
+                    data.session_not_found(resp)?;
                 } else {
-                    reply(resp, Self::build_init())?;
+                    data.respond(resp)?;
                 }
             }
-            ClientRequest::ListSessionsRequest(data) => {
-                self.handle_session_list(data, resp).await?
-            }
-            ClientRequest::NewSessionRequest(data) => self.handle_session_new(data, resp).await?,
-            ClientRequest::ResumeSessionRequest(data) => {
-                self.handle_session_resume(data, resp, cx).await?
-            }
-            ClientRequest::CloseSessionRequest(data) => {
-                self.handle_session_close(data, resp).await?;
-            }
-            ClientRequest::DeleteSessionRequest(data) => {
-                self.handle_session_delete(data, resp).await?;
-            }
-            ClientRequest::SetSessionConfigOptionRequest(data) => {
-                if !self.sess_state.is_active_id(&data.session_id) {
-                    reply_no_session(resp, data.session_id)?;
-                } else {
-                    // TODO implement real config options
-                    reply(resp, SetSessionConfigOptionResponse::new(vec![]))?;
-                }
-            }
-            ClientRequest::PromptRequest(data) => self.handle_prompt(data, resp).await?,
+            ACPRequest::Prompt(data) => self.handle_prompt(data, resp).await?,
             _ => resp.respond_with_error(Error::method_not_found())?,
         }
         Ok(())
@@ -100,38 +77,31 @@ impl ACPEngine {
 
     pub async fn handle_session_list(
         &mut self,
-        data: Box<ListSessionsRequest>,
+        data: Box<dyn ListSessions>,
         resp: Responder,
     ) -> Result<(), Error> {
-        if data.cursor.is_some() {
+        if data.has_cursor() {
             resp.respond_with_error(Error::invalid_params())?;
             return Ok(());
         }
-        let Ok(cwd) = abs_path(data.cwd) else {
+        let Ok(cwd) = data.cwd() else {
             resp.respond_with_error(Error::invalid_params())?;
             return Ok(());
         };
         let sessions = Session::list(cwd.as_deref());
-        let info = sessions
-            .into_iter()
-            .filter_map(|session| {
-                let id = session.id?;
-                Some(SessionInfo::new(id, session.proj).title(session.name))
-            })
-            .collect();
-        reply(resp, ListSessionsResponse::new(info))
+        data.respond(resp, sessions)
     }
 
     pub async fn handle_session_new(
         &mut self,
-        data: Box<NewSessionRequest>,
+        data: Box<dyn NewSession>,
         resp: Responder,
     ) -> Result<(), Error> {
-        if !data.mcp_servers.is_empty() {
+        if data.has_mcp() {
             resp.respond_with_error(Error::invalid_params())?;
             return Ok(());
         }
-        let Ok(cwd) = abs_path(Some(data.cwd)) else {
+        let Ok(cwd) = data.cwd() else {
             resp.respond_with_error(Error::invalid_params())?;
             return Ok(());
         };
@@ -143,12 +113,11 @@ impl ACPEngine {
 
         match self.replies.recv().await {
             Some(CommandReply::SessionCreated(Ok(snapshot))) => {
-                if let Some(session_id) = snapshot.session_id {
-                    self.sess_state.set(&session_id);
-                    reply(resp, NewSessionResponse::new(session_id))
-                } else {
-                    resp.respond_with_error(Error::internal_error())
+                let session_id = snapshot.session_id.clone();
+                if let Some(id) = &session_id {
+                    self.sess_state.set(id);
                 }
+                data.respond(resp, session_id)
             }
             Some(CommandReply::SessionCreated(Err(_))) | Some(CommandReply::Busy(_)) | None => {
                 resp.respond_with_error(Error::internal_error())
@@ -159,23 +128,18 @@ impl ACPEngine {
 
     pub async fn handle_session_resume(
         &mut self,
-        data: Box<ResumeSessionRequest>,
+        data: Box<dyn ResumeSession>,
         resp: Responder,
         cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
-        let do_replay = match data.replay_from {
-            Some(ReplayFrom::Start(_)) => true,
-            Some(_) => {
-                resp.respond_with_error(Error::invalid_params())?;
-                return Ok(());
-            }
-            None => false,
+        let Some(do_replay) = data.do_replay() else {
+            resp.respond_with_error(Error::invalid_params())?;
+            return Ok(());
         };
 
-        let session_id = data.session_id.to_string();
+        let session_id = data.session_id();
         if self.sess_state.is_unknown(&session_id) {
-            reply_no_session(resp, data.session_id)?;
-            return Ok(());
+            return data.session_not_found(resp);
         }
 
         if self.actor.load_session(session_id.clone()).await.is_err() {
@@ -201,11 +165,7 @@ impl ACPEngine {
 
             match self.replies.recv().await {
                 Some(CommandReply::HistoryReplayed(messages)) => {
-                    messages.iter().for_each(|m| {
-                        if let Some(update) = m.to_update(&session_id) {
-                            let _ = cx.send_notification(update);
-                        }
-                    });
+                    data.send_replay(&cx, &session_id, &messages);
                 }
                 Some(CommandReply::Busy(_)) | Some(_) | None => {
                     resp.respond_with_error(Error::internal_error())?;
@@ -214,32 +174,15 @@ impl ACPEngine {
             }
         }
 
-        let complete = SessionUpdate::ReplayComplete(ReplayComplete::new());
-        let update = UpdateSessionNotification::new(session_id.clone(), complete);
-        let _ = cx.send_notification(update);
-
-        let idle = IdleStateUpdate::new().stop_reason(StopReason::EndTurn);
-        let state = SessionUpdate::StateUpdate(StateUpdate::Idle(idle));
-        let update = UpdateSessionNotification::new(session_id.clone(), state);
-        let _ = cx.send_notification(update);
-
-        let mut info = SessionInfoUpdate::new().updated_at(Utc::now().to_rfc3339());
-        if let Ok(title) = Session::name(&session_id) {
-            info = info.title(title);
-        }
-        let update = SessionUpdate::SessionInfoUpdate(info);
-        let update = UpdateSessionNotification::new(session_id, update);
-        let _ = cx.send_notification(update);
-
-        reply(resp, ResumeSessionResponse::new())
+        data.finish(resp, &cx, &session_id)
     }
 
     pub async fn handle_session_delete(
         &mut self,
-        data: Box<DeleteSessionRequest>,
+        data: Box<dyn DeleteSession>,
         resp: Responder,
     ) -> Result<(), Error> {
-        let session_id = data.session_id.to_string();
+        let session_id = data.session_id();
         if self.sess_state.is_active(&session_id) {
             if self.actor.close_session().await.is_err() {
                 resp.respond_with_error(Error::internal_error())?;
@@ -263,17 +206,17 @@ impl ACPEngine {
         }
 
         self.sess_state.remove(&session_id);
-        reply(resp, DeleteSessionResponse::new())
+        data.success(resp)
     }
 
     pub async fn handle_session_close(
         &mut self,
-        data: Box<CloseSessionRequest>,
+        data: Box<dyn CloseSession>,
         resp: Responder,
     ) -> Result<(), Error> {
-        if !self.sess_state.is_active_id(&data.session_id) {
-            reply(resp, CloseSessionResponse::new())?;
-            return Ok(());
+        let session_id = data.session_id();
+        if !self.sess_state.is_active(&session_id) {
+            return data.success(resp);
         }
         if self.actor.close_session().await.is_err() {
             resp.respond_with_error(Error::internal_error())?;
@@ -286,7 +229,7 @@ impl ACPEngine {
         if closed {
             self.sess_state.clear();
             self.pending_prompts.cancel();
-            reply(resp, CloseSessionResponse::new())
+            data.success(resp)
         } else {
             resp.respond_with_error(Error::internal_error())
         }
@@ -294,43 +237,17 @@ impl ACPEngine {
 
     pub async fn handle_prompt(
         &mut self,
-        data: Box<PromptRequest>,
+        data: Box<dyn Prompt>,
         resp: Responder,
     ) -> Result<(), Error> {
-        if !self.sess_state.is_active_id(&data.session_id) {
-            reply_no_session(resp, data.session_id)?;
-            return Ok(());
+        if !self.sess_state.is_active(&data.session_id()) {
+            return data.session_not_found(resp);
         }
 
-        let mut text_blocks = Vec::new();
-        let mut attachments = Vec::new();
-        for block in data.prompt {
-            match block {
-                ContentBlock::Text(text) => {
-                    text_blocks.push(text.text);
-                }
-                ContentBlock::ResourceLink(link) => match serde_json::to_string(&link) {
-                    Ok(link) => attachments.push(link),
-                    Err(_) => {
-                        resp.respond_with_error(Error::internal_error())?;
-                        return Ok(());
-                    }
-                },
-                _ => {
-                    resp.respond_with_error(Error::invalid_params())?;
-                    return Ok(());
-                }
-            }
-        }
-
-        let mut prompt = text_blocks.join("\n\n");
-        if !attachments.is_empty() {
-            if !prompt.is_empty() {
-                prompt.push_str("\n\n");
-            }
-            prompt.push_str("Attachments:\n");
-            prompt.push_str(&attachments.join("\n"));
-        }
+        let prompt = match data.build_prompt() {
+            Ok(p) => p,
+            Err(err) => return resp.respond_with_error(err),
+        };
 
         if self.actor.run_prompt(prompt).await.is_err() {
             return resp.respond_with_error(Error::internal_error());
@@ -345,22 +262,13 @@ impl ACPEngine {
         }
     }
 
-    pub async fn handle_notification(&self, note: ClientNotification, _cx: ConnectionTo<Client>) {
+    pub async fn handle_notification(&self, note: ACPNotification, _cx: ConnectionTo<Client>) {
         match note {
-            ClientNotification::CancelSessionNotification(_) => {
+            ACPNotification::CancelSession => {
                 self.pending_prompts.cancel();
                 let _ = self.actor.cancel().await;
             }
-            _ => { /* Ignore */ }
+            ACPNotification::Other => { /* Ignore */ }
         }
-    }
-
-    fn build_init() -> InitializeResponse {
-        let ver = Implementation::new("gaius", env!("GIT_VERSION"));
-        let msg = InitializeResponse::new(ProtocolVersion::V2, ver);
-        let sess = SessionCapabilities::new().delete(SessionDeleteCapabilities::new());
-        let auth = AgentAuthCapabilities::new();
-        let cap = AgentCapabilities::new().session(sess).auth(auth);
-        msg.capabilities(cap)
     }
 }

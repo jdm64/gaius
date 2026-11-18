@@ -51,9 +51,7 @@ impl HarnessMsg {
                 ToolCallUpdate::new(call_id.clone())
                     .name(name.clone())
                     .title(name.clone())
-                    .raw_input(
-                        serde_json::from_str(arguments).unwrap_or(Value::String(arguments.clone())),
-                    )
+                    .raw_input(Value::String(arguments.clone()))
                     .status(ToolCallStatus::InProgress),
             ),
             HarnessMsg::ToolResult {

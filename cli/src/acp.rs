@@ -4,6 +4,8 @@
 
 pub mod engine;
 pub mod event_handler;
+pub mod message;
+pub mod message_v2;
 pub mod state;
 pub mod util;
 
@@ -15,6 +17,7 @@ use agent_client_protocol::{
     Agent, Client, ConnectionTo, Dispatch, Error, HandleDispatchFrom, Handled, Stdio,
     v2::schema::{ClientNotification, ClientRequest},
 };
+use core::error::Error as CoreError;
 use std::fmt::Debug;
 
 impl HandleDispatchFrom<Client> for ACPEngine {
@@ -25,7 +28,7 @@ impl HandleDispatchFrom<Client> for ACPEngine {
     ) -> Result<Handled<Dispatch>, Error> {
         let message = match message.into_request::<ClientRequest>()? {
             Ok((req, responder)) => {
-                self.handle_request(req, responder, cx).await?;
+                self.handle_request(req.into(), responder, cx).await?;
                 return Ok(Handled::Yes);
             }
             Err(message) => message,
@@ -33,7 +36,7 @@ impl HandleDispatchFrom<Client> for ACPEngine {
 
         let message = match message.into_notification::<ClientNotification>()? {
             Ok(notif) => {
-                self.handle_notification(notif, cx).await;
+                self.handle_notification(notif.into(), cx).await;
                 return Ok(Handled::Yes);
             }
             Err(message) => message,
@@ -50,7 +53,7 @@ impl HandleDispatchFrom<Client> for ACPEngine {
     }
 }
 
-pub async fn run_acp() -> Result<(), Box<dyn core::error::Error>> {
+pub async fn run_acp() -> Result<(), Box<dyn CoreError>> {
     let ACPSetup { engine, events } = match ACPEngine::setup().await {
         Ok(setup) => setup,
         Err(error) => {

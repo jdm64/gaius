@@ -3,10 +3,7 @@
  */
 
 use crate::{acp::util::reply, session::Session};
-use agent_client_protocol::{
-    Error, Responder,
-    v2::schema::{PromptResponse, SessionId},
-};
+use agent_client_protocol::{Error, Responder, v2::schema::PromptResponse};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
@@ -41,10 +38,6 @@ impl SessState {
 
     pub fn is_unknown(&self, sess_id: &str) -> bool {
         !self.is_active(sess_id) && !self.known.contains(sess_id) && !Session::exists(sess_id)
-    }
-
-    pub fn is_active_id(&self, id: &SessionId) -> bool {
-        self.is_active(&id.to_string())
     }
 
     pub fn clear(&mut self) {
