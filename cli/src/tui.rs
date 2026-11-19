@@ -325,7 +325,9 @@ impl TuiApp {
                     selected: 0,
                 };
             }
-            HarnessEvent::TurnFinished { snapshot, status, .. } => {
+            HarnessEvent::TurnFinished {
+                snapshot, status, ..
+            } => {
                 self.finish_last_timer();
                 self.save_snapshot(&snapshot);
                 match status {

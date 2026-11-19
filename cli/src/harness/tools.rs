@@ -32,12 +32,12 @@ impl Harness {
             let status = result.status();
             match result {
                 ToolResult::Question(title, options) => {
-                    let answer =
-                        on_event(HarnessMsg::AskUser {
-                            call_id: tc.call_id.to_string(),
-                            title,
-                            options,
-                        }).unwrap_or_default();
+                    let answer = on_event(HarnessMsg::AskUser {
+                        call_id: tc.call_id.to_string(),
+                        title,
+                        options,
+                    })
+                    .unwrap_or_default();
                     self.send_tool_result_event(tc, answer, status, on_event);
                 }
                 ToolResult::Text(text) => {
