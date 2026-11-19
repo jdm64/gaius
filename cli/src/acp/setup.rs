@@ -11,6 +11,7 @@ use crate::{
     actor::{HarnessActorClient, HarnessCommand, HarnessEvent, HarnessRxHandle},
     config::Config,
     harness::Harness,
+    models::Models,
 };
 use agent_client_protocol::Error;
 use core::error::Error as CoreError;
@@ -25,18 +26,29 @@ pub struct ConnectionState {
 }
 
 impl ConnectionState {
-    fn create_client(
+    async fn create_client(
         config: &Config,
     ) -> Result<(HarnessActorClient, HarnessRxHandle), Box<dyn CoreError>> {
-        let harness = Harness::new(config, None)?;
+        let mut harness = Harness::new(config, None)?;
+
+        let models_cache = Models::list(config).await?;
+        if let Some(recent_model) = Models::first_from_recent(&models_cache) {
+            harness.set_model(recent_model).await?;
+        } else {
+            let config_model = Models::first_from_config(config, &models_cache).ok();
+            if let Some(config_model) = config_model {
+                harness.set_model(config_model).await?;
+            }
+        }
         Ok(HarnessActorClient::new(harness)?)
     }
 
-    pub fn build(
+    pub async fn build(
         config: &Config,
         protocol: Box<dyn ACPProtocol>,
     ) -> Result<ConnectionState, Error> {
         let (actor, actor_rx) = Self::create_client(config)
+            .await
             .map_err(|err| Error::internal_error().data(err.to_string()))?;
         let sess_state = SessState::default();
         let prompts = PendingPrompts::default();

@@ -199,7 +199,7 @@ impl OAuthHandle {
                     .downcast_ref::<TokenError>()
                     .is_some_and(TokenError::is_permanent)
                 {
-                    self.forget().await?;
+                    self.forget()?;
                 }
 
                 return Err(err);
@@ -210,7 +210,7 @@ impl OAuthHandle {
         self.save_token().await
     }
 
-    async fn forget(&self) -> Result<(), Box<dyn Error>> {
+    fn forget(&self) -> Result<(), Box<dyn Error>> {
         self.set_token(None);
         OAuthFile::delete(self.spec.id)?;
         Ok(())

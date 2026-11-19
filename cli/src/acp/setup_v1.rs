@@ -4,8 +4,7 @@
 
 use crate::{
     acp::{
-        engine::ACPEngine, event::ACPEventHandler, protocol_v1::ProtocolV1,
-        setup::ConnectionState,
+        engine::ACPEngine, event::ACPEventHandler, protocol_v1::ProtocolV1, setup::ConnectionState,
     },
     config::Config,
 };
@@ -28,7 +27,7 @@ impl ACPSetupV1 {
 
 impl ConnectTo<Client> for ACPSetupV1 {
     async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), Error> {
-        let state = ConnectionState::build(&self.config, Box::new(ProtocolV1))?;
+        let state = ConnectionState::build(&self.config, Box::new(ProtocolV1)).await?;
 
         Agent
             .v1()

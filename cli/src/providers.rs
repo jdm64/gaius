@@ -181,16 +181,18 @@ impl ProviderDef {
             .build()?;
 
         let urls = self.models_list_urls()?;
-        let mut last_error: Option<Box<dyn Error>> = None;
+        let mut last_error: Option<String> = None;
 
         for url in urls {
             match self.fetch_models(&client, url).await {
                 Ok(models) => return Ok(models),
-                Err(err) => last_error = Some(err),
+                Err(err) => last_error = Some(err.to_string()),
             }
         }
 
-        Err(last_error.unwrap_or_else(|| "No model URLs generated".into()))
+        Err(last_error
+            .unwrap_or_else(|| "No model URLs generated".into())
+            .into())
     }
 
     pub fn models_list_urls(&self) -> Result<Vec<Url>, Box<dyn Error>> {
