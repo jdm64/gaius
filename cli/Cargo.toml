@@ -3,6 +3,12 @@ name = "gaius"
 version = "0.5.3"
 edition = "2024"
 
+[profile.release]
+opt-level = "z"
+#lto = "thin"
+panic = "abort"
+strip = true
+
 [dependencies]
 agent-client-protocol = { version = "5", features = [
     "stdio",
