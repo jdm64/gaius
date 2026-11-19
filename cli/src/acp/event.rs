@@ -32,6 +32,8 @@ pub trait ACPEventProtocol: Send + Sync {
         cx: &ConnectionTo<Client>,
     );
 
+    fn on_cancel(&self, responders: Vec<Box<Responder>>);
+
     fn on_turn_finished(
         &self,
         sess_id: String,

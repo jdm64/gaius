@@ -9,7 +9,7 @@ use crate::{
     tool_engine::ToolStatus,
 };
 use agent_client_protocol::{
-    Client, ConnectionTo, Responder,
+    Client, ConnectionTo, Error, Responder,
     v2::schema::{Error as SchemaError, *},
 };
 use serde_json::Value;
@@ -136,6 +136,12 @@ impl ACPEventProtocol for EventProtocolV2 {
             };
             let _ = answer_tx.send(answer);
         });
+    }
+
+    fn on_cancel(&self, responders: Vec<Box<Responder>>) {
+        for responder in responders {
+            let _ = responder.respond_with_error(Error::request_cancelled());
+        }
     }
 
     fn on_turn_finished(

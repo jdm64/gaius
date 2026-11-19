@@ -99,6 +99,12 @@ impl ACPEventProtocol for EventProtocolV1 {
         let _ = tx.send(String::new());
     }
 
+    fn on_cancel(&self, mut responders: Vec<Box<Responder>>) {
+        if let Some(responder) = responders.drain(..).next() {
+            let _ = reply(*responder, PromptResponse::new(StopReason::Cancelled));
+        }
+    }
+
     fn on_turn_finished(
         &self,
         _sess_id: String,

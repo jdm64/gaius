@@ -4,6 +4,7 @@
 
 use crate::{
     acp::{
+        event::ACPEventProtocol,
         message::*,
         state::{PendingPrompts, SessState, SharedSessionId},
     },
@@ -32,7 +33,10 @@ impl ConnectionState {
         Ok(HarnessActorClient::new(harness)?)
     }
 
-    pub fn build(config: &Config) -> Result<ConnectionState, Error> {
+    pub fn build(
+        config: &Config,
+        protocol: Box<dyn ACPEventProtocol>,
+    ) -> Result<ConnectionState, Error> {
         let (actor, actor_rx) = Self::create_client(config)
             .map_err(|err| Error::internal_error().data(err.to_string()))?;
         let sess_state = SessState::default();
@@ -43,6 +47,7 @@ impl ConnectionState {
             sess_state,
             prompts,
             initialized: false,
+            protocol,
         };
         let actor_tx = engine.actor.clone_tx();
         let session_id = engine.sess_state.clone_active();
@@ -64,9 +69,14 @@ pub struct ACPEngine {
     pub sess_state: SessState,
     pub prompts: PendingPrompts,
     initialized: bool,
+    pub protocol: Box<dyn ACPEventProtocol>,
 }
 
 impl ACPEngine {
+    fn cancel_prompts(&self) {
+        self.prompts.cancel(self.protocol.as_ref());
+    }
+
     pub async fn handle_request(
         &mut self,
         req: ACPRequest,
@@ -225,7 +235,7 @@ impl ACPEngine {
                 return Ok(());
             }
             self.sess_state.clear();
-            self.prompts.cancel();
+            self.cancel_prompts();
         }
 
         if Session::delete(&session_id).is_err() {
@@ -256,7 +266,7 @@ impl ACPEngine {
         };
         if closed {
             self.sess_state.clear();
-            self.prompts.cancel();
+            self.cancel_prompts();
             data.success(resp)
         } else {
             resp.respond_with_error(Error::internal_error())
@@ -293,7 +303,7 @@ impl ACPEngine {
     pub async fn handle_notification(&self, note: ACPNotification, _cx: ConnectionTo<Client>) {
         match note {
             ACPNotification::CancelSession => {
-                self.prompts.cancel();
+                self.cancel_prompts();
                 let _ = self.actor.cancel().await;
             }
             ACPNotification::Other => { /* Ignore */ }

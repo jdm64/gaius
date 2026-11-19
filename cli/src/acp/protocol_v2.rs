@@ -29,20 +29,19 @@ impl ACPSetupV2 {
 
 impl ConnectTo<Client> for ACPSetupV2 {
     async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), Error> {
-        let state = ConnectionState::build(&self.config)?;
+        let state = ConnectionState::build(&self.config, Box::new(EventProtocolV2))?;
 
         Agent
             .v2()
             .name("gaius")
             .with_handler(ACPDispatchV2::new(state.engine))
             .connect_with(client, async move |cx| {
-                let protocol = Box::new(EventProtocolV2);
                 let handler = ACPEventHandler::new(
                     state.events,
                     state.actor_tx,
                     state.session_id,
                     state.prompts,
-                    protocol,
+                    Box::new(EventProtocolV2),
                 );
                 handler.run(cx.into()).await;
                 Ok(())

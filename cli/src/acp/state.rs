@@ -3,7 +3,7 @@
  */
 
 use crate::{acp::event::ACPEventProtocol, session::Session};
-use agent_client_protocol::{Error, Responder};
+use agent_client_protocol::Responder;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
@@ -110,22 +110,24 @@ impl PendingPrompts {
         }
     }
 
-    pub fn cancel(&self) {
+    pub fn cancel(&self, protocol: &dyn ACPEventProtocol) {
         let responders: Vec<Box<Responder>> = {
             let mut prompts = self.arc.0.lock().unwrap();
-            prompts
-                .values_mut()
-                .filter_map(
-                    |slot| match std::mem::replace(slot, PendingPrompt::Cancelled) {
-                        PendingPrompt::Waiting(responder) => Some(responder),
-                        PendingPrompt::Cancelled => None,
-                    },
-                )
+            let mut responders = prompts
+                .drain()
+                .filter_map(|(msg_id, prompt)| match prompt {
+                    PendingPrompt::Waiting(responder) => Some((msg_id, responder)),
+                    PendingPrompt::Cancelled => None,
+                })
+                .collect::<Vec<_>>();
+            responders.sort_by_key(|(msg_id, _)| *msg_id);
+            responders
+                .into_iter()
+                .map(|(_, responder)| responder)
                 .collect()
         };
-        for responder in responders {
-            let _ = responder.respond_with_error(Error::request_cancelled());
-        }
+
+        protocol.on_cancel(responders);
         self.arc.1.notify_waiters();
     }
 }
