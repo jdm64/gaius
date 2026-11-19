@@ -42,6 +42,7 @@ impl ConnectionState {
             replies: actor_rx.replies,
             sess_state,
             pending_prompts,
+            initialized: false,
         };
         let actor_tx = engine.actor.clone_tx();
         let session_id = engine.sess_state.clone_active();
@@ -62,6 +63,7 @@ pub struct ACPEngine {
     pub replies: UnboundedReceiver<CommandReply>,
     pub sess_state: SessState,
     pub pending_prompts: PendingPrompts,
+    initialized: bool,
 }
 
 impl ACPEngine {
@@ -71,8 +73,16 @@ impl ACPEngine {
         resp: Responder,
         cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
+        if !self.initialized && !matches!(&req, ACPRequest::Initialize(_)) {
+            resp.respond_with_error(Error::invalid_request())?;
+            return Ok(());
+        }
+
         match req {
-            ACPRequest::Initialize(data) => data.respond(resp)?,
+            ACPRequest::Initialize(data) => {
+                data.respond(resp)?;
+                self.initialized = true;
+            }
             ACPRequest::ListSessions(data) => self.handle_session_list(data, resp).await?,
             ACPRequest::NewSession(data) => self.handle_session_new(data, resp).await?,
             ACPRequest::ResumeSession(data) => self.handle_session_resume(data, resp, cx).await?,
@@ -167,8 +177,10 @@ impl ACPEngine {
             Some(CommandReply::SessionLoaded(Ok(_))) => {
                 self.sess_state.set(&session_id);
             }
-            Some(CommandReply::SessionLoaded(Err(_))) | Some(_) | None => {
-                resp.respond_with_error(Error::internal_error())?;
+            err => {
+                // TODO V1 fails with this:
+                // Some(Busy(\"Agent is busy; wait for idle before running this command\"))"}
+                resp.respond_with_error(Error::internal_error().data(format!("{:?}", err)))?;
                 return Ok(());
             }
         }

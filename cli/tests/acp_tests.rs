@@ -12,6 +12,7 @@ use gaius::{
     acp::{
         message::{ACPNotification, ACPRequest},
         message_v2::InitializeV2,
+        protocol_v1::ACPSetupV1,
         protocol_v2::ACPSetupV2,
     },
     config::Config,
@@ -21,6 +22,10 @@ use std::{sync::Arc, time::Duration};
 /// The agent under test only speaks protocol v2.
 fn setup() -> ACPSetupV2 {
     ACPSetupV2::new(Arc::new(Config::default()))
+}
+
+fn setup_v1() -> ACPSetupV1 {
+    ACPSetupV1::new(Arc::new(Config::default()))
 }
 
 #[tokio::test]
@@ -57,6 +62,40 @@ async fn v1_client_gets_an_unsupported_protocol_version_error() {
     assert_eq!(data["supported"], serde_json::json!([2]));
 
     // The client is done, so the connection closes and the agent shuts down.
+    let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
+}
+
+#[tokio::test]
+async fn v1_client_routes_to_the_v1_handler() {
+    let (client, agent) = Channel::duplex();
+
+    let server = tokio::spawn(async move {
+        Agent
+            .protocol_router()
+            .with_v1(setup_v1())
+            .with_v2(setup())
+            .connect_to(agent)
+            .await
+    });
+
+    let response = Client
+        .v1()
+        .connect_with(client, async |cx| {
+            cx.send_request(InitializeRequestV1::new(ProtocolVersion::V1))
+                .block_task()
+                .await
+        })
+        .await
+        .expect("v1 client initializes with v1");
+    assert_eq!(response.protocol_version, ProtocolVersion::V1);
+    assert_eq!(response.agent_info.expect("agent info").name, "gaius");
+    let capabilities = response.agent_capabilities;
+    assert!(capabilities.session_capabilities.list.is_some());
+    assert!(capabilities.session_capabilities.resume.is_some());
+    assert!(capabilities.session_capabilities.close.is_some());
+    assert!(capabilities.session_capabilities.delete.is_some());
+    assert!(!capabilities.load_session);
+
     let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
 }
 

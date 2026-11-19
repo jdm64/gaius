@@ -4,13 +4,19 @@
 
 pub mod engine;
 pub mod event;
+pub mod event_v1;
 pub mod event_v2;
 pub mod message;
+pub mod message_v1;
 pub mod message_v2;
+pub mod protocol_v1;
 pub mod protocol_v2;
 pub mod state;
 
-use crate::{acp::protocol_v2::ACPSetupV2, config::Config};
+use crate::{
+    acp::{protocol_v1::ACPSetupV1, protocol_v2::ACPSetupV2},
+    config::Config,
+};
 use agent_client_protocol::{Agent, ConnectTo, Error, JsonRpcResponse, Responder, Stdio};
 use core::error::Error as CoreError;
 use serde_json::Value;
@@ -27,6 +33,7 @@ pub async fn run_acp() -> Result<(), Box<dyn CoreError>> {
 
     Agent
         .protocol_router()
+        .with_v1(ACPSetupV1::new(config.clone()))
         .with_v2(ACPSetupV2::new(config))
         .connect_to(Stdio::default())
         .await?;
