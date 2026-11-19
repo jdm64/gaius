@@ -106,12 +106,24 @@ impl ACPEventProtocol for EventProtocolV1 {
         pending: &PendingPrompts,
         _cx: &ConnectionTo<Client>,
     ) {
+        let mut error = None;
         let reason = match status {
             FinishedReason::Done => StopReason::EndTurn,
             FinishedReason::Cancel => StopReason::Cancelled,
-            FinishedReason::Error(_) => StopReason::Cancelled,
+            FinishedReason::Error(e) => {
+                error = Some(e);
+                StopReason::Cancelled
+            }
         };
+
         let msg = PromptResponse::new(reason);
+        let msg = if let Some(error_msg) = error {
+            let mut data = Meta::new();
+            data.insert("error".to_string(), error_msg.into());
+            msg.meta(data)
+        } else {
+            msg
+        };
 
         pending.ack_first(|responder| {
             let _ = reply(*responder, msg);
