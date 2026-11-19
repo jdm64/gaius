@@ -4,72 +4,23 @@
 
 use crate::{
     acp::{
-        event::ACPEventProtocol,
         message::*,
-        state::{PendingPrompts, SessState, SharedSessionId},
+        protocol::ACPProtocol,
+        state::{PendingPrompts, SessState},
     },
-    actor::{CommandReply, HarnessActorClient, HarnessCommand, HarnessEvent, HarnessRxHandle},
-    config::Config,
-    harness::Harness,
+    actor::{CommandReply, HarnessActorClient},
     session::Session,
 };
 use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
-use core::error::Error as CoreError;
-use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-
-pub struct ConnectionState {
-    pub engine: ACPEngine,
-    pub events: UnboundedReceiver<HarnessEvent>,
-    pub actor_tx: Sender<HarnessCommand>,
-    pub session_id: SharedSessionId,
-    pub prompts: PendingPrompts,
-}
-
-impl ConnectionState {
-    fn create_client(
-        config: &Config,
-    ) -> Result<(HarnessActorClient, HarnessRxHandle), Box<dyn CoreError>> {
-        let harness = Harness::new(config, None)?;
-        Ok(HarnessActorClient::new(harness)?)
-    }
-
-    pub fn build(
-        config: &Config,
-        protocol: Box<dyn ACPEventProtocol>,
-    ) -> Result<ConnectionState, Error> {
-        let (actor, actor_rx) = Self::create_client(config)
-            .map_err(|err| Error::internal_error().data(err.to_string()))?;
-        let sess_state = SessState::default();
-        let prompts = PendingPrompts::default();
-        let engine = ACPEngine {
-            actor,
-            replies: actor_rx.replies,
-            sess_state,
-            prompts,
-            initialized: false,
-            protocol,
-        };
-        let actor_tx = engine.actor.clone_tx();
-        let session_id = engine.sess_state.clone_active();
-        let prompts = engine.prompts.clone();
-
-        Ok(ConnectionState {
-            engine,
-            events: actor_rx.events,
-            actor_tx,
-            session_id,
-            prompts,
-        })
-    }
-}
+use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct ACPEngine {
     pub actor: HarnessActorClient,
     pub replies: UnboundedReceiver<CommandReply>,
     pub sess_state: SessState,
     pub prompts: PendingPrompts,
-    initialized: bool,
-    pub protocol: Box<dyn ACPEventProtocol>,
+    pub initialized: bool,
+    pub protocol: Box<dyn ACPProtocol>,
 }
 
 impl ACPEngine {

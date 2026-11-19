@@ -12,8 +12,8 @@ use gaius::{
     acp::{
         message::{ACPNotification, ACPRequest},
         message_v2::InitializeV2,
-        protocol_v1::ACPSetupV1,
-        protocol_v2::ACPSetupV2,
+        setup_v1::ACPSetupV1,
+        setup_v2::ACPSetupV2,
     },
     config::Config,
 };

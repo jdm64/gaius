@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    acp::{event_v1::EventProtocolV1, message::*, reply},
+    acp::{message::*, protocol_v1::ProtocolV1, reply},
     harness::HarnessMsg,
     session::Session,
 };
@@ -188,7 +188,7 @@ impl ResumeSession for ResumeSessionV1 {
 
     fn send_replay(&self, cx: &ConnectionTo<Client>, session_id: &str, messages: &[HarnessMsg]) {
         messages.iter().for_each(|m| {
-            if let Some(update) = EventProtocolV1::to_update(m, session_id) {
+            if let Some(update) = ProtocolV1::to_update(m, session_id) {
                 let _ = cx.send_notification(update);
             }
         });
@@ -223,7 +223,7 @@ impl ResumeSession for LoadSessionV1 {
 
     fn send_replay(&self, cx: &ConnectionTo<Client>, session_id: &str, messages: &[HarnessMsg]) {
         messages.iter().for_each(|m| {
-            if let Some(update) = EventProtocolV1::to_update(m, session_id) {
+            if let Some(update) = ProtocolV1::to_update(m, session_id) {
                 let _ = cx.send_notification(update);
             }
         });

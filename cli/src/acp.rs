@@ -4,17 +4,19 @@
 
 pub mod engine;
 pub mod event;
-pub mod event_v1;
-pub mod event_v2;
 pub mod message;
 pub mod message_v1;
 pub mod message_v2;
+pub mod protocol;
 pub mod protocol_v1;
 pub mod protocol_v2;
+pub mod setup;
+pub mod setup_v1;
+pub mod setup_v2;
 pub mod state;
 
 use crate::{
-    acp::{protocol_v1::ACPSetupV1, protocol_v2::ACPSetupV2},
+    acp::{setup_v1::ACPSetupV1, setup_v2::ACPSetupV2},
     config::Config,
 };
 use agent_client_protocol::{Agent, ConnectTo, Error, JsonRpcResponse, Responder, Stdio};

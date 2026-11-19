@@ -3,52 +3,22 @@
  */
 
 use crate::{
-    acp::state::{PendingPrompts, SessState, SharedSessionId},
-    actor::{FinishedReason, HarnessActorClient, HarnessCommand, HarnessEvent},
+    acp::{
+        protocol::ACPProtocol,
+        state::{PendingPrompts, SessState, SharedSessionId},
+    },
+    actor::{HarnessActorClient, HarnessCommand, HarnessEvent},
     harness::HarnessMsg,
 };
-use agent_client_protocol::{Client, ConnectionTo, Responder};
-use tokio::sync::{
-    mpsc::{Sender, UnboundedReceiver},
-    oneshot,
-};
-
-pub trait ACPEventProtocol: Send + Sync {
-    fn ack_prompt(&self, msg_id: u32, resp: Box<Responder>);
-
-    fn is_ack_prompt(&self) -> bool {
-        true
-    }
-
-    fn on_message(&self, sess_id: String, msg: &HarnessMsg, cx: &ConnectionTo<Client>);
-
-    fn on_ask_user(
-        &self,
-        sess_id: String,
-        call_id: String,
-        title: String,
-        options: Vec<String>,
-        answer_tx: oneshot::Sender<String>,
-        cx: &ConnectionTo<Client>,
-    );
-
-    fn on_cancel(&self, responders: Vec<Box<Responder>>);
-
-    fn on_turn_finished(
-        &self,
-        sess_id: String,
-        status: FinishedReason,
-        pending: &PendingPrompts,
-        cx: &ConnectionTo<Client>,
-    );
-}
+use agent_client_protocol::{Client, ConnectionTo};
+use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
 pub struct ACPEventHandler {
     events: UnboundedReceiver<HarnessEvent>,
     tx: Sender<HarnessCommand>,
     session_id: SharedSessionId,
     prompts: PendingPrompts,
-    protocol: Box<dyn ACPEventProtocol>,
+    protocol: Box<dyn ACPProtocol>,
 }
 
 impl ACPEventHandler {
@@ -57,7 +27,7 @@ impl ACPEventHandler {
         tx: Sender<HarnessCommand>,
         session_id: SharedSessionId,
         prompts: PendingPrompts,
-        protocol: Box<dyn ACPEventProtocol>,
+        protocol: Box<dyn ACPProtocol>,
     ) -> Self {
         Self {
             events,

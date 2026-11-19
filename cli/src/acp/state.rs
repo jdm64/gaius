@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{acp::event::ACPEventProtocol, session::Session};
+use crate::{acp::protocol::ACPProtocol, session::Session};
 use agent_client_protocol::Responder;
 use std::{
     collections::{HashMap, HashSet},
@@ -93,7 +93,7 @@ impl PendingPrompts {
         }
     }
 
-    pub async fn ack(&self, msg_id: u32, protocol: &dyn ACPEventProtocol) {
+    pub async fn ack(&self, msg_id: u32, protocol: &dyn ACPProtocol) {
         loop {
             let notified = self.arc.1.notified();
             tokio::pin!(notified);
@@ -110,7 +110,7 @@ impl PendingPrompts {
         }
     }
 
-    pub fn cancel(&self, protocol: &dyn ACPEventProtocol) {
+    pub fn cancel(&self, protocol: &dyn ACPProtocol) {
         let responders: Vec<Box<Responder>> = {
             let mut prompts = self.arc.0.lock().unwrap();
             let mut responders = prompts

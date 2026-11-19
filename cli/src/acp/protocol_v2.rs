@@ -3,94 +3,169 @@
  */
 
 use crate::{
-    acp::{
-        engine::{ACPEngine, ConnectionState},
-        event::ACPEventHandler,
-        event_v2::EventProtocolV2,
-    },
-    config::Config,
+    acp::{protocol::ACPProtocol, reply, state::PendingPrompts},
+    actor::FinishedReason,
+    harness::HarnessMsg,
+    tool_engine::ToolStatus,
 };
 use agent_client_protocol::{
-    Agent, Client, ConnectTo, ConnectionTo, Dispatch, Error, HandleDispatchFrom, Handled,
-    v2::schema::{ClientNotification, ClientRequest},
+    Client, ConnectionTo, Error, Responder,
+    v2::schema::{Error as SchemaError, *},
 };
-use core::fmt::Debug;
-use std::sync::Arc;
+use serde_json::Value;
+use tokio::sync::oneshot;
 
-pub struct ACPSetupV2 {
-    config: Arc<Config>,
-}
+pub struct ProtocolV2;
 
-impl ACPSetupV2 {
-    pub fn new(config: Arc<Config>) -> Self {
-        Self { config }
-    }
-}
-
-impl ConnectTo<Client> for ACPSetupV2 {
-    async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), Error> {
-        let state = ConnectionState::build(&self.config, Box::new(EventProtocolV2))?;
-
-        Agent
-            .v2()
-            .name("gaius")
-            .with_handler(ACPDispatchV2::new(state.engine))
-            .connect_with(client, async move |cx| {
-                let handler = ACPEventHandler::new(
-                    state.events,
-                    state.actor_tx,
-                    state.session_id,
-                    state.prompts,
-                    Box::new(EventProtocolV2),
-                );
-                handler.run(cx.into()).await;
-                Ok(())
-            })
-            .await
-    }
-}
-
-pub struct ACPDispatchV2 {
-    engine: ACPEngine,
-}
-
-impl ACPDispatchV2 {
-    pub fn new(engine: ACPEngine) -> Self {
-        Self { engine }
-    }
-}
-
-impl HandleDispatchFrom<Client> for ACPDispatchV2 {
-    async fn handle_dispatch_from(
-        &mut self,
-        message: Dispatch,
-        cx: ConnectionTo<Client>,
-    ) -> Result<Handled<Dispatch>, Error> {
-        let message = match message.into_request::<ClientRequest>()? {
-            Ok((req, responder)) => {
-                self.engine
-                    .handle_request(req.into(), responder, cx)
-                    .await?;
-                return Ok(Handled::Yes);
+impl ProtocolV2 {
+    pub fn to_update(msg: &HarnessMsg, session_id: &str) -> Option<UpdateSessionNotification> {
+        let text = |value: String| ContentBlock::Text(TextContent::new(value));
+        let update = match msg {
+            HarnessMsg::TurnStarted(_) => {
+                SessionUpdate::StateUpdate(StateUpdate::Running(RunningStateUpdate::new()))
             }
-            Err(message) => message,
-        };
-
-        let message = match message.into_notification::<ClientNotification>()? {
-            Ok(notif) => {
-                self.engine.handle_notification(notif.into(), cx).await;
-                return Ok(Handled::Yes);
+            HarnessMsg::TurnDuration(_) => return None,
+            HarnessMsg::UserPrompt { msg_id, content } => SessionUpdate::UserMessage(
+                UserMessage::new(msg_id.to_string()).content(vec![text(content.clone())]),
+            ),
+            HarnessMsg::AgentMessage { msg_id, content }
+            | HarnessMsg::PlanMessage { msg_id, content } => SessionUpdate::AgentMessage(
+                AgentMessage::new(msg_id.to_string()).content(vec![text(content.clone())]),
+            ),
+            HarnessMsg::AgentChunk { msg_id, content } => SessionUpdate::AgentMessageChunk(
+                ContentChunk::new(text(content.clone()), msg_id.to_string()),
+            ),
+            HarnessMsg::Thinking { msg_id, content } => SessionUpdate::AgentThought(
+                AgentThought::new(msg_id.to_string()).content(vec![text(content.clone())]),
+            ),
+            HarnessMsg::ThinkingChunk { msg_id, content } => SessionUpdate::AgentThoughtChunk(
+                ContentChunk::new(text(content.clone()), msg_id.to_string()),
+            ),
+            HarnessMsg::ToolCall {
+                call_id,
+                name,
+                arguments,
+                ..
+            } => SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new(call_id.clone())
+                    .name(name.clone())
+                    .title(name.clone())
+                    .raw_input(Value::String(arguments.clone()))
+                    .status(ToolCallStatus::InProgress),
+            ),
+            HarnessMsg::ToolResult {
+                call_id,
+                name,
+                result,
+                status,
+            } => {
+                let status = match status {
+                    ToolStatus::Valid => ToolCallStatus::Completed,
+                    ToolStatus::Error | ToolStatus::Failure => ToolCallStatus::Failed,
+                };
+                SessionUpdate::ToolCallUpdate(
+                    ToolCallUpdate::new(call_id.clone())
+                        .name(name.clone())
+                        .status(status)
+                        .raw_output(Value::String(result.clone())),
+                )
             }
-            Err(message) => message,
+            HarnessMsg::DiffView(_)
+            | HarnessMsg::TokenUsage { .. }
+            | HarnessMsg::AskUser { .. }
+            | HarnessMsg::SystemMessage(_) => return None,
+            HarnessMsg::CompactStart { msg_id, .. } => SessionUpdate::CompactionUpdate(
+                CompactionUpdate::new(msg_id.to_string(), CompactionStatus::InProgress),
+            ),
+            HarnessMsg::CompactSummary { msg_id, .. } => SessionUpdate::CompactionUpdate(
+                CompactionUpdate::new(msg_id.to_string(), CompactionStatus::Completed),
+            ),
+            HarnessMsg::QueueChanged(size) => SessionUpdate::Notice(Notice::new(
+                NoticeSeverity::Info,
+                format!("Queued prompts: {size}"),
+            )),
         };
+        Some(UpdateSessionNotification::new(session_id, update))
+    }
+}
 
-        Ok(Handled::No {
-            message,
-            retry: false,
-        })
+impl ACPProtocol for ProtocolV2 {
+    fn is_ack_prompt(&self) -> bool {
+        true
     }
 
-    fn describe_chain(&self) -> impl Debug {
-        "Gaius (ACP v2)"
+    fn ack_prompt(&self, msg_id: u32, resp: Box<Responder>) {
+        let msg = PromptResponse::new(msg_id.to_string());
+        let _ = reply(*resp, msg);
+    }
+
+    fn on_message(&self, session_id: String, msg: &HarnessMsg, cx: &ConnectionTo<Client>) {
+        if let Some(notification) = Self::to_update(msg, &session_id) {
+            let _ = cx.send_notification(notification);
+        }
+    }
+
+    fn on_ask_user(
+        &self,
+        session_id: String,
+        call_id: String,
+        title: String,
+        options: Vec<String>,
+        answer_tx: oneshot::Sender<String>,
+        cx: &ConnectionTo<Client>,
+    ) {
+        let scope = ElicitationSessionScope::new(session_id).tool_call_id(call_id.as_str());
+        let values = StringPropertySchema::new().enum_values(options);
+        let schema = ElicitationSchema::new()
+            .title(title.clone())
+            .property("choice", values, true);
+        let mode = ElicitationFormMode::new(ElicitationScope::Session(scope), schema);
+        let request = CreateElicitationRequest::new(ElicitationMode::Form(mode), title);
+        let sent = cx.send_request(request);
+        tokio::spawn(async move {
+            let answer = match sent.block_task().await {
+                Ok(response) => match response.action {
+                    ElicitationAction::Accept(accepted) => accepted
+                        .content
+                        .and_then(|content| content.get("choice").cloned())
+                        .and_then(|choice| serde_json::to_value(choice).ok())
+                        .and_then(|choice| choice.as_str().map(str::to_owned))
+                        .unwrap_or_default(),
+                    ElicitationAction::Decline
+                    | ElicitationAction::Cancel
+                    | ElicitationAction::Other(_) => String::new(),
+                    _ => String::new(),
+                },
+                Err(_) => String::new(),
+            };
+            let _ = answer_tx.send(answer);
+        });
+    }
+
+    fn on_cancel(&self, responders: Vec<Box<Responder>>) {
+        for responder in responders {
+            let _ = responder.respond_with_error(Error::request_cancelled());
+        }
+    }
+
+    fn on_turn_finished(
+        &self,
+        session_id: String,
+        status: FinishedReason,
+        _pending: &PendingPrompts,
+        cx: &ConnectionTo<Client>,
+    ) {
+        let idle_state = match status {
+            FinishedReason::Done => IdleStateUpdate::new().stop_reason(StopReason::EndTurn),
+            FinishedReason::Error(msg) => {
+                let error = SchemaError::internal_error().data(msg);
+                let reason = StopReason::Error(ErrorStopReason::new().error(error));
+                IdleStateUpdate::new().stop_reason(reason)
+            }
+            FinishedReason::Cancel => IdleStateUpdate::new().stop_reason(StopReason::Cancelled),
+        };
+        let update = SessionUpdate::StateUpdate(StateUpdate::Idle(idle_state));
+        let msg = UpdateSessionNotification::new(session_id, update);
+        let _ = cx.send_notification(msg);
     }
 }
