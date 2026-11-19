@@ -7,6 +7,14 @@ use agent_client_protocol::{Client, ConnectionTo, Responder};
 use tokio::sync::oneshot;
 
 pub trait ACPProtocol: Send + Sync {
+    fn send_error_notice(
+        &self,
+        title: String,
+        msg: String,
+        sess_id: String,
+        cx: &ConnectionTo<Client>,
+    );
+
     fn is_ack_prompt(&self) -> bool;
 
     fn ack_prompt(&self, msg_id: u32, resp: Box<Responder>);

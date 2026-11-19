@@ -90,6 +90,20 @@ impl ProtocolV2 {
 }
 
 impl ACPProtocol for ProtocolV2 {
+    fn send_error_notice(
+        &self,
+        title: String,
+        msg: String,
+        sess_id: String,
+        cx: &ConnectionTo<Client>,
+    ) {
+        let note = Notice::new(NoticeSeverity::Error, title).description(msg);
+        let _ = cx.send_notification(UpdateSessionNotification::new(
+            sess_id,
+            SessionUpdate::Notice(note),
+        ));
+    }
+
     fn is_ack_prompt(&self) -> bool {
         true
     }
@@ -158,6 +172,12 @@ impl ACPProtocol for ProtocolV2 {
         let idle_state = match status {
             FinishedReason::Done => IdleStateUpdate::new().stop_reason(StopReason::EndTurn),
             FinishedReason::Error(msg) => {
+                self.send_error_notice(
+                    "Request Failed".into(),
+                    msg.clone(),
+                    session_id.clone(),
+                    cx,
+                );
                 let error = SchemaError::internal_error().data(msg);
                 let reason = StopReason::Error(ErrorStopReason::new().error(error));
                 IdleStateUpdate::new().stop_reason(reason)

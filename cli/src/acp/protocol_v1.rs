@@ -73,6 +73,20 @@ impl ProtocolV1 {
 }
 
 impl ACPProtocol for ProtocolV1 {
+    fn send_error_notice(
+        &self,
+        title: String,
+        msg: String,
+        sess_id: String,
+        cx: &ConnectionTo<Client>,
+    ) {
+        let note = Notice::new(NoticeSeverity::Error, title).description(msg);
+        let _ = cx.send_notification(SessionNotification::new(
+            sess_id,
+            SessionUpdate::Notice(note),
+        ));
+    }
+
     fn is_ack_prompt(&self) -> bool {
         false
     }
@@ -107,10 +121,10 @@ impl ACPProtocol for ProtocolV1 {
 
     fn on_turn_finished(
         &self,
-        _sess_id: String,
+        sess_id: String,
         status: FinishedReason,
         pending: &PendingPrompts,
-        _cx: &ConnectionTo<Client>,
+        cx: &ConnectionTo<Client>,
     ) {
         let mut error = None;
         let reason = match status {
@@ -124,6 +138,7 @@ impl ACPProtocol for ProtocolV1 {
 
         let msg = PromptResponse::new(reason);
         let msg = if let Some(error_msg) = error {
+            self.send_error_notice("Request Failed".into(), error_msg.clone(), sess_id, cx);
             let mut data = Meta::new();
             data.insert("error".to_string(), error_msg.into());
             msg.meta(data)
