@@ -101,8 +101,7 @@ impl InitializeV1 {
         let msg = InitializeResponse::new(ProtocolVersion::V1).agent_info(ver);
         let sess = SessionCapabilities::new()
             .list(SessionListCapabilities::new())
-            // TODO sync issue with restore
-            // .resume(SessionResumeCapabilities::new())
+            .resume(SessionResumeCapabilities::new())
             .close(SessionCloseCapabilities::new())
             .delete(SessionDeleteCapabilities::new());
         let auth = AgentAuthCapabilities::new();
