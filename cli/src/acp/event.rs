@@ -14,8 +14,14 @@ use tokio::sync::{
 };
 
 pub trait ACPEventProtocol: Send + Sync {
-    fn on_prompt(&self, msg_id: u32, resp: Box<Responder>);
+    fn ack_prompt(&self, msg_id: u32, resp: Box<Responder>);
+
+    fn is_ack_prompt(&self) -> bool {
+        true
+    }
+
     fn on_message(&self, sess_id: String, msg: &HarnessMsg, cx: &ConnectionTo<Client>);
+
     fn on_ask_user(
         &self,
         sess_id: String,
@@ -25,14 +31,21 @@ pub trait ACPEventProtocol: Send + Sync {
         answer_tx: oneshot::Sender<String>,
         cx: &ConnectionTo<Client>,
     );
-    fn on_turn_finished(&self, sess_id: String, status: FinishedReason, cx: &ConnectionTo<Client>);
+
+    fn on_turn_finished(
+        &self,
+        sess_id: String,
+        status: FinishedReason,
+        pending: &PendingPrompts,
+        cx: &ConnectionTo<Client>,
+    );
 }
 
 pub struct ACPEventHandler {
     events: UnboundedReceiver<HarnessEvent>,
     tx: Sender<HarnessCommand>,
     session_id: SharedSessionId,
-    pending_prompts: PendingPrompts,
+    prompts: PendingPrompts,
     protocol: Box<dyn ACPEventProtocol>,
 }
 
@@ -41,14 +54,14 @@ impl ACPEventHandler {
         events: UnboundedReceiver<HarnessEvent>,
         tx: Sender<HarnessCommand>,
         session_id: SharedSessionId,
-        pending_prompts: PendingPrompts,
+        prompts: PendingPrompts,
         protocol: Box<dyn ACPEventProtocol>,
     ) -> Self {
         Self {
             events,
             tx,
             session_id,
-            pending_prompts,
+            prompts,
             protocol,
         }
     }
@@ -76,12 +89,12 @@ impl ACPEventHandler {
                 let Some(session_id) = SessState::get(&self.session_id) else {
                     return;
                 };
-                if let HarnessMsg::UserPrompt { msg_id, .. } = &msg {
-                    self.pending_prompts
-                        .respond(*msg_id, self.protocol.as_ref())
-                        .await;
+                if self.protocol.is_ack_prompt()
+                    && let HarnessMsg::UserPrompt { msg_id, .. } = &msg
+                {
+                    self.prompts.ack(*msg_id, self.protocol.as_ref()).await;
                 }
-                self.protocol.on_message(session_id, &msg, &cx);
+                self.protocol.on_message(session_id, &msg, cx);
             }
             HarnessEvent::AskUser {
                 call_id,
@@ -94,18 +107,19 @@ impl ACPEventHandler {
                     return;
                 };
                 self.protocol
-                    .on_ask_user(session_id, call_id, title, options, answer_tx, &cx);
+                    .on_ask_user(session_id, call_id, title, options, answer_tx, cx);
             }
             HarnessEvent::TurnFinished { status, ack, .. } => {
                 let Some(session_id) = SessState::get(&self.session_id) else {
                     return;
                 };
-                self.protocol.on_turn_finished(session_id, status, &cx);
+                self.protocol
+                    .on_turn_finished(session_id, status, &self.prompts, cx);
                 if let Some(ack) = ack {
                     let _ = ack.send(());
                 }
             }
-            HarnessEvent::ShutdownComplete(_) => return,
+            HarnessEvent::ShutdownComplete(_) => {}
         }
     }
 }

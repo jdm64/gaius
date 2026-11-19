@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    acp::{event::ACPEventProtocol, reply},
+    acp::{event::ACPEventProtocol, reply, state::PendingPrompts},
     actor::FinishedReason,
     harness::HarnessMsg,
     tool_engine::ToolStatus,
@@ -90,7 +90,7 @@ impl EventProtocolV2 {
 }
 
 impl ACPEventProtocol for EventProtocolV2 {
-    fn on_prompt(&self, msg_id: u32, resp: Box<Responder>) {
+    fn ack_prompt(&self, msg_id: u32, resp: Box<Responder>) {
         let msg = PromptResponse::new(msg_id.to_string());
         let _ = reply(*resp, msg);
     }
@@ -142,6 +142,7 @@ impl ACPEventProtocol for EventProtocolV2 {
         &self,
         session_id: String,
         status: FinishedReason,
+        _pending: &PendingPrompts,
         cx: &ConnectionTo<Client>,
     ) {
         let idle_state = match status {

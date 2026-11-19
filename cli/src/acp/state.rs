@@ -69,7 +69,31 @@ impl PendingPrompts {
         self.arc.1.notify_waiters();
     }
 
-    pub async fn respond(&self, msg_id: u32, protocol: &dyn ACPEventProtocol) {
+    pub fn ack_first(&self, response: impl FnOnce(Box<Responder>)) {
+        let responders = {
+            let mut prompts = self.arc.0.lock().unwrap();
+            let first_id = prompts
+                .iter()
+                .filter_map(|(msg_id, prompt)| {
+                    matches!(prompt, PendingPrompt::Waiting(_)).then_some(*msg_id)
+                })
+                .min();
+            let mut responders = Vec::new();
+            if let Some(msg_id) = first_id
+                && let Some(PendingPrompt::Waiting(responder)) = prompts.remove(&msg_id)
+            {
+                responders.push(responder);
+            }
+            prompts.clear();
+            responders
+        };
+
+        if let Some(responder) = responders.into_iter().next() {
+            response(responder);
+        }
+    }
+
+    pub async fn ack(&self, msg_id: u32, protocol: &dyn ACPEventProtocol) {
         loop {
             let notified = self.arc.1.notified();
             tokio::pin!(notified);
@@ -77,7 +101,7 @@ impl PendingPrompts {
             let slot = self.arc.0.lock().unwrap().remove(&msg_id);
             match slot {
                 Some(PendingPrompt::Waiting(responder)) => {
-                    protocol.on_prompt(msg_id, responder);
+                    protocol.ack_prompt(msg_id, responder);
                     return;
                 }
                 Some(PendingPrompt::Cancelled) => return,

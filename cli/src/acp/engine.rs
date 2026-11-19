@@ -21,7 +21,7 @@ pub struct ConnectionState {
     pub events: UnboundedReceiver<HarnessEvent>,
     pub actor_tx: Sender<HarnessCommand>,
     pub session_id: SharedSessionId,
-    pub pending_prompts: PendingPrompts,
+    pub prompts: PendingPrompts,
 }
 
 impl ConnectionState {
@@ -36,24 +36,24 @@ impl ConnectionState {
         let (actor, actor_rx) = Self::create_client(config)
             .map_err(|err| Error::internal_error().data(err.to_string()))?;
         let sess_state = SessState::default();
-        let pending_prompts = PendingPrompts::default();
+        let prompts = PendingPrompts::default();
         let engine = ACPEngine {
             actor,
             replies: actor_rx.replies,
             sess_state,
-            pending_prompts,
+            prompts,
             initialized: false,
         };
         let actor_tx = engine.actor.clone_tx();
         let session_id = engine.sess_state.clone_active();
-        let pending_prompts = engine.pending_prompts.clone();
+        let prompts = engine.prompts.clone();
 
         Ok(ConnectionState {
             engine,
             events: actor_rx.events,
             actor_tx,
             session_id,
-            pending_prompts,
+            prompts,
         })
     }
 }
@@ -62,7 +62,7 @@ pub struct ACPEngine {
     pub actor: HarnessActorClient,
     pub replies: UnboundedReceiver<CommandReply>,
     pub sess_state: SessState,
-    pub pending_prompts: PendingPrompts,
+    pub prompts: PendingPrompts,
     initialized: bool,
 }
 
@@ -225,7 +225,7 @@ impl ACPEngine {
                 return Ok(());
             }
             self.sess_state.clear();
-            self.pending_prompts.cancel();
+            self.prompts.cancel();
         }
 
         if Session::delete(&session_id).is_err() {
@@ -256,7 +256,7 @@ impl ACPEngine {
         };
         if closed {
             self.sess_state.clear();
-            self.pending_prompts.cancel();
+            self.prompts.cancel();
             data.success(resp)
         } else {
             resp.respond_with_error(Error::internal_error())
@@ -283,7 +283,7 @@ impl ACPEngine {
 
         match self.replies.recv().await {
             Some(CommandReply::PromptQueued { msg_id, .. }) => {
-                self.pending_prompts.insert(msg_id, resp);
+                self.prompts.insert(msg_id, resp);
                 Ok(())
             }
             _ => resp.respond_with_error(Error::internal_error()),
@@ -293,7 +293,7 @@ impl ACPEngine {
     pub async fn handle_notification(&self, note: ACPNotification, _cx: ConnectionTo<Client>) {
         match note {
             ACPNotification::CancelSession => {
-                self.pending_prompts.cancel();
+                self.prompts.cancel();
                 let _ = self.actor.cancel().await;
             }
             ACPNotification::Other => { /* Ignore */ }

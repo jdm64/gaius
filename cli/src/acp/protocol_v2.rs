@@ -41,7 +41,7 @@ impl ConnectTo<Client> for ACPSetupV2 {
                     state.events,
                     state.actor_tx,
                     state.session_id,
-                    state.pending_prompts,
+                    state.prompts,
                     protocol,
                 );
                 handler.run(cx.into()).await;

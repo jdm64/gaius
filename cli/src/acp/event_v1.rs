@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    acp::{event::ACPEventProtocol, reply},
+    acp::{event::ACPEventProtocol, reply, state::PendingPrompts},
     actor::FinishedReason,
     harness::HarnessMsg,
     tool_engine::ToolStatus,
@@ -73,8 +73,12 @@ impl EventProtocolV1 {
 }
 
 impl ACPEventProtocol for EventProtocolV1 {
-    fn on_prompt(&self, _: u32, resp: Box<Responder>) {
-        let _ = reply(*resp, PromptResponse::new(StopReason::EndTurn));
+    fn ack_prompt(&self, _: u32, _: Box<Responder>) {
+        // V1 responds only when the turn finishes in on_turn_finished().
+    }
+
+    fn is_ack_prompt(&self) -> bool {
+        false
     }
 
     fn on_message(&self, session_id: String, msg: &HarnessMsg, cx: &ConnectionTo<Client>) {
@@ -95,5 +99,22 @@ impl ACPEventProtocol for EventProtocolV1 {
         let _ = tx.send(String::new());
     }
 
-    fn on_turn_finished(&self, _: String, _: FinishedReason, _: &ConnectionTo<Client>) {}
+    fn on_turn_finished(
+        &self,
+        _sess_id: String,
+        status: FinishedReason,
+        pending: &PendingPrompts,
+        _cx: &ConnectionTo<Client>,
+    ) {
+        let reason = match status {
+            FinishedReason::Done => StopReason::EndTurn,
+            FinishedReason::Cancel => StopReason::Cancelled,
+            FinishedReason::Error(_) => StopReason::Cancelled,
+        };
+        let msg = PromptResponse::new(reason);
+
+        pending.ack_first(|responder| {
+            let _ = reply(*responder, msg);
+        });
+    }
 }
