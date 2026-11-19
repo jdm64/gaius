@@ -40,6 +40,11 @@ impl From<ClientRequest> for ACPRequest {
             ClientRequest::NewSessionRequest(data) => Self::NewSession(Box::new(NewSessionV1 {
                 data: Box::new(data),
             })),
+            ClientRequest::LoadSessionRequest(data) => {
+                Self::ResumeSession(Box::new(LoadSessionV1 {
+                    data: Box::new(data),
+                }))
+            }
             ClientRequest::ResumeSessionRequest(data) => {
                 Self::ResumeSession(Box::new(ResumeSessionV1 {
                     data: Box::new(data),
@@ -197,6 +202,41 @@ impl ResumeSession for ResumeSessionV1 {
         _session_id: &str,
     ) -> Result<(), Error> {
         reply(resp, ResumeSessionResponse::new())
+    }
+}
+
+pub struct LoadSessionV1 {
+    data: Box<LoadSessionRequest>,
+}
+
+impl ResumeSession for LoadSessionV1 {
+    fn do_replay(&self) -> Option<bool> {
+        Some(true)
+    }
+
+    fn session_id(&self) -> String {
+        self.data.session_id.to_string()
+    }
+
+    fn session_not_found(&self, resp: Responder) -> Result<(), Error> {
+        reply_no_session(resp, self.data.session_id.clone())
+    }
+
+    fn send_replay(&self, cx: &ConnectionTo<Client>, session_id: &str, messages: &[HarnessMsg]) {
+        messages.iter().for_each(|m| {
+            if let Some(update) = EventProtocolV1::to_update(m, session_id) {
+                let _ = cx.send_notification(update);
+            }
+        });
+    }
+
+    fn finish(
+        &self,
+        resp: Responder,
+        _cx: &ConnectionTo<Client>,
+        _session_id: &str,
+    ) -> Result<(), Error> {
+        reply(resp, LoadSessionResponse::new())
     }
 }
 
