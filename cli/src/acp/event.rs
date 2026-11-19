@@ -61,37 +61,51 @@ impl ACPEventHandler {
                     break;
                 },
                 event = self.events.recv() => {
-                    let Some(event) = event else { break; };
-                    match event {
-                        HarnessEvent::Message(msg) => {
-                            let Some(session_id) = SessState::get(&self.session_id) else {
-                                break;
-                            };
-                            if let HarnessMsg::UserPrompt { msg_id, .. } = &msg {
-                                self.pending_prompts.respond(*msg_id, self.protocol.as_ref()).await;
-                            }
-                            self.protocol.on_message(session_id, &msg, &cx);
-                        }
-                        HarnessEvent::AskUser { call_id, title, options, answer_tx } => {
-                            let Some(session_id) = SessState::get(&self.session_id) else {
-                                let _ = answer_tx.send(String::new());
-                                break;
-                            };
-                            self.protocol.on_ask_user(session_id, call_id, title, options, answer_tx, &cx);
-                        }
-                        HarnessEvent::TurnFinished { status, ack, .. } => {
-                            let Some(session_id) = SessState::get(&self.session_id) else {
-                                break;
-                            };
-                            self.protocol.on_turn_finished(session_id, status, &cx);
-                            if let Some(ack) = ack {
-                                let _ = ack.send(());
-                            }
-                        }
-                        HarnessEvent::ShutdownComplete(_) => break
-                    }
+                    self.handle_events(event, &cx).await
                 }
             }
+        }
+    }
+
+    async fn handle_events(&self, event: Option<HarnessEvent>, cx: &ConnectionTo<Client>) {
+        let Some(event) = event else {
+            return;
+        };
+        match event {
+            HarnessEvent::Message(msg) => {
+                let Some(session_id) = SessState::get(&self.session_id) else {
+                    return;
+                };
+                if let HarnessMsg::UserPrompt { msg_id, .. } = &msg {
+                    self.pending_prompts
+                        .respond(*msg_id, self.protocol.as_ref())
+                        .await;
+                }
+                self.protocol.on_message(session_id, &msg, &cx);
+            }
+            HarnessEvent::AskUser {
+                call_id,
+                title,
+                options,
+                answer_tx,
+            } => {
+                let Some(session_id) = SessState::get(&self.session_id) else {
+                    let _ = answer_tx.send(String::new());
+                    return;
+                };
+                self.protocol
+                    .on_ask_user(session_id, call_id, title, options, answer_tx, &cx);
+            }
+            HarnessEvent::TurnFinished { status, ack, .. } => {
+                let Some(session_id) = SessState::get(&self.session_id) else {
+                    return;
+                };
+                self.protocol.on_turn_finished(session_id, status, &cx);
+                if let Some(ack) = ack {
+                    let _ = ack.send(());
+                }
+            }
+            HarnessEvent::ShutdownComplete(_) => return,
         }
     }
 }
