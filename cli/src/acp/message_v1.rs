@@ -106,6 +106,7 @@ impl InitializeV1 {
             .delete(SessionDeleteCapabilities::new());
         let auth = AgentAuthCapabilities::new();
         let cap = AgentCapabilities::new()
+            .load_session(true)
             .session_capabilities(sess)
             .auth(auth);
         msg.agent_capabilities(cap)

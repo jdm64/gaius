@@ -94,7 +94,7 @@ async fn v1_client_routes_to_the_v1_handler() {
     assert!(capabilities.session_capabilities.resume.is_some());
     assert!(capabilities.session_capabilities.close.is_some());
     assert!(capabilities.session_capabilities.delete.is_some());
-    assert!(!capabilities.load_session);
+    assert!(capabilities.load_session);
 
     let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
 }
