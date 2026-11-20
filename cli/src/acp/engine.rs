@@ -9,9 +9,13 @@ use crate::{
         state::{PendingPrompts, SessState},
     },
     actor::{CommandReply, HarnessActorClient},
+    config::Config,
+    models::{ModelDef, Models},
     session::Session,
 };
 use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
+use serde_json::json;
+use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct ACPEngine {
@@ -21,9 +25,45 @@ pub struct ACPEngine {
     pub prompts: PendingPrompts,
     pub initialized: bool,
     pub protocol: Box<dyn ACPProtocol>,
+    pub config: Arc<Config>,
+    pub models: Vec<ModelDef>,
+    pub curr_model: ModelDef,
 }
 
 impl ACPEngine {
+    pub fn model_config(&self) -> (String, Vec<(String, String)>) {
+        let selected = self.curr_model.key();
+        let options = self
+            .models
+            .iter()
+            .map(|model| (model.key(), model.label()))
+            .collect();
+        (selected, options)
+    }
+
+    pub async fn set_model(&mut self, key: String) -> Result<(), Error> {
+        let Some(model) = Models::lookup(key.clone(), &self.models) else {
+            return Err(Error::invalid_params().data(json!({
+                "configId": "model",
+                "value": key,
+            })));
+        };
+
+        self.actor
+            .set_model(model.clone())
+            .await
+            .map_err(|err| Error::internal_error().data(err))?;
+
+        match self.replies.recv().await {
+            Some(CommandReply::ModelSet(Ok(model))) => {
+                self.curr_model = model;
+                Ok(())
+            }
+            Some(CommandReply::ModelSet(Err(err))) => Err(Error::internal_error().data(err)),
+            _ => Err(Error::internal_error()),
+        }
+    }
+
     fn cancel_prompts(&self) {
         self.prompts.cancel(self.protocol.as_ref());
     }
@@ -48,17 +88,40 @@ impl ACPEngine {
             ACPRequest::ResumeSession(data) => self.handle_session_resume(data, resp, cx).await?,
             ACPRequest::CloseSession(data) => self.handle_session_close(data, resp).await?,
             ACPRequest::DeleteSession(data) => self.handle_session_delete(data, resp).await?,
-            ACPRequest::SetConfig(data) => {
-                if !self.sess_state.is_active(&data.session_id()) {
-                    data.session_not_found(resp)?;
-                } else {
-                    data.respond(resp)?;
-                }
-            }
+            ACPRequest::SetConfig(data) => self.handle_set_config(data, resp).await?,
             ACPRequest::Prompt(data) => self.handle_prompt(data, resp).await?,
             _ => resp.respond_with_error(Error::method_not_found())?,
         }
         Ok(())
+    }
+
+    pub async fn handle_set_config(
+        &mut self,
+        data: Box<dyn SetConfig>,
+        resp: Responder,
+    ) -> Result<(), Error> {
+        if !self.sess_state.is_active(&data.session_id()) {
+            data.session_not_found(resp)?;
+            return Ok(());
+        }
+        let (key, value) = data.entry();
+        match key.as_str() {
+            "model" => {
+                if let Err(err) = self.set_model(value).await {
+                    resp.respond_with_error(err)?;
+                    return Ok(());
+                }
+            }
+            _ => {
+                resp.respond_with_error(Error::invalid_params().data(json!({
+                    "configId": key,
+                    "value": value,
+                })))?;
+                return Ok(());
+            }
+        }
+
+        data.respond(resp, self)
     }
 
     pub async fn handle_session_list(
@@ -99,11 +162,12 @@ impl ACPEngine {
 
         match self.replies.recv().await {
             Some(CommandReply::SessionCreated(Ok(snapshot))) => {
+                self.curr_model = snapshot.model.clone();
                 let session_id = snapshot.session_id.clone();
                 if let Some(id) = &session_id {
                     self.sess_state.set(id);
                 }
-                data.respond(resp, session_id)
+                data.respond(resp, session_id, self)
             }
             Some(CommandReply::SessionCreated(Err(_))) | Some(CommandReply::Busy(_)) | None => {
                 resp.respond_with_error(Error::internal_error())
@@ -134,8 +198,9 @@ impl ACPEngine {
         }
 
         match self.replies.recv().await {
-            Some(CommandReply::SessionLoaded(Ok(_))) => {
+            Some(CommandReply::SessionLoaded(Ok(snapshot))) => {
                 self.sess_state.set(&session_id);
+                self.curr_model = snapshot.model;
             }
             err => {
                 // TODO V1 fails with this:
@@ -143,7 +208,7 @@ impl ACPEngine {
                 resp.respond_with_error(Error::internal_error().data(format!("{:?}", err)))?;
                 return Ok(());
             }
-        }
+        };
 
         if do_replay {
             if self.actor.replay_history().await.is_err() {
@@ -162,7 +227,7 @@ impl ACPEngine {
             }
         }
 
-        data.finish(resp, &cx, &session_id)
+        data.finish(resp, &cx, &session_id, self)
     }
 
     pub async fn handle_session_delete(

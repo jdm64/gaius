@@ -27,7 +27,7 @@ impl ACPSetupV2 {
 
 impl ConnectTo<Client> for ACPSetupV2 {
     async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), Error> {
-        let state = ConnectionState::build(&self.config, Box::new(ProtocolV2)).await?;
+        let state = ConnectionState::build(self.config, Box::new(ProtocolV2)).await?;
 
         Agent
             .v2()

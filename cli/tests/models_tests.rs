@@ -70,6 +70,28 @@ fn extracts_model_arrays() {
 }
 
 #[test]
+fn model_key_combines_provider_and_id() {
+    let model = model("local", "llama");
+
+    assert_eq!(model.key(), "local llama");
+}
+
+#[test]
+fn model_lookup_finds_matching_model() {
+    let expected = model("provider with spaces", "model-x");
+    let cache = vec![model("other", "model-y"), expected.clone()];
+
+    assert_eq!(Models::lookup(expected.key(), &cache), Some(&expected));
+}
+
+#[test]
+fn model_lookup_returns_none_when_not_found() {
+    let cache = vec![model("provider", "available")];
+
+    assert_eq!(Models::lookup("provider missing".to_string(), &cache), None);
+}
+
+#[test]
 fn model_label_puts_provider_in_brackets() {
     let model = model("local", "llama");
 

@@ -3,7 +3,7 @@
  */
 
 use crate::{
-    acp::{message::*, protocol_v2::ProtocolV2, reply},
+    acp::{engine::ACPEngine, message::*, protocol_v2::ProtocolV2, reply},
     harness::HarnessMsg,
     session::Session,
 };
@@ -24,6 +24,22 @@ pub fn abs_path(path: Option<AbsolutePath>) -> Result<Option<PathBuf>, String> {
         Some(p) if p.0.is_absolute() => Ok(Some(p.0)),
         None => Ok(None),
         _ => Err("Absolute path required".into()),
+    }
+}
+
+struct MsgBuilder;
+
+impl MsgBuilder {
+    pub fn models(engine: &ACPEngine) -> SessionConfigOption {
+        let (selected, options) = engine.model_config();
+        let options = options
+            .into_iter()
+            .map(|(value, name)| SessionConfigSelectOption::new(value, name))
+            .collect();
+        let options = SessionConfigSelectOptions::Ungrouped(options);
+        let select = SessionConfigSelect::new(selected, options);
+        SessionConfigOption::new("model", "Models", SessionConfigKind::Select(select))
+            .category(SessionConfigOptionCategory::Model)
     }
 }
 
@@ -140,9 +156,18 @@ impl NewSession for NewSessionV2 {
         abs_path(Some(self.data.cwd.clone()))
     }
 
-    fn respond(self: Box<Self>, resp: Responder, session_id: Option<String>) -> Result<(), Error> {
+    fn respond(
+        self: Box<Self>,
+        resp: Responder,
+        session_id: Option<String>,
+        engine: &ACPEngine,
+    ) -> Result<(), Error> {
         if let Some(session_id) = session_id {
-            reply(resp, NewSessionResponse::new(session_id))
+            let models = MsgBuilder::models(engine);
+            reply(
+                resp,
+                NewSessionResponse::new(session_id).config_options(vec![models]),
+            )
         } else {
             resp.respond_with_error(Error::internal_error())
         }
@@ -183,6 +208,7 @@ impl ResumeSession for ResumeSessionV2 {
         resp: Responder,
         cx: &ConnectionTo<Client>,
         session_id: &str,
+        engine: &ACPEngine,
     ) -> Result<(), Error> {
         let complete = SessionUpdate::ReplayComplete(ReplayComplete::new());
         let update = UpdateSessionNotification::new(session_id.to_string(), complete);
@@ -201,7 +227,11 @@ impl ResumeSession for ResumeSessionV2 {
         let update = UpdateSessionNotification::new(session_id.to_string(), update);
         let _ = cx.send_notification(update);
 
-        reply(resp, ResumeSessionResponse::new())
+        let models = MsgBuilder::models(engine);
+        reply(
+            resp,
+            ResumeSessionResponse::new().config_options(vec![models]),
+        )
     }
 }
 
@@ -246,9 +276,19 @@ impl SetConfig for SetSessionConfigOptionV2 {
         reply_no_session(resp, self.data.session_id.clone())
     }
 
-    fn respond(&self, resp: Responder) -> Result<(), Error> {
-        // TODO implement real config options
-        reply(resp, SetSessionConfigOptionResponse::new(vec![]))
+    fn entry(&self) -> (String, String) {
+        let key = self.data.config_id.to_string();
+        let value = match &self.data.value {
+            SessionConfigOptionValue::Boolean { value } => value.to_string(),
+            SessionConfigOptionValue::Id { value } => value.to_string(),
+            _ => "".into(),
+        };
+        (key, value)
+    }
+
+    fn respond(&self, resp: Responder, engine: &ACPEngine) -> Result<(), Error> {
+        let models = MsgBuilder::models(engine);
+        reply(resp, SetSessionConfigOptionResponse::new(vec![models]))
     }
 }
 

@@ -212,6 +212,10 @@ impl PickList<ModelPickerRow> {
 }
 
 impl ModelDef {
+    pub fn key(&self) -> String {
+        format!("{} {}", self.provider.name(), self.id)
+    }
+
     pub fn label(&self) -> String {
         format!("{} [{}]", self.id, self.provider.name())
     }
@@ -394,6 +398,13 @@ impl RecentModelDef {
 pub struct Models;
 
 impl Models {
+    pub fn lookup(key: String, cache: &[ModelDef]) -> Option<&ModelDef> {
+        let (provider, id) = key.rsplit_once(' ')?;
+        cache
+            .iter()
+            .find(|model| model.provider.name() == provider && model.id == id)
+    }
+
     pub fn first_from_config(
         config: &Config,
         cache: &[ModelDef],

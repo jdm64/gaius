@@ -11,10 +11,11 @@ use crate::{
     actor::{HarnessActorClient, HarnessCommand, HarnessEvent, HarnessRxHandle},
     config::Config,
     harness::Harness,
-    models::Models,
+    models::{ModelDef, Models},
 };
 use agent_client_protocol::Error;
 use core::error::Error as CoreError;
+use std::sync::Arc;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
 pub struct ConnectionState {
@@ -26,28 +27,30 @@ pub struct ConnectionState {
 }
 
 impl ConnectionState {
+    fn default_model(models: &[ModelDef], config: &Config) -> Option<ModelDef> {
+        Models::first_from_recent(models).or_else(|| Models::first_from_config(config, models).ok())
+    }
+
     async fn create_client(
+        model: &Option<ModelDef>,
         config: &Config,
     ) -> Result<(HarnessActorClient, HarnessRxHandle), Box<dyn CoreError>> {
         let mut harness = Harness::new(config, None)?;
-
-        let models_cache = Models::list(config).await?;
-        if let Some(recent_model) = Models::first_from_recent(&models_cache) {
-            harness.set_model(recent_model).await?;
-        } else {
-            let config_model = Models::first_from_config(config, &models_cache).ok();
-            if let Some(config_model) = config_model {
-                harness.set_model(config_model).await?;
-            }
+        if let Some(m) = model {
+            harness.set_model(m.clone()).await?;
         }
         Ok(HarnessActorClient::new(harness)?)
     }
 
     pub async fn build(
-        config: &Config,
+        config: Arc<Config>,
         protocol: Box<dyn ACPProtocol>,
     ) -> Result<ConnectionState, Error> {
-        let (actor, actor_rx) = Self::create_client(config)
+        let models = Models::list(config.as_ref())
+            .await
+            .map_err(|err| Error::internal_error().data(err.to_string()))?;
+        let curr_model = Self::default_model(&models, config.as_ref());
+        let (actor, actor_rx) = Self::create_client(&curr_model, config.as_ref())
             .await
             .map_err(|err| Error::internal_error().data(err.to_string()))?;
         let sess_state = SessState::default();
@@ -59,6 +62,9 @@ impl ConnectionState {
             prompts,
             initialized: false,
             protocol,
+            config: config.clone(),
+            models,
+            curr_model: curr_model.unwrap_or_default(),
         };
         let actor_tx = engine.actor.clone_tx();
         let session_id = engine.sess_state.clone_active();

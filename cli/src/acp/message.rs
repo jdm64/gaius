@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{harness::HarnessMsg, session::Session};
+use crate::{acp::engine::ACPEngine, harness::HarnessMsg, session::Session};
 use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
 use std::path::PathBuf;
 
@@ -36,7 +36,12 @@ pub trait ListSessions: Send {
 pub trait NewSession: Send {
     fn has_mcp(&self) -> bool;
     fn cwd(&self) -> Result<Option<PathBuf>, String>;
-    fn respond(self: Box<Self>, resp: Responder, session_id: Option<String>) -> Result<(), Error>;
+    fn respond(
+        self: Box<Self>,
+        resp: Responder,
+        session_id: Option<String>,
+        engine: &ACPEngine,
+    ) -> Result<(), Error>;
 }
 
 pub trait ResumeSession: Send {
@@ -49,6 +54,7 @@ pub trait ResumeSession: Send {
         resp: Responder,
         cx: &ConnectionTo<Client>,
         session_id: &str,
+        engine: &ACPEngine,
     ) -> Result<(), Error>;
 }
 
@@ -65,7 +71,8 @@ pub trait DeleteSession: Send {
 pub trait SetConfig: Send {
     fn session_id(&self) -> String;
     fn session_not_found(&self, resp: Responder) -> Result<(), Error>;
-    fn respond(&self, resp: Responder) -> Result<(), Error>;
+    fn entry(&self) -> (String, String);
+    fn respond(&self, resp: Responder, engine: &ACPEngine) -> Result<(), Error>;
 }
 
 pub trait Prompt: Send {
