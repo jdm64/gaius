@@ -3,7 +3,7 @@
  */
 
 use genai::chat::Tool;
-use serde_json::json;
+use serde_json::{Value, json};
 
 #[allow(non_upper_case_globals)]
 pub struct ArgName;
@@ -104,6 +104,28 @@ impl ToolName {
             ToolName::WebFetch => &[ArgName::Url],
             ToolName::WebSearch => &[ArgName::Query],
         }
+    }
+
+    pub fn desc(name: Option<ToolName>, args: &Value) -> String {
+        name.map_or_else(String::new, |tool| {
+            Self::arguments_json_fields(args, tool.display_fields())
+        })
+    }
+
+    fn arguments_json_fields(args: &Value, fields: &[&str]) -> String {
+        fields
+            .iter()
+            .filter_map(|&f| {
+                args.get(f).and_then(|v| {
+                    if v.is_string() {
+                        v.as_str().map(|s| s.to_string())
+                    } else {
+                        Some(v.to_string())
+                    }
+                })
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     pub fn genai_tool(self) -> Tool {

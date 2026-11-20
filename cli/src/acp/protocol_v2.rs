@@ -7,17 +7,53 @@ use crate::{
     actor::FinishedReason,
     harness::HarnessMsg,
     tool_engine::ToolStatus,
+    tools::ToolName,
 };
 use agent_client_protocol::{
     Client, ConnectionTo, Error, Responder,
     v2::schema::{Error as SchemaError, *},
 };
-use serde_json::Value;
+use serde_json::{Value, from_str};
 use tokio::sync::oneshot;
 
 pub struct ProtocolV2;
 
 impl ProtocolV2 {
+    fn to_tool_call(call_id: &str, name: &str, args: &str) -> SessionUpdate {
+        let tool_name = ToolName::from_name(name);
+        let kind = tool_name.map_or(ToolKind::Other, |tool| match tool {
+            ToolName::Read => ToolKind::Read,
+            ToolName::Write | ToolName::Edit => ToolKind::Edit,
+            ToolName::Bash => ToolKind::Execute,
+            ToolName::Glob | ToolName::Grep => ToolKind::Search,
+            ToolName::WebFetch | ToolName::WebSearch => ToolKind::Fetch,
+            _ => ToolKind::Other,
+        });
+        let json_args = from_str::<Value>(args).unwrap_or_default();
+        let tool_call = ToolCallUpdate::new(ToolCallId::new(call_id))
+            .name(name)
+            .title(ToolName::desc(tool_name, &json_args))
+            .kind(kind)
+            .status(ToolCallStatus::InProgress)
+            .raw_input(json_args);
+
+        SessionUpdate::ToolCallUpdate(tool_call)
+    }
+
+    fn to_tool_result(call_id: &str, result: &str, status: ToolStatus) -> SessionUpdate {
+        let status = match status {
+            ToolStatus::Valid => ToolCallStatus::Completed,
+            ToolStatus::Error | ToolStatus::Failure => ToolCallStatus::Failed,
+        };
+        let block = ContentBlock::Text(TextContent::new(result));
+        let content = vec![ToolCallContent::Content(Box::new(Content::new(block)))];
+        let tool_call = ToolCallUpdate::new(ToolCallId::new(call_id))
+            .status(status)
+            .content(content);
+
+        SessionUpdate::ToolCallUpdate(tool_call)
+    }
+
     pub fn to_update(msg: &HarnessMsg, session_id: &str) -> Option<UpdateSessionNotification> {
         let text = |value: String| ContentBlock::Text(TextContent::new(value));
         let update = match msg {
@@ -46,30 +82,13 @@ impl ProtocolV2 {
                 name,
                 arguments,
                 ..
-            } => SessionUpdate::ToolCallUpdate(
-                ToolCallUpdate::new(call_id.clone())
-                    .name(name.clone())
-                    .title(name.clone())
-                    .raw_input(Value::String(arguments.clone()))
-                    .status(ToolCallStatus::InProgress),
-            ),
+            } => Self::to_tool_call(call_id, name, arguments),
             HarnessMsg::ToolResult {
                 call_id,
-                name,
                 result,
                 status,
-            } => {
-                let status = match status {
-                    ToolStatus::Valid => ToolCallStatus::Completed,
-                    ToolStatus::Error | ToolStatus::Failure => ToolCallStatus::Failed,
-                };
-                SessionUpdate::ToolCallUpdate(
-                    ToolCallUpdate::new(call_id.clone())
-                        .name(name.clone())
-                        .status(status)
-                        .raw_output(Value::String(result.clone())),
-                )
-            }
+                ..
+            } => Self::to_tool_result(call_id, result, *status),
             HarnessMsg::DiffView(_)
             | HarnessMsg::TokenUsage { .. }
             | HarnessMsg::AskUser { .. }

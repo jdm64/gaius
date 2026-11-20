@@ -319,9 +319,7 @@ impl Render {
         let style = self.theme.toolcall_style();
         let json_args = from_str::<Value>(arguments).unwrap_or_default();
         let tool_name = ToolName::from_name(name);
-        let display = tool_name.map_or_else(String::new, |tool| {
-            Self::arguments_json_fields(&json_args, tool.display_fields())
-        });
+        let display = ToolName::desc(tool_name, &json_args);
 
         lines.push(Line::from(vec![
             Span::styled(name.to_string(), style.add_modifier(Modifier::BOLD)),
@@ -484,21 +482,5 @@ impl Render {
         owned.style = line.style;
         owned.alignment = line.alignment;
         owned
-    }
-
-    fn arguments_json_fields(arguments: &Value, fields: &[&str]) -> String {
-        fields
-            .iter()
-            .filter_map(|&f| {
-                arguments.get(f).and_then(|v| {
-                    if v.is_string() {
-                        v.as_str().map(|s| s.to_string())
-                    } else {
-                        Some(v.to_string())
-                    }
-                })
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
     }
 }
