@@ -58,13 +58,14 @@ impl Harness {
     pub fn send_skill_message<F>(
         &mut self,
         name: String,
+        msg_id: u32,
         mut on_event: F,
     ) -> Result<(), Box<dyn Error>>
     where
         F: FnMut(HarnessMsg) -> Option<String>,
     {
         let skill_command = format!("/skill {}", name);
-        self.send_user_message(skill_command, &mut on_event);
+        self.send_user_message_with_id(skill_command, msg_id, &mut on_event);
 
         let tc = ToolCall {
             call_id: Uuid::new_v4().to_string(),

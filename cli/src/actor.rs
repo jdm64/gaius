@@ -366,7 +366,10 @@ impl HarnessActorServer {
                             Self::tx(&self.reply_tx, CommandReply::SessionInfo(Ok(info)));
                         }
                         Some(HarnessCommand::RunPrompt(prompt)) => {
-                            prompt_queue.push(prompt, &self.reply_tx);
+                            prompt_queue.push_prompt(prompt, &self.reply_tx);
+                        }
+                        Some(HarnessCommand::RunSkill(name)) => {
+                            prompt_queue.push_skill(name, &self.reply_tx);
                         }
                         Some(HarnessCommand::CloseSession) => {
                             cancel_flag.cancel();
@@ -410,7 +413,10 @@ impl HarnessActorServer {
                         Self::tx(&self.reply_tx, CommandReply::SessionInfo(Ok(info)));
                     }
                     Some(HarnessCommand::RunPrompt(prompt)) => {
-                        prompt_queue.push(prompt, &self.reply_tx);
+                        prompt_queue.push_prompt(prompt, &self.reply_tx);
+                    }
+                    Some(HarnessCommand::RunSkill(name)) => {
+                        prompt_queue.push_skill(name, &self.reply_tx);
                     }
                     Some(HarnessCommand::CloseSession) => {
                         cancel_flag.cancel();
@@ -442,7 +448,12 @@ impl HarnessActorServer {
                     let _ = self.run_turn(UserRequest::Prompt { msg_id, prompt }).await;
                 }
                 HarnessCommand::RunSkill(name) => {
-                    let _ = self.run_turn(UserRequest::Skill(name)).await;
+                    let msg_id = self.harness.next_msg_id();
+                    Self::tx(
+                        &self.reply_tx,
+                        CommandReply::PromptQueued { size: 0, msg_id },
+                    );
+                    let _ = self.run_turn(UserRequest::Skill { msg_id, name }).await;
                 }
                 HarnessCommand::GetSkills => {
                     let skills = self.harness.list_skills();

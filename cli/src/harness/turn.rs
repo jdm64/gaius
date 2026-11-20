@@ -55,7 +55,9 @@ impl Harness {
             UserRequest::Prompt { prompt, msg_id } => {
                 self.send_user_message_with_id(prompt, msg_id, &mut on_event)
             }
-            UserRequest::Skill(name) => self.send_skill_message(name, &mut on_event)?,
+            UserRequest::Skill { msg_id, name } => {
+                self.send_skill_message(name, msg_id, &mut on_event)?;
+            }
         }
 
         loop {
@@ -64,9 +66,16 @@ impl Harness {
                 return Ok(());
             }
 
-            if let Some((msg_id, prompt)) = self.prompt_queue.pop() {
+            if let Some(request) = self.prompt_queue.pop() {
                 on_event(HarnessMsg::QueueChanged(self.prompt_queue.len()));
-                self.send_user_message_with_id(prompt, msg_id, &mut on_event);
+                match request {
+                    UserRequest::Prompt { prompt, msg_id } => {
+                        self.send_user_message_with_id(prompt, msg_id, &mut on_event);
+                    }
+                    UserRequest::Skill { msg_id, name } => {
+                        self.send_skill_message(name, msg_id, &mut on_event)?;
+                    }
+                }
                 continue;
             }
 

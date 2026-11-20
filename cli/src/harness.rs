@@ -35,7 +35,15 @@ use std::{
 #[derive(Clone, Debug)]
 pub enum UserRequest {
     Prompt { msg_id: u32, prompt: String },
-    Skill(String),
+    Skill { msg_id: u32, name: String },
+}
+
+impl UserRequest {
+    fn id(&self) -> u32 {
+        match self {
+            UserRequest::Prompt { msg_id, .. } | UserRequest::Skill { msg_id, .. } => *msg_id,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

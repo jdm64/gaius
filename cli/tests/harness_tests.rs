@@ -2,7 +2,10 @@ use gaius::{
     actor::CommandReply,
     config::Config,
     diff_view::{DiffHunk, DiffLine, DiffLineKind, DiffView},
-    harness::{Harness, HarnessMsg, compact::Compact, history_replay, prompt_queue::PromptQueue},
+    harness::{
+        Harness, HarnessMsg, UserRequest, compact::Compact, history_replay,
+        prompt_queue::PromptQueue,
+    },
     models::TokenPrice,
     rate_limit::{is_rate_limit_error, is_webc_rate_limit},
     token_usage::{TokenUsageLedger, TokenUsageSpan},
@@ -915,8 +918,8 @@ fn prompt_queue_runs_prompts_in_the_order_they_arrived() {
     let queue = PromptQueue::new(Arc::new(AtomicU32::new(0)));
     let (reply_tx, mut replies) = tokio::sync::mpsc::unbounded_channel();
 
-    queue.push("first".to_string(), &reply_tx);
-    queue.push("second".to_string(), &reply_tx);
+    queue.push_prompt("first".to_string(), &reply_tx);
+    queue.push_prompt("second".to_string(), &reply_tx);
 
     assert_eq!(queue.len(), 2);
     assert!(matches!(
@@ -929,10 +932,10 @@ fn prompt_queue_runs_prompts_in_the_order_they_arrived() {
     ));
 
     // drain hands back every waiting prompt in arrival order, with assigned IDs
-    assert_eq!(queue.pop().unwrap().1, "first");
-    assert_eq!(queue.pop().unwrap().1, "second");
+    assert!(matches!(queue.pop(), Some(UserRequest::Prompt { prompt, .. }) if prompt == "first"));
+    assert!(matches!(queue.pop(), Some(UserRequest::Prompt { prompt, .. }) if prompt == "second"));
     assert!(queue.is_empty());
-    assert_eq!(queue.pop(), None);
+    assert!(queue.pop().is_none());
 }
 
 #[test]
@@ -940,12 +943,12 @@ fn prompt_queue_clear_drops_every_waiting_prompt() {
     let queue = PromptQueue::new(Arc::new(AtomicU32::new(0)));
     let (reply_tx, _replies) = tokio::sync::mpsc::unbounded_channel();
 
-    queue.push("first".to_string(), &reply_tx);
-    queue.push("second".to_string(), &reply_tx);
+    queue.push_prompt("first".to_string(), &reply_tx);
+    queue.push_prompt("second".to_string(), &reply_tx);
 
     assert_eq!(queue.clear(), 2);
     assert!(queue.is_empty());
-    assert_eq!(queue.pop(), None);
+    assert!(queue.pop().is_none());
     assert_eq!(queue.clear(), 0);
 }
 
@@ -955,8 +958,8 @@ fn harness_counts_prompts_waiting_to_be_sent() {
     let queue = harness.prompt_queue();
     let (reply_tx, _replies) = tokio::sync::mpsc::unbounded_channel();
 
-    queue.push("first".to_string(), &reply_tx);
-    queue.push("second".to_string(), &reply_tx);
+    queue.push_prompt("first".to_string(), &reply_tx);
+    queue.push_prompt("second".to_string(), &reply_tx);
 
     assert_eq!(queue.len(), 2);
     assert_eq!(harness.snapshot().queued_prompts, 2);
@@ -975,9 +978,11 @@ fn harness_prompt_queue_handle_shares_the_same_queue() {
     let queue = harness.prompt_queue();
     let (reply_tx, _replies) = tokio::sync::mpsc::unbounded_channel();
 
-    queue.push("while busy".to_string(), &reply_tx);
+    queue.push_prompt("while busy".to_string(), &reply_tx);
 
     assert_eq!(queue.len(), 1);
-    assert_eq!(queue.pop().unwrap().1, "while busy");
+    assert!(
+        matches!(queue.pop(), Some(UserRequest::Prompt { prompt, .. }) if prompt == "while busy")
+    );
     assert_eq!(queue.len(), 0);
 }
