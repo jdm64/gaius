@@ -41,8 +41,7 @@ impl ACPEngine {
 
         match req {
             ACPRequest::Initialize(data) => {
-                data.respond(resp)?;
-                self.initialized = true;
+                self.initialized = data.respond(resp)?;
             }
             ACPRequest::ListSessions(data) => self.handle_session_list(data, resp).await?,
             ACPRequest::NewSession(data) => self.handle_session_new(data, resp).await?,

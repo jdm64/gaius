@@ -91,11 +91,13 @@ impl InitializeV2 {
 }
 
 impl Initialize for InitializeV2 {
-    fn respond(self: Box<Self>, resp: Responder) -> Result<(), Error> {
+    fn respond(self: Box<Self>, resp: Responder) -> Result<bool, Error> {
         if let Err(err) = Self::check_version(self.data.protocol_version) {
-            resp.respond_with_error(err)
+            resp.respond_with_error(err)?;
+            Ok(false)
         } else {
-            reply(resp, Self::build_init())
+            reply(resp, Self::build_init())?;
+            Ok(true)
         }
     }
 }

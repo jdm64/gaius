@@ -24,7 +24,7 @@ pub enum ACPNotification {
 }
 
 pub trait Initialize: Send {
-    fn respond(self: Box<Self>, resp: Responder) -> Result<(), Error>;
+    fn respond(self: Box<Self>, resp: Responder) -> Result<bool, Error>;
 }
 
 pub trait ListSessions: Send {

@@ -12,6 +12,7 @@ use agent_client_protocol::{
     schema::ProtocolVersion,
     v1::schema::{Error as SchemaError, *},
 };
+use serde_json::json;
 use std::path::PathBuf;
 
 pub fn reply_no_session(resp: Responder, id: SessionId) -> Result<(), Error> {
@@ -88,11 +89,16 @@ pub struct InitializeV1 {
 
 impl InitializeV1 {
     pub fn check_version(version: ProtocolVersion) -> Result<(), Error> {
-        if version != ProtocolVersion::V1 {
-            let err = SchemaError::invalid_params();
-            Err(err.into())
-        } else {
+        if version == ProtocolVersion::V1 || version == ProtocolVersion::V0 {
             Ok(())
+        } else {
+            let mut err = SchemaError::invalid_params();
+            let ver_num = version.as_u16();
+            err = err.data(json!({
+                "requested": ver_num,
+                "supported": [1]
+            }));
+            Err(err.into())
         }
     }
 
@@ -114,11 +120,13 @@ impl InitializeV1 {
 }
 
 impl Initialize for InitializeV1 {
-    fn respond(self: Box<Self>, resp: Responder) -> Result<(), Error> {
+    fn respond(self: Box<Self>, resp: Responder) -> Result<bool, Error> {
         if let Err(err) = Self::check_version(self.data.protocol_version) {
-            resp.respond_with_error(err)
+            resp.respond_with_error(err)?;
+            Ok(false)
         } else {
-            reply(resp, Self::build_init())
+            reply(resp, Self::build_init())?;
+            Ok(true)
         }
     }
 }
