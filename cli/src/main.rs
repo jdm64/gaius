@@ -10,6 +10,7 @@ use gaius::{
     config::Config,
     harness::{Harness, HarnessSnapshot},
     models::{ModelDef, Models},
+    session::Session,
     tui::TuiApp,
     upgrade::Upgrader,
 };
@@ -265,6 +266,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if snapshot.has_history
         && let Some(session_id) = snapshot.session_id
+        && Session::exists(&session_id)
     {
         println!("To continue pass --session {}", session_id);
     }

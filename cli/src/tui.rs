@@ -223,10 +223,11 @@ impl TuiApp {
             }
         }
 
-        match HarnessActorClient::shutdown(actor.clone_tx(), &mut actor_rx.events).await {
-            Some(snapshot) => Ok(snapshot),
-            None => Ok(self.snapshot.clone()),
-        }
+        Ok(
+            HarnessActorClient::shutdown(actor.clone_tx(), &mut actor_rx.events)
+                .await
+                .map_err(io::Error::other)?,
+        )
     }
 
     async fn handle_terminal_event(

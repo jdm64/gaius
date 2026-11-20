@@ -222,25 +222,23 @@ impl HarnessActorClient {
     pub async fn shutdown(
         tx: Sender<HarnessCommand>,
         rx: &mut UnboundedReceiver<HarnessEvent>,
-    ) -> Option<HarnessSnapshot> {
-        match tx.send(HarnessCommand::Shutdown).await {
-            Ok(_) => {}
-            Err(_) => return None,
-        };
+    ) -> Result<HarnessSnapshot, String> {
+        tx.send(HarnessCommand::Shutdown)
+            .await
+            .map_err(|_| ACTOR_STOPPED.to_string())?;
 
         let shutdown = async {
             while let Some(event) = rx.recv().await {
                 if let HarnessEvent::ShutdownComplete(result) = event {
-                    return result.ok();
+                    return result;
                 }
             }
-            None
+            Err(ACTOR_STOPPED.to_string())
         };
 
         time::timeout(SHUTDOWN_TIMEOUT, shutdown)
             .await
-            .ok()
-            .flatten()
+            .map_err(|_| "Timed out waiting for harness actor shutdown".to_string())?
     }
 }
 

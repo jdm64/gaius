@@ -117,12 +117,10 @@ async fn replay_history_answers_with_the_history_events() {
 async fn shutdown_answers_with_the_final_snapshot() {
     let (actor, mut actor_rx, initial) = actor();
 
-    match HarnessActorClient::shutdown(actor.clone_tx(), &mut actor_rx.events).await {
-        Some(snapshot) => {
-            assert_eq!(snapshot.session_id, initial.session_id);
-        }
-        other => panic!("expected a ShutdownComplete event, got {other:?}"),
-    }
+    let snapshot = HarnessActorClient::shutdown(actor.clone_tx(), &mut actor_rx.events)
+        .await
+        .expect("shutdown should return the final snapshot");
+    assert_eq!(snapshot.session_id, initial.session_id);
 }
 
 #[tokio::test]

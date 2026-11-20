@@ -42,7 +42,7 @@ impl ACPEventHandler {
         loop {
             tokio::select! {
                 _ = cx.incoming_closed() => {
-                    HarnessActorClient::shutdown(self.tx, &mut self.events).await;
+                    let _ = HarnessActorClient::shutdown(self.tx, &mut self.events).await;
                     break;
                 },
                 event = self.events.recv() => {
