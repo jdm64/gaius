@@ -40,6 +40,8 @@ impl InputMode {
                 };
                 if let Err(err) = actor.set_agent(selected_agent).await {
                     app.editor.set_status(err);
+                } else {
+                    app.editor.clear_input();
                 }
             }
             _ if PromptEditor::input_changed_key(key) => {

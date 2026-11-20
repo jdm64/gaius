@@ -63,7 +63,7 @@ impl TuiApp {
                     return;
                 }
                 let status = format!("Selected agent: {}", name);
-                self.editor.status_clear_input(status);
+                self.editor.set_status(status);
                 self.set_mode(InputMode::PromptInput);
             }
             Err(err) => self.editor.set_status(err),
