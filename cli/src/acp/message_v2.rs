@@ -305,30 +305,37 @@ impl Prompt for PromptV2 {
         reply_no_session(resp, self.data.session_id.clone())
     }
 
-    fn build_prompt(&self) -> Result<String, Error> {
-        let mut text_blocks = Vec::new();
-        let mut attachments = Vec::new();
+    fn prompt_data(&self) -> Result<PromptData, Error> {
+        let mut text = String::new();
+        let mut attachments: Vec<Box<dyn PromptAttachment>> = Vec::new();
         for block in &self.data.prompt {
             match block {
-                ContentBlock::Text(text) => {
-                    text_blocks.push(text.text.clone());
+                ContentBlock::Text(block) => text.push_str(&block.text),
+                ContentBlock::ResourceLink(link) => {
+                    text.push_str(&link.name);
+                    attachments.push(Box::new(PromptAttachmentV2(link.clone())));
                 }
-                ContentBlock::ResourceLink(link) => match serde_json::to_string(link) {
-                    Ok(link) => attachments.push(link),
-                    Err(_) => return Err(Error::internal_error()),
-                },
                 _ => return Err(Error::invalid_params()),
             }
         }
+        Ok(PromptData { text, attachments })
+    }
+}
 
-        let mut prompt = text_blocks.join("\n\n");
-        if !attachments.is_empty() {
-            if !prompt.is_empty() {
-                prompt.push_str("\n\n");
-            }
-            prompt.push_str("Attachments:\n");
-            prompt.push_str(&attachments.join("\n"));
-        }
-        Ok(prompt)
+struct PromptAttachmentV2(ResourceLink);
+
+impl PromptAttachment for PromptAttachmentV2 {
+    fn name(&self) -> &str {
+        &self.0.name
+    }
+
+    fn uri(&self) -> &str {
+        &self.0.uri
+    }
+
+    fn to_json(&self, uri: &str) -> Result<String, Error> {
+        let mut link = self.0.clone();
+        link.uri = uri.to_string();
+        serde_json::to_string(&link).map_err(|_| Error::internal_error())
     }
 }

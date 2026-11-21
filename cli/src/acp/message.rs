@@ -4,7 +4,8 @@
 
 use crate::{acp::engine::ACPEngine, harness::HarnessMsg, session::Session};
 use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use url::Url;
 
 pub enum ACPRequest {
     Initialize(Box<dyn Initialize>),
@@ -78,5 +79,58 @@ pub trait SetConfig: Send {
 pub trait Prompt: Send {
     fn session_id(&self) -> String;
     fn session_not_found(&self, resp: Responder) -> Result<(), Error>;
-    fn build_prompt(&self) -> Result<String, Error>;
+    fn prompt_data(&self) -> Result<PromptData, Error>;
+}
+
+pub struct PromptData {
+    pub text: String,
+    pub attachments: Vec<Box<dyn PromptAttachment>>,
+}
+
+pub trait PromptAttachment: Send {
+    fn name(&self) -> &str;
+    fn uri(&self) -> &str;
+    fn to_json(&self, uri: &str) -> Result<String, Error>;
+}
+
+impl PromptData {
+    pub fn build(self, workspace: Option<&Path>) -> Result<String, Error> {
+        let mut prompt = self.text;
+        if self.attachments.is_empty() {
+            return Ok(prompt);
+        }
+
+        if !prompt.is_empty() {
+            prompt.push_str("\n\n");
+        }
+        prompt.push_str("---\n**Attachments**\n");
+        let mut attachments = Vec::with_capacity(self.attachments.len());
+        for attachment in self.attachments {
+            let uri = normalize_uri(attachment.uri(), workspace);
+            attachments.push(attachment.to_json(&uri)?);
+        }
+        prompt.push_str("- ");
+        prompt.push_str(&attachments.join("\n- "));
+        Ok(prompt)
+    }
+}
+
+fn normalize_uri(uri: &str, workspace: Option<&Path>) -> String {
+    let Some(workspace) = workspace else {
+        return uri.to_string();
+    };
+    let path = uri.strip_prefix("file://");
+    let Some(path) = path else {
+        return uri.to_string();
+    };
+    let Ok(path) = Url::parse(&format!("file://{path}")) else {
+        return uri.to_string();
+    };
+    let Ok(path) = path.to_file_path() else {
+        return uri.to_string();
+    };
+    match path.strip_prefix(workspace) {
+        Ok(relative) => relative.to_string_lossy().into_owned(),
+        Err(_) => uri.to_string(),
+    }
 }

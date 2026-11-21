@@ -58,7 +58,7 @@ impl ACPEventHandler {
         };
         match event {
             HarnessEvent::Message(msg) => {
-                let Some(session_id) = SessState::get(&self.session_id) else {
+                let Some(session_id) = SessState::get_id(&self.session_id) else {
                     return;
                 };
                 if self.protocol.is_ack_prompt()
@@ -74,7 +74,7 @@ impl ACPEventHandler {
                 options,
                 answer_tx,
             } => {
-                let Some(session_id) = SessState::get(&self.session_id) else {
+                let Some(session_id) = SessState::get_id(&self.session_id) else {
                     let _ = answer_tx.send(String::new());
                     return;
                 };
@@ -82,7 +82,7 @@ impl ACPEventHandler {
                     .on_ask_user(session_id, call_id, title, options, answer_tx, cx);
             }
             HarnessEvent::TurnFinished { status, ack, .. } => {
-                let Some(session_id) = SessState::get(&self.session_id) else {
+                let Some(session_id) = SessState::get_id(&self.session_id) else {
                     return;
                 };
                 self.protocol

@@ -6,6 +6,7 @@ use crate::{acp::protocol::ACPProtocol, session::Session};
 use agent_client_protocol::Responder;
 use std::{
     collections::{HashMap, HashSet},
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 use tokio::sync::Notify;
@@ -16,6 +17,7 @@ pub type SharedSessionId = Arc<Mutex<Option<String>>>;
 pub struct SessState {
     active: SharedSessionId,
     known: HashSet<String>,
+    cwd: Option<PathBuf>,
 }
 
 impl SessState {
@@ -23,13 +25,18 @@ impl SessState {
         self.active.clone()
     }
 
-    pub fn get(shared: &SharedSessionId) -> Option<String> {
+    pub fn get_id(shared: &SharedSessionId) -> Option<String> {
         shared.lock().unwrap().clone()
     }
 
-    pub fn set(&mut self, sess_id: &str) {
+    pub fn get_cwd(&self) -> Option<PathBuf> {
+        self.cwd.clone()
+    }
+
+    pub fn set(&mut self, sess_id: &str, cwd: PathBuf) {
         *self.active.lock().unwrap() = Some(sess_id.to_string());
         self.known.insert(sess_id.to_string());
+        self.cwd = Some(cwd);
     }
 
     pub fn is_active(&self, sess_id: &str) -> bool {
@@ -42,6 +49,7 @@ impl SessState {
 
     pub fn clear(&mut self) {
         *self.active.lock().unwrap() = None;
+        self.cwd = None;
     }
 
     pub fn remove(&mut self, sess_id: &str) {

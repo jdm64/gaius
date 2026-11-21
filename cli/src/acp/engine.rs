@@ -165,7 +165,7 @@ impl ACPEngine {
                 self.curr_model = snapshot.model.clone();
                 let session_id = snapshot.session_id.clone();
                 if let Some(id) = &session_id {
-                    self.sess_state.set(id);
+                    self.sess_state.set(id, snapshot.proj_dir.clone());
                 }
                 data.respond(resp, session_id, self)
             }
@@ -199,7 +199,7 @@ impl ACPEngine {
 
         match self.replies.recv().await {
             Some(CommandReply::SessionLoaded(Ok(snapshot))) => {
-                self.sess_state.set(&session_id);
+                self.sess_state.set(&session_id, snapshot.proj_dir);
                 self.curr_model = snapshot.model;
             }
             err => {
@@ -297,8 +297,13 @@ impl ACPEngine {
             return data.session_not_found(resp);
         }
 
-        let prompt = match data.build_prompt() {
-            Ok(p) => p,
+        let prompt_data = match data.prompt_data() {
+            Ok(prompt) => prompt,
+            Err(err) => return resp.respond_with_error(err),
+        };
+        let workspace = self.sess_state.get_cwd();
+        let prompt = match prompt_data.build(workspace.as_deref()) {
+            Ok(prompt) => prompt,
             Err(err) => return resp.respond_with_error(err),
         };
 
