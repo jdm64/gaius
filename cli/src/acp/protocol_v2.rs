@@ -30,9 +30,10 @@ impl ProtocolV2 {
             _ => ToolKind::Other,
         });
         let json_args = from_str::<Value>(args).unwrap_or_default();
+        let title = format!("{} {}", name, ToolName::desc(tool_name, &json_args));
         let tool_call = ToolCallUpdate::new(ToolCallId::new(call_id))
             .name(name)
-            .title(ToolName::desc(tool_name, &json_args))
+            .title(title)
             .kind(kind)
             .status(ToolCallStatus::InProgress)
             .raw_input(json_args);

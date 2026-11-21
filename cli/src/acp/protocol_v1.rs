@@ -27,14 +27,12 @@ impl ProtocolV1 {
             _ => ToolKind::Other,
         });
         let json_args = from_str::<Value>(args).unwrap_or_default();
-        let tool_call = ToolCall::new(
-            ToolCallId::new(call_id),
-            ToolName::desc(tool_name, &json_args),
-        )
-        .name(name)
-        .kind(kind)
-        .status(ToolCallStatus::InProgress)
-        .raw_input(json_args);
+        let title = format!("{} {}", name, ToolName::desc(tool_name, &json_args));
+        let tool_call = ToolCall::new(ToolCallId::new(call_id), title)
+            .name(name)
+            .kind(kind)
+            .status(ToolCallStatus::InProgress)
+            .raw_input(json_args);
 
         SessionUpdate::ToolCall(tool_call)
     }
