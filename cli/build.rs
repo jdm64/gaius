@@ -27,17 +27,45 @@ fn main() {
         .unwrap_or("0.0.0")
         .to_string();
 
-    // Get git commit hash
-    let git_hash = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+    // Describe HEAD relative to the nearest tag. With --long, git emits
+    // <tag>-<distance>-g<hash>, including when HEAD is exactly on a tag.
+    let git_description = Command::new("git")
+        .args(["describe", "--tags", "--long"])
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "unknown".into());
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
 
-    // Combine version and git hash as <version>-<git commit>
-    let git_version = format!("v{version}-{git_hash}");
+    let git_version = if let Some(description) = git_description {
+        let mut parts = description.rsplitn(3, '-');
+        let hash = parts.next().unwrap_or_default();
+        let distance = parts.next().unwrap_or_default();
+        let tag = parts.next().unwrap_or_default();
+
+        if !tag.is_empty() && hash.starts_with('g') {
+            if distance == "0" {
+                // Preserve the existing version format for commits on a tag.
+                format!("v{version}-{hash}")
+            } else if let Ok(distance) = distance.parse::<u64>() {
+                format!("{tag}-{hash}-build-{distance}")
+            } else {
+                format!("v{version}-{hash}")
+            }
+        } else {
+            format!("v{version}-unknown")
+        }
+    } else {
+        // No tag is available (or this is not a git checkout); retain the
+        // previous Cargo-version-plus-commit format when possible.
+        let git_hash = Command::new("git")
+            .args(["rev-parse", "--short", "HEAD"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|| "unknown".into());
+        format!("v{version}-{git_hash}")
+    };
 
     let platform = format!(
         "{}-{}",
