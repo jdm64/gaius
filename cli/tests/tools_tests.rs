@@ -5,8 +5,30 @@ use gaius::{
     tools::ToolName::{self},
 };
 use serde_json::json;
-use std::sync::OnceLock;
+use std::{path::PathBuf, sync::OnceLock};
 use tokio::sync::Mutex;
+
+#[test]
+fn resolve_path_expands_home_and_preserves_relative_paths() {
+    let proj_dir = PathBuf::from("/tmp/gaius-test-project");
+    let engine = ToolEngine::new(SkillRepo::default(), proj_dir.clone(), 30000, 60);
+
+    assert_eq!(
+        engine.resolve_path("relative/file.txt"),
+        proj_dir.join("relative/file.txt")
+    );
+    assert_eq!(
+        engine.resolve_path("/absolute/file.txt"),
+        PathBuf::from("/absolute/file.txt")
+    );
+
+    let home = dirs::home_dir().expect("home directory should be available");
+    assert_eq!(engine.resolve_path("~"), home);
+    assert_eq!(
+        engine.resolve_path("~/documents/file.txt"),
+        home.join("documents/file.txt")
+    );
+}
 
 #[test]
 fn tool_names_are_single_source_of_truth() {

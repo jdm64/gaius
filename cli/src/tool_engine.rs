@@ -101,6 +101,21 @@ impl ToolEngine {
         ToolResult::Failure(format!("Missing required argument: {arg}"))
     }
 
+    pub fn resolve_path(&self, path: &str) -> PathBuf {
+        if (path == "~" || path.starts_with("~/"))
+            && let Some(home) = dirs::home_dir()
+        {
+            return home.join(path.strip_prefix("~/").unwrap_or(""));
+        }
+
+        let path = Path::new(path);
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.proj_dir.join(path)
+        }
+    }
+
     pub fn build_tools(&self, plan_mode: bool, filters: Option<&AgentTools>) -> Vec<Tool> {
         let has_skills = !self.skill_repo.is_empty();
         ToolName::ALL
@@ -184,7 +199,7 @@ impl ToolEngine {
             },
             None => None,
         };
-        let full_path = self.proj_dir.join(file_path_str);
+        let full_path = self.resolve_path(file_path_str);
         match std::fs::read_to_string(full_path) {
             Ok(content) => {
                 if start_line == 1 && max_lines.is_none() {
@@ -218,7 +233,7 @@ impl ToolEngine {
                 None => return ToolResult::Failure("overwrite must be a boolean".to_string()),
             },
         };
-        let full_path = self.proj_dir.join(file_path_str);
+        let full_path = self.resolve_path(file_path_str);
         let mut options = std::fs::OpenOptions::new();
         options.write(true);
         if overwrite {
@@ -262,7 +277,7 @@ impl ToolEngine {
                 None => return ToolResult::Failure("replace_all must be a boolean".to_string()),
             },
         };
-        let full_path = self.proj_dir.join(file_path_str);
+        let full_path = self.resolve_path(file_path_str);
         let content = match std::fs::read_to_string(&full_path) {
             Ok(content) => content,
             Err(e) => return ToolResult::Error(format!("Error reading file: {}", e)),
@@ -460,11 +475,7 @@ impl ToolEngine {
             .get(ArgName::Path)
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        let root = if path_prefix.starts_with('/') {
-            PathBuf::from(path_prefix)
-        } else {
-            self.proj_dir.join(path_prefix)
-        };
+        let root = self.resolve_path(path_prefix);
 
         let walker = match Self::create_file_walker(&root, Some(pattern)) {
             Ok(walker) => walker,
@@ -557,11 +568,7 @@ impl ToolEngine {
             .get(ArgName::Recursive)
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        let full_path = if path_str.starts_with('/') {
-            PathBuf::from(path_str)
-        } else {
-            self.proj_dir.join(path_str)
-        };
+        let full_path = self.resolve_path(path_str);
         let regex = match Regex::new(pattern_str) {
             Ok(r) => r,
             Err(e) => return ToolResult::Error(format!("Error compiling regex: {}", e)),
