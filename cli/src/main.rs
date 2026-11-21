@@ -8,6 +8,7 @@ use gaius::{
     auth::{handle::OAuthHandle, spec::OAuthKind},
     cli_prompt::CliPrompt,
     config::Config,
+    dirs::Dirs,
     harness::{Harness, HarnessSnapshot},
     models::{ModelDef, Models},
     session::Session,
@@ -15,13 +16,14 @@ use gaius::{
     upgrade::Upgrader,
 };
 use pico_args::Arguments;
-use std::{error::Error, path::PathBuf, process};
+use std::{convert::Infallible, error::Error, path::PathBuf, process};
 
 struct Args {
     command: Option<Command>,
     cli_mode: bool,
     prompt: Option<String>,
     session_id: Option<String>,
+    sess_dir: Option<PathBuf>,
     agent: Option<String>,
     model: Option<String>,
 }
@@ -70,6 +72,7 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
             cli_mode: false,
             prompt: None,
             session_id: None,
+            sess_dir: None,
             agent: None,
             model: None,
         });
@@ -88,9 +91,12 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
     let cli_mode = pargs.contains("--cli");
     let prompt_mode = pargs.contains("--prompt");
     let prompt_file = pargs.opt_value_from_os_str("--prompt-file", |path| {
-        Ok::<PathBuf, std::convert::Infallible>(PathBuf::from(path))
+        Ok::<PathBuf, Infallible>(PathBuf::from(path))
     })?;
     let session_id = pargs.opt_value_from_str("--session")?;
+    let sess_dir = pargs.opt_value_from_os_str("--sess-dir", |path| {
+        Ok::<PathBuf, Infallible>(PathBuf::from(path))
+    })?;
     let agent = pargs.opt_value_from_str("--agent")?;
     let model = pargs.opt_value_from_str("--model")?;
 
@@ -129,6 +135,7 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
         cli_mode,
         prompt,
         session_id,
+        sess_dir,
         agent,
         model,
     })
@@ -141,7 +148,8 @@ fn print_help() {
     println!("  gaius [OPTIONS | CLI_OPTIONS | COMMANDS | INFO]");
     println!();
     println!("OPTIONS:");
-    println!("  --session <ID>  Load and continue a saved session");
+    println!("  --session  <ID>   Load and continue a saved session");
+    println!("  --sess-dir <DIR>  Load and save sessions in this directory");
     println!();
     println!("CLI_OPTIONS:");
     println!("  --cli                 Enter simple interactive mode");
@@ -237,6 +245,7 @@ async fn tui_mode(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
+    Dirs::set_sessions_dir(args.sess_dir.clone());
 
     if let Some(command) = args.command {
         return match command {

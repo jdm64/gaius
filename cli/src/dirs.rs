@@ -2,11 +2,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use std::{error::Error, path::PathBuf};
+use std::{
+    error::Error,
+    path::PathBuf,
+    sync::{Mutex, PoisonError},
+};
+
+static SESSION_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 pub struct Dirs;
 
 impl Dirs {
+    pub fn set_sessions_dir(path: Option<PathBuf>) {
+        *SESSION_DIR.lock().unwrap_or_else(PoisonError::into_inner) = path;
+    }
+
+    fn session_dir_override() -> Option<PathBuf> {
+        SESSION_DIR
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     ///
     /// --- Config Dirs ---
     ///
@@ -36,6 +53,9 @@ impl Dirs {
     }
 
     pub fn sessions_dir() -> Result<PathBuf, Box<dyn Error>> {
+        if let Some(path) = Self::session_dir_override() {
+            return Ok(path);
+        }
         Ok(Self::data_dir()?.join("sessions"))
     }
 
