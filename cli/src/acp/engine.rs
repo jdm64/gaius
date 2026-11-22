@@ -58,7 +58,9 @@ impl ACPEngine {
             })));
         };
 
-        self.apply_model(model.clone()).await
+        let mut new_model = model.clone();
+        new_model.reasoning = self.curr_model.reasoning.clone();
+        self.apply_model(new_model).await
     }
 
     pub async fn set_reasoning(&mut self, value: String) -> Result<(), Error> {
