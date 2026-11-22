@@ -10,7 +10,7 @@ use crate::{
     },
     actor::{CommandReply, HarnessActorClient},
     config::Config,
-    models::{ModelDef, Models},
+    models::{ModelDef, Models, ReasoningEffort},
     session::Session,
 };
 use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
@@ -41,16 +41,45 @@ impl ACPEngine {
         (selected, options)
     }
 
+    pub fn model_reasoning(&self) -> String {
+        self.curr_model
+            .reasoning
+            .as_ref()
+            .unwrap_or(&ReasoningEffort::Default)
+            .label()
+            .to_string()
+    }
+
     pub async fn set_model(&mut self, key: String) -> Result<(), Error> {
         let Some(model) = Models::lookup(key.clone(), &self.models) else {
             return Err(Error::invalid_params().data(json!({
-                "configId": "model",
+                "configId": ConfigKey::MODEL,
                 "value": key,
             })));
         };
 
+        self.apply_model(model.clone()).await
+    }
+
+    pub async fn set_reasoning(&mut self, value: String) -> Result<(), Error> {
+        let reasoning = ReasoningEffort::all()
+            .iter()
+            .find(|effort| effort.label() == value)
+            .cloned()
+            .ok_or_else(|| {
+                Error::invalid_params().data(json!({
+                    "configId": ConfigKey::REASONING,
+                    "value": value,
+                }))
+            })?;
+        let mut model = self.curr_model.clone();
+        model.reasoning = (reasoning != ReasoningEffort::Default).then_some(reasoning);
+        self.apply_model(model).await
+    }
+
+    async fn apply_model(&mut self, model: ModelDef) -> Result<(), Error> {
         self.actor
-            .set_model(model.clone())
+            .set_model(model)
             .await
             .map_err(|err| Error::internal_error().data(err))?;
 
@@ -106,8 +135,14 @@ impl ACPEngine {
         }
         let (key, value) = data.entry();
         match key.as_str() {
-            "model" => {
+            ConfigKey::MODEL => {
                 if let Err(err) = self.set_model(value).await {
+                    resp.respond_with_error(err)?;
+                    return Ok(());
+                }
+            }
+            ConfigKey::REASONING => {
+                if let Err(err) = self.set_reasoning(value).await {
                     resp.respond_with_error(err)?;
                     return Ok(());
                 }

@@ -7,6 +7,15 @@ use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
 use std::path::{Path, PathBuf};
 use url::Url;
 
+pub struct ConfigKey;
+
+impl ConfigKey {
+    pub const MODEL: &'static str = "model";
+    pub const MODEL_LABEL: &'static str = "Model";
+    pub const REASONING: &'static str = "reasoning";
+    pub const REASONING_LABEL: &'static str = "Reasoning";
+}
+
 pub enum ACPRequest {
     Initialize(Box<dyn Initialize>),
     ListSessions(Box<dyn ListSessions>),

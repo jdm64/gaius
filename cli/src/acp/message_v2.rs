@@ -5,6 +5,7 @@
 use crate::{
     acp::{engine::ACPEngine, message::*, protocol_v2::ProtocolV2, reply},
     harness::HarnessMsg,
+    models::ReasoningEffort,
     session::Session,
 };
 use agent_client_protocol::{
@@ -38,8 +39,34 @@ impl MsgBuilder {
             .collect();
         let options = SessionConfigSelectOptions::Ungrouped(options);
         let select = SessionConfigSelect::new(selected, options);
-        SessionConfigOption::new("model", "Models", SessionConfigKind::Select(select))
-            .category(SessionConfigOptionCategory::Model)
+        SessionConfigOption::new(
+            ConfigKey::MODEL,
+            ConfigKey::MODEL_LABEL,
+            SessionConfigKind::Select(select),
+        )
+        .category(SessionConfigOptionCategory::Model)
+    }
+
+    pub fn reasoning(engine: &ACPEngine) -> SessionConfigOption {
+        let selected = engine.model_reasoning();
+        let options = ReasoningEffort::all()
+            .iter()
+            .map(|effort| {
+                SessionConfigSelectOption::new(effort.label().to_string(), effort.label())
+            })
+            .collect();
+        let options = SessionConfigSelectOptions::Ungrouped(options);
+        let select = SessionConfigSelect::new(selected, options);
+        SessionConfigOption::new(
+            ConfigKey::REASONING,
+            ConfigKey::REASONING_LABEL,
+            SessionConfigKind::Select(select),
+        )
+        .category(SessionConfigOptionCategory::ThoughtLevel)
+    }
+
+    pub fn config_options(engine: &ACPEngine) -> Vec<SessionConfigOption> {
+        vec![Self::models(engine), Self::reasoning(engine)]
     }
 }
 
@@ -163,10 +190,10 @@ impl NewSession for NewSessionV2 {
         engine: &ACPEngine,
     ) -> Result<(), Error> {
         if let Some(session_id) = session_id {
-            let models = MsgBuilder::models(engine);
             reply(
                 resp,
-                NewSessionResponse::new(session_id).config_options(vec![models]),
+                NewSessionResponse::new(session_id)
+                    .config_options(MsgBuilder::config_options(engine)),
             )
         } else {
             resp.respond_with_error(Error::internal_error())
@@ -227,10 +254,9 @@ impl ResumeSession for ResumeSessionV2 {
         let update = UpdateSessionNotification::new(session_id.to_string(), update);
         let _ = cx.send_notification(update);
 
-        let models = MsgBuilder::models(engine);
         reply(
             resp,
-            ResumeSessionResponse::new().config_options(vec![models]),
+            ResumeSessionResponse::new().config_options(MsgBuilder::config_options(engine)),
         )
     }
 }
@@ -287,8 +313,10 @@ impl SetConfig for SetSessionConfigOptionV2 {
     }
 
     fn respond(&self, resp: Responder, engine: &ACPEngine) -> Result<(), Error> {
-        let models = MsgBuilder::models(engine);
-        reply(resp, SetSessionConfigOptionResponse::new(vec![models]))
+        reply(
+            resp,
+            SetSessionConfigOptionResponse::new(MsgBuilder::config_options(engine)),
+        )
     }
 }
 
