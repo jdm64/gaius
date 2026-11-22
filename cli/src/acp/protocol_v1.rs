@@ -55,8 +55,10 @@ impl ProtocolV1 {
     pub fn to_update(msg: &HarnessMsg, session_id: &str) -> Option<SessionNotification> {
         let text = |s: String| ContentBlock::Text(TextContent::new(s));
         let update = match msg {
-            HarnessMsg::UserPrompt { content, .. } => {
-                SessionUpdate::UserMessageChunk(ContentChunk::new(text(content.clone())))
+            HarnessMsg::UserPrompt { .. } => {
+                // Client already has the prompt because it sent it.
+                // Or history replay is done as CommandReply::HistoryReplayed
+                return None;
             }
             HarnessMsg::AgentMessage { content, .. } | HarnessMsg::PlanMessage { content, .. } => {
                 SessionUpdate::AgentMessageChunk(ContentChunk::new(text(content.clone())))

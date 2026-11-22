@@ -62,9 +62,11 @@ impl ProtocolV2 {
                 SessionUpdate::StateUpdate(StateUpdate::Running(RunningStateUpdate::new()))
             }
             HarnessMsg::TurnDuration(_) => return None,
-            HarnessMsg::UserPrompt { msg_id, content } => SessionUpdate::UserMessage(
-                UserMessage::new(msg_id.to_string()).content(vec![text(content.clone())]),
-            ),
+            HarnessMsg::UserPrompt { .. } => {
+                // Client already has the prompt because it sent it.
+                // Or history replay is done as CommandReply::HistoryReplayed
+                return None;
+            }
             HarnessMsg::AgentMessage { msg_id, content }
             | HarnessMsg::PlanMessage { msg_id, content } => SessionUpdate::AgentMessage(
                 AgentMessage::new(msg_id.to_string()).content(vec![text(content.clone())]),
