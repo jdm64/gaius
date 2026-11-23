@@ -1,3 +1,22 @@
+## v0.6.0
+
+### New features
+- Added `--sess-dir` to override the directory used to load and save sessions.
+- Added initial Agent Client Protocol (ACP) support:
+  - Use `gaius acp` to connect an ACP client over stdio.
+  - Supports ACP protocol versions 1 and 2.
+  - Creates sessions and resumes existing sessions, replaying their conversation history.
+  - Streams assistant responses and reasoning, along with tool-call and tool-result updates.
+  - Provides model and reasoning configuration options to ACP clients.
+  - Handles prompt cancellation and session close/delete requests.
+
+### Improvements
+- Tool path arguments now expand `~` to the home directory.
+- Skills can be queued while the agent is busy, like prompts.
+- Cycling agents with Tab no longer clears the prompt.
+- The session-continue message on exit is shown only when the session file still exists.
+- Add -build to the version number with a number indicating commits since last tag.
+
 ## v0.5.3
 
 ### Improvements
