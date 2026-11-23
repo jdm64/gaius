@@ -14,6 +14,7 @@ jobs:
   build:
     name: CI Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -23,9 +24,13 @@ jobs:
             target: x86_64-unknown-linux-gnu
             binary: gaius-linux-x86_64
           - name: macos-aarch64
-            os: macos-15
+            os: macos-26
             target: aarch64-apple-darwin
             binary: gaius-macos-aarch64
+            deployment_target: "15.0"
+
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
 
     steps:
       - name: Checkout repository

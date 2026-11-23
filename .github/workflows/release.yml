@@ -15,6 +15,7 @@ jobs:
   build:
     name: Release Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -27,6 +28,10 @@ jobs:
             os: macos-15
             target: aarch64-apple-darwin
             binary: gaius-macos-aarch64
+            deployment_target: "15.0"
+
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
 
     steps:
       - name: Checkout repository
