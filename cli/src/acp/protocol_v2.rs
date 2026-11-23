@@ -97,11 +97,16 @@ impl ProtocolV2 {
             | HarnessMsg::AskUser { .. }
             | HarnessMsg::SystemMessage(_) => return None,
             HarnessMsg::CompactStart { msg_id, .. } => SessionUpdate::CompactionUpdate(
-                CompactionUpdate::new(msg_id.to_string(), CompactionStatus::InProgress),
+                CompactionUpdate::new(msg_id.to_string()).status(CompactionStatus::InProgress),
             ),
-            HarnessMsg::CompactSummary { msg_id, .. } => SessionUpdate::CompactionUpdate(
-                CompactionUpdate::new(msg_id.to_string(), CompactionStatus::Completed),
-            ),
+            HarnessMsg::CompactSummary { msg_id, content } => {
+                let block = ContentBlock::Text(TextContent::new(content));
+                SessionUpdate::CompactionUpdate(
+                    CompactionUpdate::new(msg_id.to_string())
+                        .status(CompactionStatus::Completed)
+                        .summary(vec![block]),
+                )
+            }
             HarnessMsg::QueueChanged(size) => SessionUpdate::Notice(Notice::new(
                 NoticeSeverity::Info,
                 format!("Queued prompts: {size}"),
