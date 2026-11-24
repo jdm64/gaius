@@ -18,4 +18,4 @@ acp-tck \
   --timeout 90 \
   --test-timeout 300 \
   --report-json report.json \
-  -- $(pwd)/target/debug/gaius acp
+  -- $(pwd)/target/debug/gaius --sess-dir target/acp-tck-sess acp

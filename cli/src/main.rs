@@ -37,6 +37,9 @@ enum Command {
 
 fn parse_args() -> Result<Args, Box<dyn Error>> {
     let mut pargs = Arguments::from_env();
+    let sess_dir = pargs.opt_value_from_os_str("--sess-dir", |path| {
+        Ok::<PathBuf, Infallible>(PathBuf::from(path))
+    })?;
 
     // Commands are standalone; do not interpret prompt text as a command.
     if let Some(name) = pargs.subcommand()? {
@@ -72,7 +75,7 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
             cli_mode: false,
             prompt: None,
             session_id: None,
-            sess_dir: None,
+            sess_dir,
             agent: None,
             model: None,
         });
@@ -94,9 +97,6 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
         Ok::<PathBuf, Infallible>(PathBuf::from(path))
     })?;
     let session_id = pargs.opt_value_from_str("--session")?;
-    let sess_dir = pargs.opt_value_from_os_str("--sess-dir", |path| {
-        Ok::<PathBuf, Infallible>(PathBuf::from(path))
-    })?;
     let agent = pargs.opt_value_from_str("--agent")?;
     let model = pargs.opt_value_from_str("--model")?;
 
