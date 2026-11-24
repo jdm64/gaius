@@ -5,6 +5,7 @@
 use crate::{
     acp::{protocol::ACPProtocol, reply, state::PendingPrompts},
     actor::FinishedReason,
+    commands::Command as GaiusCommand,
     harness::HarnessMsg,
     tool_engine::ToolStatus,
     tools::ToolName,
@@ -15,6 +16,7 @@ use agent_client_protocol::{
 };
 use serde_json::{Value, from_str};
 use tokio::sync::oneshot;
+use uuid::Uuid;
 
 pub struct ProtocolV2;
 
@@ -129,6 +131,37 @@ impl ACPProtocol for ProtocolV2 {
             sess_id,
             SessionUpdate::Notice(note),
         ));
+    }
+
+    fn send_commands(&self, session_id: &str, cx: &ConnectionTo<Client>) -> Result<(), Error> {
+        let commands = vec![AvailableCommand::Command(Command::new(
+            GaiusCommand::Info.name(),
+            GaiusCommand::Info.description(),
+        ))];
+        let update = SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(commands));
+        cx.send_notification(UpdateSessionNotification::new(session_id, update))
+    }
+
+    fn send_agent_msg(&self, session_id: String, content: String, cx: &ConnectionTo<Client>) {
+        let msg_id = Uuid::now_v7().to_string();
+        let block = ContentBlock::Text(TextContent::new(content));
+        let message = AgentMessage::new(msg_id).content(vec![block]);
+        let update = SessionUpdate::AgentMessage(message);
+        let _ = cx.send_notification(UpdateSessionNotification::new(session_id, update));
+    }
+
+    fn send_command_finished(
+        &self,
+        session_id: String,
+        resp: Responder,
+        cx: &ConnectionTo<Client>,
+    ) -> Result<(), Error> {
+        let msg_id = Uuid::now_v7().to_string();
+        reply(resp, PromptResponse::new(msg_id))?;
+
+        let idle = IdleStateUpdate::new().stop_reason(StopReason::EndTurn);
+        let update = SessionUpdate::StateUpdate(StateUpdate::Idle(idle));
+        cx.send_notification(UpdateSessionNotification::new(session_id, update))
     }
 
     fn is_ack_prompt(&self) -> bool {

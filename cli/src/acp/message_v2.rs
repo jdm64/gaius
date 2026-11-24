@@ -335,10 +335,16 @@ impl Prompt for PromptV2 {
 
     fn prompt_data(&self) -> Result<PromptData, Error> {
         let mut text = String::new();
+        let mut command = None;
         let mut attachments: Vec<Box<dyn PromptAttachment>> = Vec::new();
         for block in &self.data.prompt {
             match block {
-                ContentBlock::Text(block) => text.push_str(&block.text),
+                ContentBlock::Text(block) => {
+                    if command.is_none() {
+                        command = block.text.split(' ').next().map(str::to_owned);
+                    }
+                    text.push_str(&block.text)
+                }
                 ContentBlock::ResourceLink(link) => {
                     text.push_str(&link.name);
                     attachments.push(Box::new(PromptAttachmentV2(link.clone())));
@@ -346,7 +352,12 @@ impl Prompt for PromptV2 {
                 _ => return Err(Error::invalid_params()),
             }
         }
-        Ok(PromptData { text, attachments })
+
+        Ok(PromptData {
+            text,
+            command,
+            attachments,
+        })
     }
 }
 

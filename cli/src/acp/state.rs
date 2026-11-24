@@ -25,8 +25,12 @@ impl SessState {
         self.active.clone()
     }
 
-    pub fn get_id(shared: &SharedSessionId) -> Option<String> {
+    pub fn id(shared: &SharedSessionId) -> Option<String> {
         shared.lock().unwrap().clone()
+    }
+
+    pub fn get_id(&self) -> Option<String> {
+        self.active.lock().unwrap().clone()
     }
 
     pub fn get_cwd(&self) -> Option<PathBuf> {

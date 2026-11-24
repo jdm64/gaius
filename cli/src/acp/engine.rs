@@ -115,12 +115,12 @@ impl ACPEngine {
                 self.initialized = data.respond(resp)?;
             }
             ACPRequest::ListSessions(data) => self.handle_session_list(data, resp).await?,
-            ACPRequest::NewSession(data) => self.handle_session_new(data, resp).await?,
+            ACPRequest::NewSession(data) => self.handle_session_new(data, resp, cx).await?,
             ACPRequest::ResumeSession(data) => self.handle_session_resume(data, resp, cx).await?,
             ACPRequest::CloseSession(data) => self.handle_session_close(data, resp).await?,
             ACPRequest::DeleteSession(data) => self.handle_session_delete(data, resp).await?,
             ACPRequest::SetConfig(data) => self.handle_set_config(data, resp).await?,
-            ACPRequest::Prompt(data) => self.handle_prompt(data, resp).await?,
+            ACPRequest::Prompt(data) => self.handle_prompt(data, resp, cx).await?,
             _ => resp.respond_with_error(Error::method_not_found())?,
         }
         Ok(())
@@ -182,6 +182,7 @@ impl ACPEngine {
         &mut self,
         data: Box<dyn NewSession>,
         resp: Responder,
+        cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
         if data.has_mcp() {
             resp.respond_with_error(Error::invalid_params())?;
@@ -201,10 +202,14 @@ impl ACPEngine {
             Some(CommandReply::SessionCreated(Ok(snapshot))) => {
                 self.curr_model = snapshot.model.clone();
                 let session_id = snapshot.session_id.clone();
-                if let Some(id) = &session_id {
-                    self.sess_state.set(id, snapshot.proj_dir.clone());
-                }
-                data.respond(resp, session_id, self)
+                let Some(id) = session_id.clone() else {
+                    resp.respond_with_error(Error::internal_error())?;
+                    return Ok(());
+                };
+
+                self.sess_state.set(&id, snapshot.proj_dir.clone());
+                data.respond(resp, session_id, self)?;
+                self.protocol.send_commands(&id, &cx)
             }
             Some(CommandReply::SessionCreated(Err(_))) | Some(CommandReply::Busy(_)) | None => {
                 resp.respond_with_error(Error::internal_error())
@@ -264,7 +269,8 @@ impl ACPEngine {
             }
         }
 
-        data.finish(resp, &cx, &session_id, self)
+        data.finish(resp, &cx, &session_id, self)?;
+        self.protocol.send_commands(&session_id, &cx)
     }
 
     pub async fn handle_session_delete(
@@ -329,6 +335,7 @@ impl ACPEngine {
         &mut self,
         data: Box<dyn Prompt>,
         resp: Responder,
+        cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
         if !self.sess_state.is_active(&data.session_id()) {
             return data.session_not_found(resp);
@@ -338,6 +345,14 @@ impl ACPEngine {
             Ok(prompt) => prompt,
             Err(err) => return resp.respond_with_error(err),
         };
+        if let Some(command) = prompt_data
+            .command
+            .as_deref()
+            .filter(|text| text.starts_with('/'))
+        {
+            return self.handle_command(command, resp, &cx).await;
+        }
+
         let workspace = self.sess_state.get_cwd();
         let prompt = match prompt_data.build(workspace.as_deref()) {
             Ok(prompt) => prompt,

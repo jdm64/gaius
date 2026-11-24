@@ -93,6 +93,7 @@ pub trait Prompt: Send {
 
 pub struct PromptData {
     pub text: String,
+    pub command: Option<String>,
     pub attachments: Vec<Box<dyn PromptAttachment>>,
 }
 

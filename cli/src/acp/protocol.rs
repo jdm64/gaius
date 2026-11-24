@@ -3,7 +3,7 @@
  */
 
 use crate::{acp::state::PendingPrompts, actor::FinishedReason, harness::HarnessMsg};
-use agent_client_protocol::{Client, ConnectionTo, Responder};
+use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
 use tokio::sync::oneshot;
 
 pub trait ACPProtocol: Send + Sync {
@@ -14,6 +14,17 @@ pub trait ACPProtocol: Send + Sync {
         sess_id: String,
         cx: &ConnectionTo<Client>,
     );
+
+    fn send_commands(&self, session_id: &str, cx: &ConnectionTo<Client>) -> Result<(), Error>;
+
+    fn send_agent_msg(&self, sess_id: String, content: String, cx: &ConnectionTo<Client>);
+
+    fn send_command_finished(
+        &self,
+        sess_id: String,
+        resp: Responder,
+        cx: &ConnectionTo<Client>,
+    ) -> Result<(), Error>;
 
     fn is_ack_prompt(&self) -> bool;
 
