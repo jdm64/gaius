@@ -224,7 +224,7 @@ impl ResumeSession for ResumeSessionV2 {
 
     fn send_replay(&self, cx: &ConnectionTo<Client>, session_id: &str, messages: &[HarnessMsg]) {
         messages.iter().for_each(|m| {
-            if let Some(update) = ProtocolV2::to_update(m, session_id) {
+            if let Some(update) = ProtocolV2::to_update(m, session_id, false) {
                 let _ = cx.send_notification(update);
             }
         });

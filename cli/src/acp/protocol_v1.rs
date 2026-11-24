@@ -53,13 +53,19 @@ impl ProtocolV1 {
         SessionUpdate::ToolCallUpdate(tool_call)
     }
 
-    pub fn to_update(msg: &HarnessMsg, session_id: &str) -> Option<SessionNotification> {
+    pub fn to_update(
+        msg: &HarnessMsg,
+        session_id: &str,
+        is_event: bool,
+    ) -> Option<SessionNotification> {
         let text = |s: String| ContentBlock::Text(TextContent::new(s));
         let update = match msg {
-            HarnessMsg::UserPrompt { .. } => {
-                // Client already has the prompt because it sent it.
-                // Or history replay is done as CommandReply::HistoryReplayed
-                return None;
+            HarnessMsg::UserPrompt { content, .. } => {
+                if is_event {
+                    // live prompt, so client already has it because it sent it.
+                    return None;
+                }
+                SessionUpdate::UserMessageChunk(ContentChunk::new(text(content.clone())))
             }
             HarnessMsg::AgentMessage { content, .. } | HarnessMsg::PlanMessage { content, .. } => {
                 SessionUpdate::AgentMessageChunk(ContentChunk::new(text(content.clone())))
@@ -144,7 +150,7 @@ impl ACPProtocol for ProtocolV1 {
     }
 
     fn on_message(&self, session_id: String, msg: &HarnessMsg, cx: &ConnectionTo<Client>) {
-        if let Some(note) = Self::to_update(msg, &session_id) {
+        if let Some(note) = Self::to_update(msg, &session_id, true) {
             let _ = cx.send_notification(note);
         }
     }
