@@ -184,6 +184,10 @@ impl ACPEngine {
         resp: Responder,
         cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
+        if self.models.is_empty() {
+            resp.respond_with_error(Error::auth_required())?;
+            return Ok(());
+        }
         if data.has_mcp() {
             resp.respond_with_error(Error::invalid_params())?;
             return Ok(());
@@ -224,6 +228,10 @@ impl ACPEngine {
         resp: Responder,
         cx: ConnectionTo<Client>,
     ) -> Result<(), Error> {
+        if self.models.is_empty() {
+            resp.respond_with_error(Error::auth_required())?;
+            return Ok(());
+        }
         let Some(do_replay) = data.do_replay() else {
             resp.respond_with_error(Error::invalid_params())?;
             return Ok(());

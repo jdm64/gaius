@@ -128,8 +128,11 @@ impl InitializeV2 {
         let msg = InitializeResponse::new(ProtocolVersion::V2, ver);
         let sess = SessionCapabilities::new().delete(SessionDeleteCapabilities::new());
         let auth = AgentAuthCapabilities::new();
+        let setup_auth =
+            AuthMethodTerminal::new("setup", "Setup config file").args(vec!["setup".into()]);
         let cap = AgentCapabilities::new().session(sess).auth(auth);
         msg.capabilities(cap)
+            .auth_methods(vec![AuthMethod::Terminal(setup_auth)])
     }
 }
 

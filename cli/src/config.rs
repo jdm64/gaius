@@ -11,7 +11,7 @@ use crate::{
 };
 use genai::adapter::AdapterKind;
 use serde::{Deserialize, Serialize};
-use std::{error::Error, path::PathBuf};
+use std::error::Error;
 use url::Url;
 
 const fn default_tool_max_output() -> usize {
@@ -88,7 +88,7 @@ impl Config {
         }
     }
 
-    pub async fn load(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn load(&mut self, run_setup: bool) -> Result<(), Box<dyn Error>> {
         let path = Dirs::config_file()?;
         if path.exists() {
             let contents = std::fs::read_to_string(&path)?;
@@ -97,18 +97,20 @@ impl Config {
             return Ok(());
         }
 
-        self.setup(path).await
+        if run_setup {
+            let path = Dirs::config_file()?;
+            println!("Config file missing: {}\nStarting setup...", path.display());
+            self.setup().await?;
+        }
+        Ok(())
     }
 
-    async fn setup(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
-        println!(
-            "Config file missing: {}\nConfigure an LLM provider:\n",
-            path.display()
-        );
+    pub async fn setup(&mut self) -> Result<(), Box<dyn Error>> {
+        println!("\n\nWelcome to Gaius config file setup.\nAn LLM provider needs to be added.\n");
 
         loop {
             let mut kind = CliPrompt::get_input(
-                "Kind (blank = OpenAI compatible; codex or grok = Codex/Grok subscriptions): ",
+                "Provider Kind (blank = OpenAI compatible; codex or grok = Codex/Grok subscriptions):\n> ",
             )?;
             kind = if kind.is_empty() {
                 "openai".to_string()
@@ -139,8 +141,8 @@ impl Config {
 
                 (spec.display.to_string(), String::new(), String::new())
             } else {
-                let url = CliPrompt::get_input("Url: ")?;
-                let key = CliPrompt::get_input("Key: ")?;
+                let url = CliPrompt::get_input("\nProvider URL:\n> ")?;
+                let key = CliPrompt::get_input("\nProvider API Key:\n> ")?;
                 let name =
                     match Url::parse(&url).map(|u| u.host_str().unwrap_or("default").to_string()) {
                         Ok(name) => name,
@@ -167,11 +169,14 @@ impl Config {
                 agents: Agents::load(&Dirs::config_dir()?)?,
                 tools: ToolsConfig::default(),
             };
+            let path = Dirs::config_file()?;
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(&path, toml::to_string_pretty(&config)?)?;
             *self = config;
+
+            println!("\nConfig file written to: {}", path.display());
             return Ok(());
         }
     }

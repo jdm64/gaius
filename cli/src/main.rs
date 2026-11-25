@@ -29,6 +29,7 @@ struct Args {
 }
 
 enum Command {
+    Setup,
     Upgrade,
     Login(String),
     TokenRefresh(String),
@@ -44,6 +45,7 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
     // Commands are standalone; do not interpret prompt text as a command.
     if let Some(name) = pargs.subcommand()? {
         let command = match name.as_str() {
+            "setup" => Command::Setup,
             "upgrade" => Command::Upgrade,
             "login" => {
                 let provider = match pargs.free_from_str() {
@@ -63,7 +65,15 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
                 };
                 Command::TokenRefresh(provider)
             }
-            "acp" => Command::AcpMode,
+            "acp" => {
+                let acp_command: Result<String, _> = pargs.free_from_str();
+                match acp_command {
+                    // some clients add instead of replace the arguments for terminal auth
+                    Ok(command) if command == "setup" => Command::Setup,
+                    Ok(command) => return Err(format!("Unknown acp command: {command}").into()),
+                    Err(_) => Command::AcpMode,
+                }
+            }
             _ => return Err(format!("Unknown command: {name}").into()),
         };
         let remaining = pargs.finish();
@@ -162,6 +172,7 @@ fn print_help() {
     );
     println!();
     println!("COMMANDS:");
+    println!("  setup                     Run config file setup and exit");
     println!("  upgrade                   Upgrade to the latest release and exit");
     println!("  acp                       Run in ACP mode (agent client protocol)");
     println!("  login <PROVIDER>          Log in to a provider and exit");
@@ -249,6 +260,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if let Some(command) = args.command {
         return match command {
+            Command::Setup => Config::new().setup().await,
             Command::Upgrade => Upgrader::new()?.run().await,
             Command::Login(provider) => login(&provider).await,
             Command::TokenRefresh(provider) => token_refresh(&provider).await,
@@ -257,7 +269,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut config = Config::new();
-    config.load().await?;
+    config.load(true).await?;
 
     let harness = if args.prompt.is_some() && args.session_id.is_none() {
         Harness::new_without_session(&config)?

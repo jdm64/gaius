@@ -31,7 +31,7 @@ pub fn reply<T: JsonRpcResponse>(r: Responder<Value>, resp: T) -> Result<(), Err
 
 pub async fn run_acp() -> Result<(), Box<dyn CoreError>> {
     let mut config = Config::new();
-    config.load().await?;
+    config.load(false).await?;
     let config = Arc::new(config);
 
     Agent

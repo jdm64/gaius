@@ -154,11 +154,14 @@ impl InitializeV1 {
             .close(SessionCloseCapabilities::new())
             .delete(SessionDeleteCapabilities::new());
         let auth = AgentAuthCapabilities::new();
+        let setup_auth =
+            AuthMethodTerminal::new("setup", "Setup config file").args(vec!["setup".into()]);
         let cap = AgentCapabilities::new()
             .load_session(true)
             .session_capabilities(sess)
             .auth(auth);
         msg.agent_capabilities(cap)
+            .auth_methods(vec![AuthMethod::Terminal(setup_auth)])
     }
 }
 
