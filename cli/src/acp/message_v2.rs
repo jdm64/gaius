@@ -28,9 +28,9 @@ pub fn abs_path(path: Option<AbsolutePath>) -> Result<Option<PathBuf>, String> {
     }
 }
 
-struct MsgBuilder;
+pub struct ConfigBuilderV2;
 
-impl MsgBuilder {
+impl ConfigBuilderV2 {
     pub fn models(engine: &ACPEngine) -> SessionConfigOption {
         let (selected, options) = engine.model_config();
         let options = options
@@ -65,7 +65,7 @@ impl MsgBuilder {
         .category(SessionConfigOptionCategory::ThoughtLevel)
     }
 
-    pub fn config_options(engine: &ACPEngine) -> Vec<SessionConfigOption> {
+    pub fn all(engine: &ACPEngine) -> Vec<SessionConfigOption> {
         vec![Self::models(engine), Self::reasoning(engine)]
     }
 }
@@ -195,8 +195,7 @@ impl NewSession for NewSessionV2 {
         if let Some(session_id) = session_id {
             reply(
                 resp,
-                NewSessionResponse::new(session_id)
-                    .config_options(MsgBuilder::config_options(engine)),
+                NewSessionResponse::new(session_id).config_options(ConfigBuilderV2::all(engine)),
             )
         } else {
             resp.respond_with_error(Error::internal_error())
@@ -259,7 +258,7 @@ impl ResumeSession for ResumeSessionV2 {
 
         reply(
             resp,
-            ResumeSessionResponse::new().config_options(MsgBuilder::config_options(engine)),
+            ResumeSessionResponse::new().config_options(ConfigBuilderV2::all(engine)),
         )
     }
 }
@@ -318,7 +317,7 @@ impl SetConfig for SetSessionConfigOptionV2 {
     fn respond(&self, resp: Responder, engine: &ACPEngine) -> Result<(), Error> {
         reply(
             resp,
-            SetSessionConfigOptionResponse::new(MsgBuilder::config_options(engine)),
+            SetSessionConfigOptionResponse::new(ConfigBuilderV2::all(engine)),
         )
     }
 }

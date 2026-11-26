@@ -2,7 +2,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{acp::state::PendingPrompts, actor::FinishedReason, harness::HarnessMsg};
+use crate::{
+    acp::{engine::ACPEngine, state::PendingPrompts},
+    actor::FinishedReason,
+    harness::HarnessMsg,
+};
 use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
 use tokio::sync::oneshot;
 
@@ -15,9 +19,16 @@ pub trait ACPProtocol: Send + Sync {
         cx: &ConnectionTo<Client>,
     );
 
+    fn send_config_update(
+        &self,
+        engine: &ACPEngine,
+        session_id: &str,
+        cx: &ConnectionTo<Client>,
+    ) -> Result<(), Error>;
+
     fn send_commands(&self, session_id: &str, cx: &ConnectionTo<Client>) -> Result<(), Error>;
 
-    fn send_agent_msg(&self, sess_id: String, content: String, cx: &ConnectionTo<Client>);
+    fn send_agent_msg(&self, sess_id: &str, content: String, cx: &ConnectionTo<Client>);
 
     fn send_command_finished(
         &self,

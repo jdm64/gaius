@@ -3,7 +3,10 @@
  */
 
 use crate::{
-    acp::{protocol::ACPProtocol, reply, state::PendingPrompts},
+    acp::{
+        engine::ACPEngine, message_v1::ConfigBuilderV1, protocol::ACPProtocol, reply,
+        state::PendingPrompts,
+    },
     actor::FinishedReason,
     commands::Command as GaiusCommand,
     harness::HarnessMsg,
@@ -117,19 +120,31 @@ impl ACPProtocol for ProtocolV1 {
         ));
     }
 
+    fn send_config_update(
+        &self,
+        engine: &ACPEngine,
+        session_id: &str,
+        cx: &ConnectionTo<Client>,
+    ) -> Result<(), Error> {
+        let update = SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
+            ConfigBuilderV1::all(engine),
+        ));
+        cx.send_notification(SessionNotification::new(session_id.to_string(), update))
+    }
+
     fn send_commands(&self, session_id: &str, cx: &ConnectionTo<Client>) -> Result<(), Error> {
-        let commands = vec![AvailableCommand::new(
-            GaiusCommand::Info.name(),
-            GaiusCommand::Info.description(),
-        )];
+        let commands = vec![
+            AvailableCommand::new(GaiusCommand::Info.name(), GaiusCommand::Info.description()),
+            AvailableCommand::new("models-refresh", "Refresh the available models"),
+        ];
         let update = SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(commands));
         cx.send_notification(SessionNotification::new(session_id.to_string(), update))
     }
 
-    fn send_agent_msg(&self, session_id: String, content: String, cx: &ConnectionTo<Client>) {
+    fn send_agent_msg(&self, session_id: &str, content: String, cx: &ConnectionTo<Client>) {
         let text = ContentBlock::Text(TextContent::new(content));
         let update = SessionUpdate::AgentMessageChunk(ContentChunk::new(text));
-        let _ = cx.send_notification(SessionNotification::new(session_id, update));
+        let _ = cx.send_notification(SessionNotification::new(session_id.to_string(), update));
     }
 
     fn send_command_finished(

@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::{acp::engine::ACPEngine, actor::CommandReply};
+use crate::{acp::engine::ACPEngine, actor::CommandReply, models::Models};
 use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
 
 impl ACPEngine {
@@ -13,6 +13,11 @@ impl ACPEngine {
         cx: &ConnectionTo<Client>,
     ) -> Result<(), Error> {
         match command {
+            "/models-refresh" => {
+                if let Err(error) = self.handle_models_refresh(cx).await {
+                    return resp.respond_with_error(error);
+                }
+            }
             "/info" => {
                 if let Err(error) = self.handle_info(cx).await {
                     return resp.respond_with_error(error);
@@ -55,7 +60,25 @@ impl ACPEngine {
             .join("\n");
 
         let session_id = self.sess_state.get_id().ok_or_else(Error::internal_error)?;
-        self.protocol.send_agent_msg(session_id, content, cx);
+        self.protocol.send_agent_msg(&session_id, content, cx);
         Ok(())
+    }
+
+    async fn handle_models_refresh(&mut self, cx: &ConnectionTo<Client>) -> Result<(), Error> {
+        let session_id = match self.sess_state.get_id() {
+            Some(session_id) => session_id,
+            None => return Err(Error::internal_error()),
+        };
+        match Models::reload(&self.config).await {
+            Ok(models) => {
+                let before = self.models.len();
+                self.models = models;
+                let after = self.models.len();
+                let content = format!("Refreshed models: {} total, {} new", after, after - before);
+                self.protocol.send_agent_msg(&session_id, content, cx);
+            }
+            Err(_) => return Err(Error::internal_error()),
+        }
+        self.protocol.send_config_update(self, &session_id, cx)
     }
 }

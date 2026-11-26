@@ -28,9 +28,9 @@ pub fn abs_path(path: Option<PathBuf>) -> Result<Option<PathBuf>, String> {
     }
 }
 
-struct MsgBuilder;
+pub struct ConfigBuilderV1;
 
-impl MsgBuilder {
+impl ConfigBuilderV1 {
     pub fn models(engine: &ACPEngine) -> SessionConfigOption {
         let (selected, options) = engine.model_config();
         let options = options
@@ -65,7 +65,7 @@ impl MsgBuilder {
         .category(SessionConfigOptionCategory::ThoughtLevel)
     }
 
-    pub fn config_options(engine: &ACPEngine) -> Vec<SessionConfigOption> {
+    pub fn all(engine: &ACPEngine) -> Vec<SessionConfigOption> {
         vec![Self::models(engine), Self::reasoning(engine)]
     }
 }
@@ -224,8 +224,7 @@ impl NewSession for NewSessionV1 {
         if let Some(session_id) = session_id {
             reply(
                 resp,
-                NewSessionResponse::new(session_id)
-                    .config_options(MsgBuilder::config_options(engine)),
+                NewSessionResponse::new(session_id).config_options(ConfigBuilderV1::all(engine)),
             )
         } else {
             resp.respond_with_error(Error::internal_error())
@@ -267,7 +266,7 @@ impl ResumeSession for ResumeSessionV1 {
     ) -> Result<(), Error> {
         reply(
             resp,
-            ResumeSessionResponse::new().config_options(MsgBuilder::config_options(engine)),
+            ResumeSessionResponse::new().config_options(ConfigBuilderV1::all(engine)),
         )
     }
 }
@@ -306,7 +305,7 @@ impl ResumeSession for LoadSessionV1 {
     ) -> Result<(), Error> {
         reply(
             resp,
-            LoadSessionResponse::new().config_options(MsgBuilder::config_options(engine)),
+            LoadSessionResponse::new().config_options(ConfigBuilderV1::all(engine)),
         )
     }
 }
@@ -365,7 +364,7 @@ impl SetConfig for SetSessionConfigOptionV1 {
     fn respond(&self, resp: Responder, engine: &ACPEngine) -> Result<(), Error> {
         reply(
             resp,
-            SetSessionConfigOptionResponse::new(MsgBuilder::config_options(engine)),
+            SetSessionConfigOptionResponse::new(ConfigBuilderV1::all(engine)),
         )
     }
 }
