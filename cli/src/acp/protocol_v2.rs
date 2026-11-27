@@ -7,18 +7,17 @@ use crate::{
         engine::ACPEngine, message_v2::ConfigBuilderV2, protocol::ACPProtocol, reply,
         state::PendingPrompts,
     },
-    actor::FinishedReason,
+    actor::{AnswerSender, FinishedReason},
     commands::Command as GaiusCommand,
     harness::HarnessMsg,
     tool_engine::ToolStatus,
     tools::ToolName,
 };
 use agent_client_protocol::{
-    Client, ConnectionTo, Error, Responder,
+    Client, ConnectionTo, Error, Responder, SentRequest,
     v2::schema::{Error as SchemaError, *},
 };
 use serde_json::{Value, from_str};
-use tokio::sync::oneshot;
 use uuid::Uuid;
 
 pub struct ProtocolV2;
@@ -127,6 +126,50 @@ impl ProtocolV2 {
         };
         Some(UpdateSessionNotification::new(session_id, update))
     }
+
+    pub fn build_ask_request(
+        sess_id: String,
+        call_id: String,
+        title: String,
+        options: Vec<String>,
+    ) -> CreateElicitationRequest {
+        let scope = ElicitationSessionScope::new(sess_id).tool_call_id(call_id.as_str());
+        let values = StringPropertySchema::new().enum_values(options);
+        let details = StringPropertySchema::new();
+        let schema = ElicitationSchema::new()
+            .property("Choices", values, true)
+            .property("Details", details, false);
+        let mode = ElicitationFormMode::new(ElicitationScope::Session(scope), schema);
+        CreateElicitationRequest::new(mode, title)
+    }
+
+    pub async fn send_ask_reply(
+        sent: SentRequest<CreateElicitationResponse>,
+        answer_tx: AnswerSender,
+    ) {
+        let answer = match sent.block_task().await {
+            Ok(response) => match response.action {
+                ElicitationAction::Accept(accepted) => {
+                    let content = accepted.content.unwrap_or_default();
+                    let value = |field: &str| {
+                        content
+                            .get(field)
+                            .cloned()
+                            .and_then(|value| serde_json::to_value(value).ok())
+                            .and_then(|value| value.as_str().map(str::to_owned))
+                            .unwrap_or_default()
+                    };
+                    (value("Choices"), value("Details"))
+                }
+                ElicitationAction::Decline
+                | ElicitationAction::Cancel
+                | ElicitationAction::Other(_) => (String::new(), String::new()),
+                _ => (String::new(), String::new()),
+            },
+            Err(_) => (String::new(), String::new()),
+        };
+        let _ = answer_tx.send(answer);
+    }
 }
 
 impl ACPProtocol for ProtocolV2 {
@@ -210,38 +253,17 @@ impl ACPProtocol for ProtocolV2 {
 
     fn on_ask_user(
         &self,
-        session_id: String,
+        sess_id: String,
         call_id: String,
         title: String,
         options: Vec<String>,
-        answer_tx: oneshot::Sender<String>,
+        answer_tx: AnswerSender,
         cx: &ConnectionTo<Client>,
     ) {
-        let scope = ElicitationSessionScope::new(session_id).tool_call_id(call_id.as_str());
-        let values = StringPropertySchema::new().enum_values(options);
-        let schema = ElicitationSchema::new()
-            .title(title.clone())
-            .property("choice", values, true);
-        let mode = ElicitationFormMode::new(ElicitationScope::Session(scope), schema);
-        let request = CreateElicitationRequest::new(ElicitationMode::Form(mode), title);
+        let request = Self::build_ask_request(sess_id, call_id, title, options);
         let sent = cx.send_request(request);
         tokio::spawn(async move {
-            let answer = match sent.block_task().await {
-                Ok(response) => match response.action {
-                    ElicitationAction::Accept(accepted) => accepted
-                        .content
-                        .and_then(|content| content.get("choice").cloned())
-                        .and_then(|choice| serde_json::to_value(choice).ok())
-                        .and_then(|choice| choice.as_str().map(str::to_owned))
-                        .unwrap_or_default(),
-                    ElicitationAction::Decline
-                    | ElicitationAction::Cancel
-                    | ElicitationAction::Other(_) => String::new(),
-                    _ => String::new(),
-                },
-                Err(_) => String::new(),
-            };
-            let _ = answer_tx.send(answer);
+            Self::send_ask_reply(sent, answer_tx).await;
         });
     }
 

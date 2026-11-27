@@ -9,7 +9,7 @@ pub mod picklist;
 pub mod session;
 
 use crate::{
-    actor::HarnessActorClient,
+    actor::{AnswerSender, HarnessActorClient},
     agents::AgentDefinition,
     commands::Command,
     dirs::Dirs,
@@ -24,7 +24,6 @@ use crate::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::{error::Error, fs};
-use tokio::sync::oneshot::Sender;
 
 const MAX_HISTORY: usize = 16;
 const STATUS_TTL_SECS: i64 = 5;
@@ -259,7 +258,7 @@ pub struct PromptEditor {
     pub history: Vec<String>,
     pub history_idx: Option<usize>,
     save_input: Option<String>,
-    pub answer_tx: Option<Sender<String>>,
+    pub answer_tx: Option<AnswerSender>,
 }
 
 impl PromptEditor {
@@ -583,24 +582,18 @@ impl PromptEditor {
 
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.answer_question(String::new());
+                self.answer_question(String::new(), String::new());
                 self.mode = InputMode::Exit;
             }
             KeyCode::Esc | KeyCode::Tab => {
-                self.answer_question(String::new());
+                self.answer_question(String::new(), String::new());
                 self.clear_input();
                 self.mode = InputMode::PromptInput;
             }
             KeyCode::Enter => {
                 let answer = options.get(selected).cloned().unwrap_or_default();
                 let details = self.input.trim().to_string();
-                let response = [answer, details]
-                    .iter()
-                    .filter(|part| !part.is_empty())
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                self.answer_question(response);
+                self.answer_question(answer, details);
                 self.clear_input();
                 self.mode = InputMode::PromptInput;
             }
@@ -633,9 +626,9 @@ impl PromptEditor {
         }
     }
 
-    fn answer_question(&mut self, answer: String) {
+    fn answer_question(&mut self, answer: String, details: String) {
         if let Some(answer_tx) = self.answer_tx.take() {
-            let _ = answer_tx.send(answer);
+            let _ = answer_tx.send((answer, details));
         }
     }
 }

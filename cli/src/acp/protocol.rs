@@ -4,11 +4,10 @@
 
 use crate::{
     acp::{engine::ACPEngine, state::PendingPrompts},
-    actor::FinishedReason,
+    actor::{AnswerSender, FinishedReason},
     harness::HarnessMsg,
 };
 use agent_client_protocol::{Client, ConnectionTo, Error, Responder};
-use tokio::sync::oneshot;
 
 pub trait ACPProtocol: Send + Sync {
     fn send_error_notice(
@@ -49,7 +48,7 @@ pub trait ACPProtocol: Send + Sync {
         call_id: String,
         title: String,
         options: Vec<String>,
-        answer_tx: oneshot::Sender<String>,
+        answer_tx: AnswerSender,
         cx: &ConnectionTo<Client>,
     );
 

@@ -26,7 +26,7 @@ use tokio::{
 };
 
 pub type OperationResult<T> = Result<T, String>;
-pub type AnswerSender = oneshot::Sender<String>;
+pub type AnswerSender = oneshot::Sender<(String, String)>;
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTOR_STOPPED: &str = "Harness actor stopped";
@@ -340,7 +340,12 @@ impl HarnessActorServer {
                                 answer_tx,
                             },
                         );
-                        Some(executor::block_on(answer_rx).unwrap_or_default())
+                        let (option, details) = executor::block_on(answer_rx).unwrap_or_default();
+                        Some(if details.is_empty() {
+                            option
+                        } else {
+                            format!("{option}\n{details}")
+                        })
                     }
                     event => {
                         Self::tx(&event_tx, HarnessEvent::Message(event));

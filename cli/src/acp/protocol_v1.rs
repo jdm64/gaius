@@ -7,15 +7,14 @@ use crate::{
         engine::ACPEngine, message_v1::ConfigBuilderV1, protocol::ACPProtocol, reply,
         state::PendingPrompts,
     },
-    actor::FinishedReason,
+    actor::{AnswerSender, FinishedReason},
     commands::Command as GaiusCommand,
     harness::HarnessMsg,
     tool_engine::ToolStatus,
     tools::ToolName,
 };
-use agent_client_protocol::{Client, ConnectionTo, Error, Responder, v1::schema::*};
+use agent_client_protocol::{Client, ConnectionTo, Error, Responder, SentRequest, v1::schema::*};
 use serde_json::{Value, from_str};
-use tokio::sync::oneshot;
 
 pub struct ProtocolV1;
 
@@ -103,6 +102,50 @@ impl ProtocolV1 {
         };
         Some(SessionNotification::new(session_id.to_string(), update))
     }
+
+    pub fn build_ask_request(
+        sess_id: String,
+        call_id: String,
+        title: String,
+        options: Vec<String>,
+    ) -> CreateElicitationRequest {
+        let scope = ElicitationSessionScope::new(sess_id).tool_call_id(call_id.as_str());
+        let values = StringPropertySchema::new().enum_values(options);
+        let details = StringPropertySchema::new();
+        let schema = ElicitationSchema::new()
+            .property("Choices", values, true)
+            .property("Details", details, false);
+        let mode = ElicitationFormMode::new(ElicitationScope::Session(scope), schema);
+        CreateElicitationRequest::new(mode, title)
+    }
+
+    pub async fn send_ask_reply(
+        sent: SentRequest<CreateElicitationResponse>,
+        answer_tx: AnswerSender,
+    ) {
+        let answer = match sent.block_task().await {
+            Ok(response) => match response.action {
+                ElicitationAction::Accept(accepted) => {
+                    let content = accepted.content.unwrap_or_default();
+                    let value = |field: &str| {
+                        content
+                            .get(field)
+                            .cloned()
+                            .and_then(|value| serde_json::to_value(value).ok())
+                            .and_then(|value| value.as_str().map(str::to_owned))
+                            .unwrap_or_default()
+                    };
+                    (value("Choices"), value("Details"))
+                }
+                ElicitationAction::Decline
+                | ElicitationAction::Cancel
+                | ElicitationAction::Other(_) => (String::new(), String::new()),
+                _ => (String::new(), String::new()),
+            },
+            Err(_) => (String::new(), String::new()),
+        };
+        let _ = answer_tx.send(answer);
+    }
 }
 
 impl ACPProtocol for ProtocolV1 {
@@ -172,14 +215,18 @@ impl ACPProtocol for ProtocolV1 {
 
     fn on_ask_user(
         &self,
-        _: String,
-        _: String,
-        _: String,
-        _: Vec<String>,
-        tx: oneshot::Sender<String>,
-        _: &ConnectionTo<Client>,
+        sess_id: String,
+        call_id: String,
+        title: String,
+        options: Vec<String>,
+        answer_tx: AnswerSender,
+        cx: &ConnectionTo<Client>,
     ) {
-        let _ = tx.send(String::new());
+        let request = Self::build_ask_request(sess_id, call_id, title, options);
+        let sent = cx.send_request(request);
+        tokio::spawn(async move {
+            Self::send_ask_reply(sent, answer_tx).await;
+        });
     }
 
     fn on_cancel(&self, mut responders: Vec<Box<Responder>>) {

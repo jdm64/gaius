@@ -75,7 +75,7 @@ impl ACPEventHandler {
                 answer_tx,
             } => {
                 let Some(session_id) = SessState::id(&self.session_id) else {
-                    let _ = answer_tx.send(String::new());
+                    let _ = answer_tx.send((String::new(), String::new()));
                     return;
                 };
                 self.protocol
